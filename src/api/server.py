@@ -43,6 +43,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:7860",  # Next.js on custom port
+        "http://localhost:25801",  # Next.js on Docker dev port
         "http://localhost:3000",  # Next.js default dev server
         "http://localhost:3001",  # Alternative port
         "https://imagegen.agenticinsights.com",  # Production
