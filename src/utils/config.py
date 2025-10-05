@@ -72,19 +72,23 @@ class Config:
             )  # Load from default .env in current directory only if not explicitly overridden
 
         # Plugin configuration
-        enabled_plugins_str = os.getenv("ENABLED_PLUGINS")
-        if not enabled_plugins_str:
-            raise ValueError("ENABLED_PLUGINS environment variable is required")
+        enabled_plugins_str = os.getenv("ENABLED_PLUGINS", "")
         enabled_plugins = [p.strip() for p in enabled_plugins_str.split(",") if p.strip()]
 
         plugin_order_str = os.getenv("PLUGIN_ORDER")
-        if not plugin_order_str:
-            raise ValueError("PLUGIN_ORDER environment variable is required")
-        plugin_order = {}
-        for item in plugin_order_str.split(","):
-            if ":" in item:
-                name, order = item.split(":", 1)
-                plugin_order[name.strip()] = int(order.strip())
+        plugin_order: Dict[str, int] = {}
+        if plugin_order_str:
+            for item in plugin_order_str.split(","):
+                if ":" in item:
+                    name, order = item.split(":", 1)
+                    name = name.strip()
+                    try:
+                        plugin_order[name] = int(order.strip())
+                    except ValueError:
+                        continue
+
+        if not plugin_order and enabled_plugins:
+            plugin_order = {name: index for index, name in enumerate(enabled_plugins, start=1)}
 
         self.plugins = PluginConfig(enabled_plugins=enabled_plugins, plugin_order=plugin_order)
 
