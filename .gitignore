@@ -6,11 +6,17 @@ dist/
 wheels/
 *.egg-info
 
+# Research and planning
+thoughts/
+
 # Virtual environments
 .venv
 
 # Environment variables
 .env
+.env.*
+!.env.example
+.env.docker
 
 # Local settings
 settings.local.json
@@ -30,3 +36,28 @@ npm-debug.log
 yarn-error.log
 .npmrc
 .env.local
+
+# Docker and scripts with secrets
+docker-dev.ps1
+docker-prod.ps1
+DOCKER_SETUP.md
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# IDE files
+.vscode/
+.idea/
+*.iml
+
+# Temporary files
+*.tmp
+*.bak
+
+# Large image files
+*.png
+!assets/*.png
