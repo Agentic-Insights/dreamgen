@@ -7,7 +7,7 @@ services:
       dockerfile: Dockerfile.backend
     container_name: imagegen-backend
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-25800}:8000"
     volumes:
       # Mount models from host to avoid re-downloading
       # Windows path for Hugging Face cache

@@ -1,18 +1,14 @@
-version: '3.8'
-
 # Development override configuration
 # Use with: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
 
 services:
   backend:
-    env_file:
-      - .env.local
     build:
       context: .
       dockerfile: Dockerfile.backend
       target: builder  # Use builder stage for development
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-25800}:8000"
     deploy:
       resources:
         reservations:
@@ -27,9 +23,9 @@ services:
       - ./pyproject.toml:/app/pyproject.toml
       - ./uv.lock:/app/uv.lock
 
-      # Mount models from host
-      - ${USERPROFILE}/.cache/huggingface:/app/models
-      - ${USERPROFILE}/.cache/torch:/app/.cache/torch
+      # Mount models from centralized AI cache (configure in .env.docker)
+      - ${AI_CACHE_DIR:-~/.cache}/huggingface:/app/models
+      - ${AI_CACHE_DIR:-~/.cache}/torch:/app/.cache/torch
 
       # Mount output and logs
       - ./output:/app/output
@@ -42,14 +38,48 @@ services:
       - DEBUG=true
       - LOG_LEVEL=DEBUG
 
-      # Use real models in development (if GPU available)
-      - USE_MOCK_GENERATOR=${USE_MOCK_GENERATOR:-false}
-      - MOCK_MODE=${MOCK_MODE:-false}
+      # Use mock mode by default (set to false for GPU)
+      - USE_MOCK_GENERATOR=${USE_MOCK_GENERATOR:-true}
+      - MOCK_MODE=${MOCK_MODE:-true}
 
       # HuggingFace token for model access
       - HF_TOKEN=${HF_TOKEN:-}
       - HF_HOME=/app/models
       - TRANSFORMERS_CACHE=/app/models
+
+      # Flux Model Configuration
+      - FLUX_MODEL=${FLUX_MODEL:-black-forest-labs/FLUX.1-schnell}
+
+      # Ollama Configuration
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2:3b}
+      - OLLAMA_TEMPERATURE=${OLLAMA_TEMPERATURE:-0.7}
+
+      # Lora Configuration
+      - LORA_DIR=${LORA_DIR:-/app/loras}
+      - ENABLED_LORAS=${ENABLED_LORAS:-}
+      - LORA_APPLICATION_PROBABILITY=${LORA_APPLICATION_PROBABILITY:-0.7}
+
+      # Plugin Configuration
+      - ENABLED_PLUGINS=${ENABLED_PLUGINS:-time_of_day,art_style}
+      - PLUGIN_ORDER=${PLUGIN_ORDER:-time_of_day:1,art_style:2}
+
+      # Image Generation Settings
+      - IMAGE_HEIGHT=${IMAGE_HEIGHT:-768}
+      - IMAGE_WIDTH=${IMAGE_WIDTH:-1360}
+      - NUM_INFERENCE_STEPS=${NUM_INFERENCE_STEPS:-4}
+      - GUIDANCE_SCALE=${GUIDANCE_SCALE:-0.0}
+      - TRUE_CFG_SCALE=${TRUE_CFG_SCALE:-1.0}
+      - MAX_SEQUENCE_LENGTH=${MAX_SEQUENCE_LENGTH:-512}
+
+      # Output Configuration
+      - OUTPUT_DIR=/app/output
+      - LOG_DIR=/app/logs
+      - CACHE_DIR=/app/.cache
+
+      # System Configuration
+      - CPU_ONLY=${CPU_ONLY:-false}
+      - MPS_USE_FP16=${MPS_USE_FP16:-false}
     command: ["/opt/venv/bin/python", "-m", "uvicorn", "src.api.server:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
     networks:
@@ -60,7 +90,7 @@ services:
       context: .
       dockerfile: Dockerfile.frontend.dev  # Use development Dockerfile
     ports:
-      - "7860:7860"
+      - "${FRONTEND_PORT:-25801}:7860"
     volumes:
       # Full source mount for hot reload
       - ./web-ui:/app
@@ -68,7 +98,7 @@ services:
       - /app/.next         # Exclude build artifacts
     environment:
       - NODE_ENV=development
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_API_URL=http://localhost:25800
     command: ["npm", "run", "dev"]
 
     networks:
