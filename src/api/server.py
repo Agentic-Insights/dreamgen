@@ -6,6 +6,7 @@ Provides REST API and WebSocket endpoints for the Next.js frontend
 import asyncio
 import json
 import logging
+import os
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -18,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from src.generators.image_generator import ImageGenerator
+from src.generators.mock_image_generator import MockImageGenerator
 from src.generators.prompt_generator import PromptGenerator
 from src.utils.config import Config
 from src.utils.plugin_manager import PluginManager
@@ -53,7 +55,9 @@ app.add_middleware(
 # Global state
 config = Config()
 plugin_manager = PluginManager()
-state = {"use_mock": False}  # Use real Flux generation with GPU
+state = {
+    "use_mock": os.getenv("USE_MOCK_GENERATOR", "true").lower() == "true"
+}  # Use mock or real generation
 
 # Register plugins - simplified for now
 # TODO: Properly integrate plugins once their interfaces are standardized
@@ -457,7 +461,13 @@ async def generate_image(request: GenerateRequest):
         )
 
         try:
-            image_gen = ImageGenerator(config)
+            # Use MockImageGenerator if USE_MOCK_GENERATOR is enabled
+            if state["use_mock"]:
+                logger.info("Using MockImageGenerator")
+                image_gen = MockImageGenerator(config)
+            else:
+                logger.info("Using real Flux ImageGenerator")
+                image_gen = ImageGenerator(config)
         except MemoryError as e:
             error_msg = (
                 "Insufficient memory to load Flux model. This model requires significant RAM/VRAM."
