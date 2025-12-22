@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DreamGen Gallery</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0a0a0a;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    .gallery {
+      position: relative;
+      width: 90vw;
+      max-width: 1200px;
+      height: 80vh;
+    }
+    .gallery img {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      opacity: 0;
+      transition: opacity 1.5s ease-in-out;
+    }
+    .gallery img.active { opacity: 1; }
+    .info {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: #444;
+      font-size: 14px;
+      font-family: monospace;
+    }
+    .loading {
+      color: #666;
+      font-size: 18px;
+    }
+    .controls {
+      position: fixed;
+      bottom: 50px;
+      display: flex;
+      gap: 20px;
+    }
+    .controls button {
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      color: #888;
+      padding: 10px 20px;
+      cursor: pointer;
+      border-radius: 4px;
+      transition: all 0.2s;
+    }
+    .controls button:hover {
+      background: rgba(255,255,255,0.2);
+      color: #fff;
+    }
+    .progress {
+      position: fixed;
+      top: 0;
+      left: 0;
+      height: 2px;
+      background: linear-gradient(90deg, #667eea, #764ba2);
+      transition: width 0.1s linear;
+    }
+  </style>
+</head>
+<body>
+  <div class="progress" id="progress"></div>
+  <div class="gallery" id="gallery">
+    <div class="loading" id="loading">Loading gallery...</div>
+  </div>
+  <div class="controls">
+    <button id="prev">&#8592; Prev</button>
+    <button id="pause">Pause</button>
+    <button id="next">Next &#8594;</button>
+  </div>
+  <div class="info" id="info"></div>
+
+  <script>
+    let images = [];
+    let current = 0;
+    let interval = null;
+    let paused = false;
+    let progressInterval = null;
+    const ROTATE_TIME = 8000;
+
+    async function init() {
+      try {
+        const res = await fetch('/api/images');
+        const list = await res.json();
+
+        if (list.length === 0) {
+          document.getElementById('loading').textContent = 'No images yet';
+          return;
+        }
+
+        const gallery = document.getElementById('gallery');
+        document.getElementById('loading').style.display = 'none';
+
+        // Shuffle images for variety
+        const shuffled = list.sort(() => Math.random() - 0.5);
+
+        shuffled.forEach((key, i) => {
+          const img = document.createElement('img');
+          img.src = `/api/images/${key}`;
+          img.loading = 'lazy';
+          if (i === 0) img.classList.add('active');
+          gallery.appendChild(img);
+          images.push(img);
+        });
+
+        updateInfo();
+        startRotation();
+        startProgress();
+
+        // Keyboard controls
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'ArrowLeft') prev();
+          if (e.key === 'ArrowRight') next();
+          if (e.key === ' ') togglePause();
+        });
+
+      } catch (error) {
+        document.getElementById('loading').textContent = 'Error loading gallery';
+        console.error(error);
+      }
+    }
+
+    function updateInfo() {
+      document.getElementById('info').textContent = `${current + 1} / ${images.length}`;
+    }
+
+    function startProgress() {
+      let elapsed = 0;
+      const progressBar = document.getElementById('progress');
+      progressInterval = setInterval(() => {
+        if (!paused) {
+          elapsed += 50;
+          progressBar.style.width = `${(elapsed / ROTATE_TIME) * 100}%`;
+          if (elapsed >= ROTATE_TIME) elapsed = 0;
+        }
+      }, 50);
+    }
+
+    function rotate() {
+      images[current].classList.remove('active');
+      current = (current + 1) % images.length;
+      images[current].classList.add('active');
+      updateInfo();
+      document.getElementById('progress').style.width = '0%';
+    }
+
+    function startRotation() {
+      interval = setInterval(() => {
+        if (!paused) rotate();
+      }, ROTATE_TIME);
+    }
+
+    function next() {
+      rotate();
+    }
+
+    function prev() {
+      images[current].classList.remove('active');
+      current = (current - 1 + images.length) % images.length;
+      images[current].classList.add('active');
+      updateInfo();
+      document.getElementById('progress').style.width = '0%';
+    }
+
+    function togglePause() {
+      paused = !paused;
+      document.getElementById('pause').textContent = paused ? 'Play' : 'Pause';
+    }
+
+    document.getElementById('prev').addEventListener('click', prev);
+    document.getElementById('next').addEventListener('click', next);
+    document.getElementById('pause').addEventListener('click', togglePause);
+
+    init();
+  </script>
+</body>
+</html>
