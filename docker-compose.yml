@@ -4,6 +4,8 @@ services:
       context: .
       dockerfile: Dockerfile.backend
     container_name: dreamgen-backend
+    env_file:
+      - .env
     ports:
       - "22022:8000"
     volumes:

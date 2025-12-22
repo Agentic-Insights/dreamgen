@@ -1,16 +1,10 @@
 # Development override configuration
-# Use with: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+# Use with: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 
 services:
   backend:
     env_file:
-      - .env.local
-    build:
-      context: .
-      dockerfile: Dockerfile.backend
-      target: builder  # Use builder stage for development
-    ports:
-      - "22022:8000"
+      - .env
     deploy:
       resources:
         reservations:
@@ -19,13 +13,13 @@ services:
               count: 1
               capabilities: [gpu]
     volumes:
-      # Override with full source mount for hot reload
+      # Override with full source mount for hot reload (read-write)
       - ./src:/app/src
       - ./data:/app/data
       - ./pyproject.toml:/app/pyproject.toml
       - ./uv.lock:/app/uv.lock
 
-      # Mount models from host
+      # Mount models from host (read-write for downloads)
       - ~/.cache/huggingface:/app/models
       - ~/.cache/torch:/app/.cache/torch
 
@@ -43,22 +37,14 @@ services:
       # Use real models in development (if GPU available)
       - USE_MOCK_GENERATOR=${USE_MOCK_GENERATOR:-false}
       - MOCK_MODE=${MOCK_MODE:-false}
-
-      # HuggingFace token for model access
-      - HF_TOKEN=${HF_TOKEN:-}
-      - HF_HOME=/app/models
-      - TRANSFORMERS_CACHE=/app/models
+    # Override entrypoint and command for hot reload
+    entrypoint: []
     command: ["/opt/venv/bin/python", "-m", "uvicorn", "src.api.server:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
-
-    networks:
-      - dreamgen-network
 
   frontend:
     build:
       context: .
-      dockerfile: Dockerfile.frontend.dev  # Use development Dockerfile
-    ports:
-      - "22023:3000"
+      dockerfile: Dockerfile.frontend.dev
     volumes:
       # Full source mount for hot reload
       - ./web-ui:/app
@@ -67,11 +53,6 @@ services:
     environment:
       - NODE_ENV=development
       - NEXT_PUBLIC_API_URL=http://localhost:22022
+    # Override entrypoint for dev
+    entrypoint: []
     command: ["npm", "run", "dev"]
-
-    networks:
-      - dreamgen-network
-
-networks:
-  dreamgen-network:
-    driver: bridge

@@ -4,84 +4,139 @@
 
 @layer base {
   :root {
+    /* Light Mode - Pure minimalism */
     --background: 0 0% 100%;
-    --foreground: 224 71% 4%;
+    --foreground: 0 0% 0%;
+
     --card: 0 0% 100%;
-    --card-foreground: 224 71% 4%;
+    --card-foreground: 0 0% 0%;
+
     --popover: 0 0% 100%;
-    --popover-foreground: 224 71% 4%;
-    --primary: 158 64% 52%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 220 14% 96%;
-    --secondary-foreground: 224 71% 4%;
-    --muted: 220 14% 96%;
-    --muted-foreground: 220 8.9% 46.1%;
-    --accent: 195 95% 50%;
-    --accent-foreground: 0 0% 100%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 220 13% 91%;
-    --input: 220 13% 91%;
-    --ring: 158 64% 52%;
-    --radius: 0.5rem;
+    --popover-foreground: 0 0% 0%;
+
+    --primary: 140 100% 50%;
+    /* Technical Green #00FF41 */
+    --primary-foreground: 0 0% 0%;
+
+    --secondary: 0 0% 96%;
+    --secondary-foreground: 0 0% 0%;
+
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 40%;
+
+    --accent: 140 100% 50%;
+    --accent-foreground: 0 0% 0%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 0 0% 90%;
+    --input: 0 0% 90%;
+    --ring: 140 100% 50%;
+
+    --radius: 0rem;
   }
 
   .dark {
-    /* Agentic Insights Terminal Theme */
-    --background: 229 39% 7%;     /* Deep blue-black */
-    --foreground: 120 100% 93%;   /* Terminal green-white */
-    --card: 229 33% 10%;
-    --card-foreground: 120 50% 90%;
-    --popover: 229 35% 9%;
-    --popover-foreground: 120 60% 85%;
-    --primary: 120 100% 63%;      /* Bright terminal green */
-    --primary-foreground: 229 39% 7%;
-    --secondary: 39 100% 50%;     /* Amber/orange */
-    --secondary-foreground: 229 39% 7%;
-    --muted: 229 30% 12%;
-    --muted-foreground: 120 20% 75%;
-    --accent: 180 100% 50%;       /* Terminal cyan */
-    --accent-foreground: 229 39% 7%;
-    --destructive: 0 85% 50%;
-    --destructive-foreground: 120 100% 93%;
-    --border: 120 30% 25%;
-    --input: 229 30% 15%;
-    --ring: 120 100% 63%;
-  }
-}
+    /* Dark Mode - Pure black with green accent */
+    --background: 0 0% 0%;
+    --foreground: 0 0% 100%;
 
-@layer base {
+    --card: 0 0% 5%;
+    --card-foreground: 0 0% 100%;
+
+    --popover: 0 0% 0%;
+    --popover-foreground: 0 0% 100%;
+
+    --primary: 140 100% 50%;
+    /* Technical Green #00FF41 */
+    --primary-foreground: 0 0% 0%;
+
+    --secondary: 0 0% 10%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 0 0% 10%;
+    --muted-foreground: 0 0% 60%;
+
+    --accent: 140 100% 50%;
+    --accent-foreground: 0 0% 0%;
+
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 0 0% 20%;
+    --input: 0 0% 20%;
+    --ring: 140 100% 50%;
+  }
+
   * {
     @apply border-border;
   }
-  body {
-    @apply bg-background text-foreground;
-  }
-}
 
-/* Custom scrollbar */
-@layer components {
-  ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
-  }
-
-  ::-webkit-scrollbar-track {
+  html {
     @apply bg-background;
   }
 
-  ::-webkit-scrollbar-thumb {
-    @apply bg-primary/20 hover:bg-primary/30;
-    border-radius: 4px;
+  body {
+    @apply text-foreground;
+    background: transparent;
   }
+}
 
-  /* Hide scrollbar for specific elements */
-  .scrollbar-none {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
+/* Terminal-style cursor animation */
+@keyframes blink {
+  0%, 49% {
+    opacity: 1;
   }
+  50%, 100% {
+    opacity: 0;
+  }
+}
 
-  .scrollbar-none::-webkit-scrollbar {
-    display: none;
-  }
+.cursor-blink {
+  animation: blink 1s step-end infinite;
+}
+
+/* Minimal underline animation */
+.underline-animate {
+  position: relative;
+}
+
+.underline-animate::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  width: 0;
+  height: 1px;
+  background: currentColor;
+  transition: width 0.3s ease;
+}
+
+.underline-animate:hover::after {
+  width: 100%;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-background;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-muted-foreground/30 hover:bg-muted-foreground/50;
+}
+
+/* Hide scrollbar for specific elements */
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
 }

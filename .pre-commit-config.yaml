@@ -1,24 +1,75 @@
 repos:
+  # Python formatting
   - repo: https://github.com/psf/black
     rev: 24.10.0
     hooks:
       - id: black
+        name: black (Python formatter)
         args: [--line-length=100]
         language_version: python3.11
 
+  # Python import sorting
   - repo: https://github.com/pycqa/isort
     rev: 5.13.2
     hooks:
       - id: isort
+        name: isort (Python import sorter)
         args: [--profile=black, --line-length=100]
 
+  # Python linting - errors only (fast)
+  - repo: https://github.com/PyCQA/pylint
+    rev: v3.3.5
+    hooks:
+      - id: pylint
+        name: pylint (Python linter - errors only)
+        args: [--errors-only, --disable=import-error]
+        files: ^src/
+
+  # General file checks
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.6.0
+    rev: v5.0.0
     hooks:
       - id: trailing-whitespace
-        exclude: '^(cso-deployment/|web-ui/)'
+        name: Trim trailing whitespace
+        exclude: '^(node_modules/|\.venv/|output/)'
       - id: end-of-file-fixer
-        exclude: '^(cso-deployment/|web-ui/)'
+        name: Fix end of files
+        exclude: '^(node_modules/|\.venv/|output/)'
       - id: check-added-large-files
+        name: Check for large files
         args: [--maxkb=1000]
       - id: check-merge-conflict
+        name: Check for merge conflicts
+      - id: check-yaml
+        name: Check YAML syntax
+        args: [--unsafe]
+      - id: check-json
+        name: Check JSON syntax
+      - id: check-toml
+        name: Check TOML syntax
+      - id: detect-private-key
+        name: Detect private keys
+      - id: mixed-line-ending
+        name: Fix mixed line endings
+        args: [--fix=lf]
+
+  # Shell script linting
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.10.0.1
+    hooks:
+      - id: shellcheck
+        name: shellcheck (Shell script linter)
+        args: [--severity=warning]
+
+# Exclude patterns globally
+exclude: |
+  (?x)(
+    ^\.venv/|
+    ^node_modules/|
+    ^output/|
+    ^\.cache/|
+    ^dist/|
+    ^build/|
+    \.min\.js$|
+    \.min\.css$
+  )

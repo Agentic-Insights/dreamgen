@@ -19,8 +19,8 @@ from pydantic import BaseModel, Field
 
 from src.generators.image_generator import ImageGenerator
 from src.generators.prompt_generator import PromptGenerator
+from src.plugins import initialize_plugins, plugin_manager
 from src.utils.config import Config
-from src.utils.plugin_manager import PluginManager
 from src.utils.storage import save_image_and_prompt
 
 # Configure logging
@@ -40,10 +40,12 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:7860",  # Next.js on custom port
+        "http://localhost:22023",  # Docker frontend port
         "http://localhost:3000",  # Next.js default dev server
         "http://localhost:3001",  # Alternative port
+        "http://localhost:7860",  # Legacy port
         "https://imagegen.agenticinsights.com",  # Production
+        "https://dreamgen.agenticinsights.com",  # Production
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -52,11 +54,10 @@ app.add_middleware(
 
 # Global state
 config = Config()
-plugin_manager = PluginManager()
 state = {"use_mock": False}  # Use real Flux generation with GPU
 
-# Register plugins - simplified for now
-# TODO: Properly integrate plugins once their interfaces are standardized
+# Initialize plugins with config
+initialize_plugins(config)
 
 # Output directory setup
 OUTPUT_DIR = Path("output")

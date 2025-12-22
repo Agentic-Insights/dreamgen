@@ -1,4 +1,8 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+export const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:22022';
+
+export function getImageUrl(path: string): string {
+  return `${API_BASE}${path}`;
+}
 
 export interface GenerateRequest {
   prompt?: string;
@@ -101,15 +105,33 @@ export class ImageGenAPI {
   }
 
   async generate(request: GenerateRequest): Promise<GenerateResponse> {
-    const response = await fetch(`${this.baseUrl}/api/generate`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(request),
-    });
-    if (!response.ok) throw new Error('Failed to generate image');
-    return response.json();
+    // Image generation can take several minutes - set 10 minute timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 600000);
+
+    try {
+      const response = await fetch(`${this.baseUrl}/api/generate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(request),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(error || 'Failed to generate image');
+      }
+      return response.json();
+    } catch (error) {
+      clearTimeout(timeoutId);
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error('Generation timed out after 10 minutes');
+      }
+      throw error;
+    }
   }
 
   async getGallery(limit: number = 50, offset: number = 0) {

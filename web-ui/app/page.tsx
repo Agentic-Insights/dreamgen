@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Image from "next/image";
 import { Terminal, Image as ImageIcon, Settings as SettingsIcon, Sparkles, Loader2, Menu, X, Upload, Edit3 } from "lucide-react";
-import { api, GenerateResponse, PluginInfo, SystemStatus, EditResponse } from "@/lib/api";
+import { api, getImageUrl, GenerateResponse, PluginInfo, SystemStatus, EditResponse } from "@/lib/api";
 import Gallery from "@/components/Gallery";
 import Settings from "@/components/Settings";
 import { cn } from "@/lib/utils";
@@ -123,16 +123,16 @@ export default function Home() {
 
   return (
     <div className="h-screen bg-background flex flex-col overflow-hidden">
-      {/* Top Bar - Responsive */}
-      <header className="bg-muted border-b border-border">
+      {/* Top Bar - Terminal Style */}
+      <header className="bg-background border-b border-border">
         <div className="flex items-center justify-between px-3 md:px-4 h-12 md:h-10">
           <div className="flex items-center gap-2 md:gap-3">
             {/* Mobile menu button */}
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="md:hidden p-1.5 hover:bg-background rounded-md transition-colors"
+              className="md:hidden p-1.5 hover:bg-card transition-colors"
             >
-              {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+              {sidebarOpen ? <X className="w-5 h-5 text-primary" /> : <Menu className="w-5 h-5 text-primary" />}
             </button>
 
             <Image
@@ -142,11 +142,11 @@ export default function Home() {
               height={20}
               className="shrink-0"
             />
-            <span className="font-semibold text-sm text-foreground hidden sm:inline">
-              Continuous Image Generator
+            <span className="font-bold text-sm text-primary tracking-wider hidden sm:inline">
+              DREAMGEN
             </span>
-            <span className="font-semibold text-sm text-foreground sm:hidden">
-              CIG
+            <span className="text-muted-foreground text-xs hidden md:inline">
+              {"//"}<span>image_generator</span>
             </span>
           </div>
 
@@ -154,16 +154,16 @@ export default function Home() {
             href="https://agenticinsights.com"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-xs hover:text-primary transition-colors flex items-center gap-1.5"
+            className="text-xs text-muted-foreground hover:text-primary transition-colors flex items-center gap-1.5 underline-animate"
           >
-            <span className="hidden sm:inline">by</span>
-            <span className="font-semibold">Agentic Insights</span>
+            <span className="hidden sm:inline text-muted-foreground">&gt;</span>
+            <span className="font-medium">AGENTIC_INSIGHTS</span>
           </a>
         </div>
       </header>
 
-      {/* Tab Bar - Responsive */}
-      <div className="bg-card border-b border-border">
+      {/* Tab Bar - Terminal Style */}
+      <div className="bg-background border-b border-border">
         <div className="flex overflow-x-auto scrollbar-none">
           {tabs.map((tab) => {
             const Icon = tab.icon;
@@ -177,14 +177,14 @@ export default function Home() {
                 }}
                 className={cn(
                   "px-3 md:px-4 py-2 text-sm border-b-2 transition-all whitespace-nowrap flex items-center gap-2",
-                  "hover:bg-background/50",
+                  "hover:bg-card",
                   activeTab === tab.id
-                    ? "border-primary text-foreground bg-background"
-                    : "border-transparent text-muted-foreground"
+                    ? "border-primary text-primary bg-card"
+                    : "border-transparent text-muted-foreground hover:text-foreground"
                 )}
               >
                 <Icon className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">{tab.label}</span>
+                <span className="hidden sm:inline uppercase tracking-wide text-xs">{tab.label}</span>
               </button>
             );
           })}
@@ -212,28 +212,28 @@ export default function Home() {
               )}>
                 <div className="h-full flex flex-col p-4 overflow-y-auto">
                   <div className="flex items-center justify-between mb-4 lg:hidden">
-                    <h2 className="text-sm font-semibold text-primary">Generation Controls</h2>
+                    <h2 className="text-xs font-bold text-primary uppercase tracking-wider">&gt; Controls</h2>
                     <button
                       onClick={() => setSidebarOpen(false)}
-                      className="p-1.5 hover:bg-background rounded-md"
+                      className="p-1.5 hover:bg-background"
                     >
-                      <X className="w-4 h-4" />
+                      <X className="w-4 h-4 text-primary" />
                     </button>
                   </div>
 
-                  <h2 className="text-sm font-semibold mb-4 text-primary hidden lg:block">
-                    Generation Controls
+                  <h2 className="text-xs font-bold mb-4 text-primary uppercase tracking-wider hidden lg:block">
+                    &gt; Controls
                   </h2>
 
                   <div className="space-y-4">
                     <div>
-                      <label className="text-xs text-muted-foreground">
+                      <label className="text-xs text-muted-foreground uppercase tracking-wide">
                         Prompt (optional)
                       </label>
                       <textarea
-                        className="w-full mt-1 p-2 bg-background border border-input rounded-md text-sm font-mono resize-none focus:outline-none focus:ring-2 focus:ring-primary/50"
+                        className="w-full mt-1 p-2 bg-background border border-border text-sm font-mono resize-none focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary placeholder:text-muted-foreground/50"
                         rows={4}
-                        placeholder="Leave empty for AI-generated prompt..."
+                        placeholder="$ enter prompt or leave empty..."
                         value={prompt}
                         onChange={(e) => setPrompt(e.target.value)}
                         disabled={isGenerating}
@@ -242,39 +242,39 @@ export default function Home() {
 
                     <motion.button
                       data-testid="generate-image-button"
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      className="w-full py-2.5 bg-primary text-primary-foreground rounded-md hover:opacity-90 transition-opacity font-medium text-sm disabled:opacity-50"
+                      whileHover={{ scale: 1.01 }}
+                      whileTap={{ scale: 0.99 }}
+                      className="w-full py-2.5 bg-primary text-primary-foreground hover:bg-primary/90 transition-colors font-bold text-sm uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
                       onClick={handleGenerate}
                       disabled={isGenerating}
                     >
                       {isGenerating ? (
                         <div className="flex items-center justify-center gap-2">
                           <Loader2 className="w-4 h-4 animate-spin" />
-                          Generating...
+                          PROCESSING...
                         </div>
                       ) : (
-                        "Generate Image"
+                        "GENERATE"
                       )}
                     </motion.button>
 
                     <div className="pt-4 border-t border-border">
-                      <h3 className="text-xs font-semibold mb-2 text-muted-foreground">
-                        Active Plugins
+                      <h3 className="text-xs font-bold mb-2 text-muted-foreground uppercase tracking-wider">
+                        Plugins
                       </h3>
                       <div className="space-y-1">
                         {plugins.map((plugin) => (
                           <label
                             key={plugin.name}
-                            className="flex items-center gap-2 text-xs cursor-pointer hover:text-foreground transition-colors"
+                            className="flex items-center gap-2 text-xs cursor-pointer hover:text-primary transition-colors"
                           >
                             <input
                               type="checkbox"
                               checked={plugin.enabled}
                               onChange={() => handlePluginToggle(plugin.name)}
-                              className="rounded accent-primary"
+                              className="accent-primary"
                             />
-                            <span>{plugin.name}</span>
+                            <span className="font-mono">{plugin.name}</span>
                           </label>
                         ))}
                       </div>
@@ -299,16 +299,16 @@ export default function Home() {
                   showLogs ? "h-32 sm:h-40 lg:h-1/3" : "h-10"
                 )}>
                   <div
-                    className="flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-muted/50"
+                    className="flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-card"
                     onClick={() => setShowLogs(!showLogs)}
                   >
                     <div className="flex items-center gap-2">
                       <Terminal className="w-4 h-4 text-primary" />
-                      <span className="text-xs font-semibold text-muted-foreground">Output</span>
+                      <span className="text-xs font-bold text-primary uppercase tracking-wider">&gt; Output</span>
                     </div>
                     <motion.div
                       animate={{ rotate: showLogs ? 180 : 0 }}
-                      className="text-muted-foreground"
+                      className="text-muted-foreground text-xs"
                     >
                       ▼
                     </motion.div>
@@ -316,18 +316,19 @@ export default function Home() {
 
                   {showLogs && (
                     <div className="px-3 pb-3 overflow-y-auto h-[calc(100%-2.5rem)]">
-                      <div className="font-mono text-xs space-y-1">
+                      <div className="font-mono text-xs space-y-0.5">
                         {logs.map((log, i) => (
                           <div
                             key={i}
                             className={cn(
                               "break-all",
-                              log.includes('[ERROR]') ? 'text-destructive' : 'text-primary'
+                              log.includes('[ERROR]') ? 'text-destructive' : 'text-primary/80'
                             )}
                           >
                             {log}
                           </div>
                         ))}
+                        <span className="text-primary animate-blink">_</span>
                       </div>
                     </div>
                   )}
@@ -368,7 +369,7 @@ export default function Home() {
                       className="max-w-full max-h-full"
                     >
                       <img
-                        src={`http://localhost:8000${currentImage.image_path}`}
+                        src={getImageUrl(currentImage.image_path)}
                         alt="Generated image"
                         className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
                       />
@@ -416,22 +417,30 @@ export default function Home() {
         </AnimatePresence>
       </main>
 
-      {/* Status Bar - Responsive */}
-      <footer className="h-6 bg-muted border-t border-border">
-        <div className="h-full flex items-center px-2 sm:px-3 text-xs text-muted-foreground">
-          <span className="truncate">
-            {status?.status === 'ready' ? '● Ready' : '○ Connecting...'}
+      {/* Status Bar - Terminal Style */}
+      <footer className="h-6 bg-background border-t border-border">
+        <div className="h-full flex items-center px-2 sm:px-3 text-xs font-mono">
+          <span className={cn(
+            "truncate",
+            status?.status === 'ready' ? 'text-primary' : 'text-muted-foreground'
+          )}>
+            {status?.status === 'ready' ? '[READY]' : '[CONNECTING...]'}
           </span>
           <div className="flex-1" />
-          <div className="flex items-center gap-2 text-xs">
-            <span className="hidden sm:inline">
-              {status ? 'API ✓' : 'API ✗'}
+          <div className="flex items-center gap-3 text-xs">
+            <span className={cn(
+              "hidden sm:inline",
+              status ? 'text-primary' : 'text-destructive'
+            )}>
+              API:{status ? 'OK' : 'ERR'}
             </span>
-            <div className="w-px h-3 bg-border hidden sm:block" />
-            <span>GPU: {status?.gpu_available ? '✓' : '✗'}</span>
-            <div className="w-px h-3 bg-border hidden md:block" />
-            <span className="hidden md:inline truncate">
-              {status?.backend || 'Unknown'}
+            <span className="text-border hidden sm:inline">|</span>
+            <span className={status?.gpu_available ? 'text-primary' : 'text-muted-foreground'}>
+              GPU:{status?.gpu_available ? 'ON' : 'OFF'}
+            </span>
+            <span className="text-border hidden md:inline">|</span>
+            <span className="hidden md:inline truncate text-muted-foreground">
+              {status?.backend || 'unknown'}
             </span>
           </div>
         </div>

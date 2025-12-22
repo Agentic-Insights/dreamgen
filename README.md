@@ -71,6 +71,84 @@ dreamgen --help
 
 For detailed setup, plugin development, and advanced usage, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## ☁️ Optional: Cloudflare Hosting
+
+DreamGen includes two Cloudflare Workers for free, global image hosting:
+
+### 1. Single Image Worker (`host-image/`)
+
+**Purpose**: Host a single showcase image from R2 storage
+**Use Case**: README badges, social media previews, landing pages
+
+**Features**:
+- Serves one hardcoded image (`ComfyUI_00372_.png`)
+- R2 bucket binding: `DREAM_BUCKET` → `continuous-image-gen`
+- CORS enabled, 1-day cache
+- Simple TypeScript worker
+
+**Setup**:
+```bash
+cd host-image
+npx wrangler deploy
+```
+
+**Configuration** (`wrangler.jsonc`):
+```json
+{
+  "name": "host-image",
+  "main": "src/index.ts",
+  "r2_buckets": [
+    { "binding": "DREAM_BUCKET", "bucket_name": "continuous-image-gen" }
+  ]
+}
+```
+
+### 2. Gallery API Worker (`cloudflare-gallery/`)
+
+**Purpose**: Full gallery API with listing and image retrieval
+**Use Case**: Web UI backend, public gallery, API integrations
+
+**Features**:
+- Dynamic routing via Cloudflare Pages Functions (`[[path]].js`)
+- **List endpoint**: `GET /api/images` → returns sorted image keys
+- **Serve endpoint**: `GET /api/images/{path}` → streams image files
+- R2 bucket binding: `GALLERY` → `dreamgen-gallery`
+- Auto-detects content types (png/jpg/webp/gif)
+- CORS enabled, 1-year cache for images
+
+**Setup**:
+```bash
+cd cloudflare-gallery
+npx wrangler pages deploy public
+```
+
+**Configuration** (`wrangler.toml`):
+```toml
+name = "dreamgen-gallery"
+pages_build_output_dir = "public"
+[[r2_buckets]]
+binding = "GALLERY"
+bucket_name = "dreamgen-gallery"
+```
+
+**API Endpoints**:
+```bash
+# List all images (sorted by upload date, newest first)
+curl https://your-worker.pages.dev/api/images
+
+# Get specific image
+curl https://your-worker.pages.dev/api/images/2024/week_52/image.png
+```
+
+**Key Differences**:
+| Feature | host-image | cloudflare-gallery |
+|---------|------------|-------------------|
+| **Type** | Cloudflare Worker | Pages Function |
+| **Routing** | Single endpoint | Dynamic catch-all |
+| **Images** | 1 hardcoded | Full R2 listing |
+| **Cache** | 1 day | 1 year |
+| **Use Case** | Static showcase | Dynamic gallery API |
+
 ---
 
 Built by [Agentic Insights](https://agenticinsights.com) • [Report Issues](https://github.com/killerapp/dreamgen/issues)

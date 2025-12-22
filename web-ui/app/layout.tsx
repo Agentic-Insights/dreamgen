@@ -1,19 +1,25 @@
 import type { Metadata } from "next";
-import { JetBrains_Mono } from "next/font/google";
+import { JetBrains_Mono, IBM_Plex_Sans } from "next/font/google";
 import "./globals.css";
 
 const jetbrainsMono = JetBrains_Mono({
-  weight: ["300", "400", "500", "700"],
   subsets: ["latin"],
+  variable: "--font-mono",
   display: "swap",
-  variable: "--font-mono"
+});
+
+const ibmPlexSans = IBM_Plex_Sans({
+  weight: ["300", "400", "500", "600", "700"],
+  subsets: ["latin"],
+  variable: "--font-sans",
+  display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "Continuous Image Generator — Agentic Insights",
+  title: "DreamGen — Agentic Insights",
   description: "AI-powered continuous image generation system with dynamic prompt enhancement",
   openGraph: {
-    title: "Continuous Image Generator — Agentic Insights",
+    title: "DreamGen — Agentic Insights",
     description: "AI-powered continuous image generation system",
     images: ["/logo_mark.png"],
     siteName: "Agentic Insights",
@@ -30,8 +36,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
-      <body className={`${jetbrainsMono.className} antialiased`}>
+    <html lang="en" className="dark antialiased">
+      <body className={`${ibmPlexSans.variable} ${jetbrainsMono.variable} font-sans flex flex-col min-h-screen`}>
         {children}
       </body>
     </html>
