@@ -1,5 +1,3 @@
-version: '3.8'
-
 # Development override configuration
 # Use with: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
 
@@ -12,7 +10,7 @@ services:
       dockerfile: Dockerfile.backend
       target: builder  # Use builder stage for development
     ports:
-      - "8000:8000"
+      - "22022:8000"
     deploy:
       resources:
         reservations:
@@ -28,8 +26,8 @@ services:
       - ./uv.lock:/app/uv.lock
 
       # Mount models from host
-      - ${USERPROFILE}/.cache/huggingface:/app/models
-      - ${USERPROFILE}/.cache/torch:/app/.cache/torch
+      - ~/.cache/huggingface:/app/models
+      - ~/.cache/torch:/app/.cache/torch
 
       # Mount output and logs
       - ./output:/app/output
@@ -53,14 +51,14 @@ services:
     command: ["/opt/venv/bin/python", "-m", "uvicorn", "src.api.server:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
     networks:
-      - imagegen-network
+      - dreamgen-network
 
   frontend:
     build:
       context: .
       dockerfile: Dockerfile.frontend.dev  # Use development Dockerfile
     ports:
-      - "7860:7860"
+      - "22023:3000"
     volumes:
       # Full source mount for hot reload
       - ./web-ui:/app
@@ -68,23 +66,12 @@ services:
       - /app/.next         # Exclude build artifacts
     environment:
       - NODE_ENV=development
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_API_URL=http://localhost:22022
     command: ["npm", "run", "dev"]
 
     networks:
-      - imagegen-network
-
-  # Development tools
-  adminer:
-    image: adminer:latest
-    container_name: imagegen-adminer
-    ports:
-      - "8080:8080"
-    networks:
-      - imagegen-network
-    profiles:
-      - tools
+      - dreamgen-network
 
 networks:
-  imagegen-network:
+  dreamgen-network:
     driver: bridge

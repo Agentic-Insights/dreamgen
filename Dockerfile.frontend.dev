@@ -14,11 +14,11 @@ COPY web-ui/package*.json ./
 RUN npm ci
 
 # Expose port
-EXPOSE 7860
+EXPOSE 3000
 
 # Environment variables
 ENV NODE_ENV=development
-ENV PORT=7860
+ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
 # The source code will be mounted as a volume

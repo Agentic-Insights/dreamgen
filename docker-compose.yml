@@ -1,17 +1,14 @@
-version: '3.8'
-
 services:
   backend:
     build:
       context: .
       dockerfile: Dockerfile.backend
-    container_name: imagegen-backend
+    container_name: dreamgen-backend
     ports:
-      - "8000:8000"
+      - "22022:8000"
     volumes:
       # Mount models from host to avoid re-downloading
-      # Windows path for Hugging Face cache
-      - ${USERPROFILE}/.cache/huggingface:/app/models:ro
+      - ~/.cache/huggingface:/app/models:ro
 
       # Mount output directory for generated images
       - ./output:/app/output
@@ -45,8 +42,31 @@ services:
 
       # Logging
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
+      # Plugin Configuration
+      - ENABLED_PLUGINS=time_of_day,nearest_holiday,holiday_fact,art_style,lora
+      - PLUGIN_ORDER=time_of_day:1,nearest_holiday:2,holiday_fact:3,art_style:4,lora:5
+
+      # Lora Configuration
+      - LORA_DIR=/app/loras
+      - ENABLED_LORAS=
+      - LORA_APPLICATION_PROBABILITY=0.7
+
+      # Model Settings
+      - OLLAMA_MODEL=qwen3-coder:30b
+      - OLLAMA_TEMPERATURE=0.7
+      - MAX_SEQUENCE_LENGTH=512
+      - IMAGE_HEIGHT=768
+      - IMAGE_WIDTH=1360
+      - NUM_INFERENCE_STEPS=4
+      - GUIDANCE_SCALE=0.0
+      - TRUE_CFG_SCALE=1.0
+      - LOG_DIR=/app/logs
+      - CACHE_DIR=/app/.cache
+      - CPU_ONLY=false
+      - MPS_USE_FP16=false
     networks:
-      - imagegen-network
+      - dreamgen-network
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/status"]
@@ -60,21 +80,21 @@ services:
       context: .
       dockerfile: Dockerfile.frontend
       args:
-        - NEXT_PUBLIC_API_URL=http://localhost:8000
-    container_name: imagegen-frontend
+        - NEXT_PUBLIC_API_URL=http://localhost:22022
+    container_name: dreamgen-frontend
     ports:
-      - "7860:7860"
+      - "22023:3000"
     environment:
       - NODE_ENV=${NODE_ENV:-production}
       - NEXT_PUBLIC_API_URL=http://backend:8000
-      - PORT=7860
+      - PORT=3000
     networks:
-      - imagegen-network
+      - dreamgen-network
     depends_on:
       - backend
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:7860"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -90,11 +110,11 @@ services:
   #   volumes:
   #     - ollama-data:/root/.ollama
   #   networks:
-  #     - imagegen-network
+  #     - dreamgen-network
   #   restart: unless-stopped
 
 networks:
-  imagegen-network:
+  dreamgen-network:
     driver: bridge
 
 volumes:
