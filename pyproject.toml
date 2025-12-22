@@ -112,8 +112,8 @@ minor_tags = ["feat"]
 patch_tags = ["fix", "perf"]
 allowed_tags = ["build", "chore", "ci", "docs", "feat", "fix", "perf", "style", "refactor", "test"]
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "pytest>=8.4.1",
     "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.0.0",

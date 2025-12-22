@@ -34,6 +34,7 @@ from rich.table import Table
 from ..generators.image_generator import ImageGenerator
 from ..generators.mock_image_generator import MockImageGenerator
 from ..generators.prompt_generator import PromptGenerator
+from ..plugins import ensure_initialized, plugin_manager
 from .config import Config
 from .logging_config import setup_logging
 from .metrics import MetricsCollector
@@ -56,6 +57,42 @@ class AppState:
 
 
 app.state = AppState()
+
+# Plugin management subcommands
+plugins_app = typer.Typer(help="Manage prompt plugins")
+app.add_typer(plugins_app, name="plugins")
+
+
+@plugins_app.command("list")
+def list_plugins() -> None:
+    """Display available plugins and their status."""
+    ensure_initialized(app.state.config)
+    table = Table("Name", "Enabled", "Description")
+    for name, info in plugin_manager.plugins.items():
+        table.add_row(name, "yes" if info.enabled else "no", info.description)
+    console.print(table)
+
+
+@plugins_app.command("enable")
+def enable_plugin(name: str) -> None:
+    """Enable a plugin by name."""
+    ensure_initialized(app.state.config)
+    if name not in plugin_manager.plugins:
+        console.print(f"[red]Plugin '{name}' not found[/red]")
+        raise typer.Exit(1)
+    plugin_manager.enable_plugin(name)
+    console.print(f"[green]Enabled plugin:[/green] {name}")
+
+
+@plugins_app.command("disable")
+def disable_plugin(name: str) -> None:
+    """Disable a plugin by name."""
+    ensure_initialized(app.state.config)
+    if name not in plugin_manager.plugins:
+        console.print(f"[red]Plugin '{name}' not found[/red]")
+        raise typer.Exit(1)
+    plugin_manager.disable_plugin(name)
+    console.print(f"[yellow]Disabled plugin:[/yellow] {name}")
 
 
 def version_callback(value: bool):

@@ -54,11 +54,11 @@ Transform continuous-image-gen from a standalone CLI tool into a modular image g
 ## Phase 3: CloudStack Integration (Week 5-6)
 ### 3.1 Service Deployment
 - [x] Dockerfile for containerized deployment - **COMPLETED**
-- [x] Kubernetes manifests (Deployment, Service, ConfigMap) - **COMPLETED**
-- [x] Helm chart for configurable deployment - **COMPLETED**
-- [x] Resource limits and autoscaling configuration - **COMPLETED**
-- [x] Multi-environment support (dev/staging/production) - **COMPLETED**
-- [x] ArgoCD GitOps deployment configuration - **COMPLETED**
+- [ ] Kubernetes manifests (Deployment, Service, ConfigMap)
+- [ ] Helm chart for configurable deployment
+- [ ] Resource limits and autoscaling configuration
+- [ ] Multi-environment support (dev/staging/production)
+- [ ] ArgoCD GitOps deployment configuration
 
 ### 3.2 Platform Integration
 - [ ] Service mesh integration (Istio/Linkerd)
@@ -92,9 +92,9 @@ Transform continuous-image-gen from a standalone CLI tool into a modular image g
 - [ ] Architecture decision records (ADRs)
 
 ## Quick Wins (Start immediately)
-1. **Create setup.py/pyproject.toml** for pip installation
+1. ~~**Create setup.py/pyproject.toml** for pip installation~~ - **COMPLETED**
 2. **Add GitHub Actions** for CI/CD pipeline
-3. **Create Docker image** for easy deployment - **COMPLETED**
+3. ~~**Create Docker image** for easy deployment~~ - **COMPLETED**
 4. **Write integration tests** for service interfaces
 5. **Document API contracts** in OpenAPI format
 

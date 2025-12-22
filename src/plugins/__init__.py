@@ -65,6 +65,29 @@ register_base_plugins()
 
 logger = logging.getLogger(__name__)
 
+# Track initialization state
+_initialized = False
+
+
+def initialize_plugins(config: Config) -> None:
+    """Initialize all plugins with the given config."""
+    global _initialized
+    register_lora_plugin(config)
+
+    # Enable plugins based on config
+    for name in config.plugins.enabled_plugins:
+        if name in plugin_manager.plugins:
+            plugin_manager.enable_plugin(name)
+
+    _initialized = True
+
+
+def ensure_initialized(config: Config) -> None:
+    """Ensure plugins are initialized, initializing if needed."""
+    global _initialized
+    if not _initialized:
+        initialize_plugins(config)
+
 
 def get_context_with_descriptions() -> Dict[str, Any]:
     """
