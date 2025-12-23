@@ -31,8 +31,7 @@ from rich.progress import (
 )
 from rich.table import Table
 
-from ..generators.image_generator import ImageGenerator
-from ..generators.mock_image_generator import MockImageGenerator
+from ..generators.factory import get_available_models, get_image_generator
 from ..generators.prompt_generator import PromptGenerator
 from ..plugins import ensure_initialized, plugin_manager
 from .config import Config
@@ -155,6 +154,12 @@ def generate(
     prompt: Optional[str] = typer.Option(
         None, "--prompt", "-p", help="Provide a custom prompt for direct inference"
     ),
+    model: Optional[str] = typer.Option(
+        None,
+        "--model",
+        "-m",
+        help="Image generation model to use (flux, zimage). Defaults to IMAGE_MODEL from .env",
+    ),
     mock: bool = typer.Option(
         False,
         "--mock",
@@ -181,16 +186,31 @@ def generate(
                     # Update config with CLI options
                     app.state.config.system.mps_use_fp16 = mps_use_fp16
 
+                    # Override model if specified via CLI
+                    if model:
+                        available = get_available_models()
+                        if model not in available:
+                            console.print(
+                                f"[red]Error: Model '{model}' not available.[/red]\n"
+                                f"Available models: {', '.join(available)}\n\n"
+                                f"Note: Z-Image requires diffusers from source:\n"
+                                f"  pip install git+https://github.com/huggingface/diffusers"
+                            )
+                            raise typer.Exit(1)
+                        app.state.config.model.image_model = model
+                        console.print(f"[cyan]Using model:[/cyan] {model}")
+
                     # Initialize components
                     init_task = progress.add_task("[cyan]Initializing components...", total=None)
                     prompt_gen = PromptGenerator(app.state.config)
+
+                    # Use factory to create image generator
                     if mock:
                         console.print(
                             "[yellow]Using mock image generator (no GPU required)[/yellow]"
                         )
-                        image_gen = MockImageGenerator(app.state.config)
-                    else:
-                        image_gen = ImageGenerator(app.state.config)
+                    image_gen = get_image_generator(app.state.config, mock=mock)
+
                     storage = StorageManager()
                     metrics = MetricsCollector(app.state.config.system.log_dir / "metrics")
                     progress.remove_task(init_task)
@@ -358,9 +378,8 @@ def loop(
                         console.print(
                             "[yellow]Using mock image generator (no GPU required)[/yellow]"
                         )
-                        image_gen = MockImageGenerator(app.state.config)
-                    else:
-                        image_gen = ImageGenerator(app.state.config)
+                    # Use factory to create image generator
+                    image_gen = get_image_generator(app.state.config, mock=mock)
                     storage = StorageManager()
                     metrics = MetricsCollector(app.state.config.system.log_dir / "metrics")
                     progress.remove_task(init_task)

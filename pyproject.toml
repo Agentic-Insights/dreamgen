@@ -46,6 +46,7 @@ dependencies = [
     "websockets>=12.0",
     "aiofiles>=23.0.0",
     "huggingface_hub[inference]>=0.20.0",  # For InferenceClient image editing
+    "loguru>=0.7.0",  # For Z-Image generator logging
 ]
 
 [project.optional-dependencies]
@@ -91,6 +92,9 @@ disable = ["C0111", "C0103"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]
 
 [tool.semantic_release]
 version_variables = [
