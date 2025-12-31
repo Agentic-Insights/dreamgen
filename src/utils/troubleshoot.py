@@ -7,13 +7,11 @@ import platform
 import shutil
 import subprocess
 import sys
-from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
 import psutil
 import torch
 from rich.console import Console
-from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.table import Table
@@ -335,7 +333,7 @@ class SystemDiagnostics:
 
         if hasattr(torch.backends, "mps"):
             if gpu_info["mps_available"]:
-                self.console.print(f"[green]✓[/green] MPS available (Apple Silicon)")
+                self.console.print("[green]✓[/green] MPS available (Apple Silicon)")
             elif gpu_info["mps_built"]:
                 self.console.print("[yellow]![/yellow] MPS is built but not available")
             else:

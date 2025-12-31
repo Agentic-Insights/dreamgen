@@ -1,14 +1,18 @@
 export async function onRequestGet(ctx) {
   const path = ctx.params.path?.join('/') || '';
 
-  // List all images
+  // List all images with metadata
   if (!path) {
     const list = await ctx.env.GALLERY.list();
-    const keys = list.objects
+    const images = list.objects
       .filter(o => /\.(png|jpg|jpeg|webp|gif)$/i.test(o.key))
       .sort((a, b) => new Date(b.uploaded) - new Date(a.uploaded))
-      .map(o => o.key);
-    return Response.json(keys);
+      .map(o => ({
+        key: o.key,
+        uploaded: o.uploaded,
+        dateStr: extractDateFromFilename(o.key)
+      }));
+    return Response.json(images);
   }
 
   // Serve individual image
@@ -33,4 +37,17 @@ export async function onRequestGet(ctx) {
       'Access-Control-Allow-Origin': '*'
     }
   });
+}
+
+function extractDateFromFilename(filename) {
+  // Extract YYYYMMDD from filename like "image_20251222_064746_16cd0ed1.png"
+  const match = filename.match(/(\d{8})/);
+  if (!match) return null;
+
+  const dateStr = match[1];
+  const year = dateStr.substring(0, 4);
+  const month = dateStr.substring(4, 6);
+
+  const date = new Date(year, parseInt(month) - 1, 1);
+  return date.toLocaleString('en-US', { month: 'short', year: 'numeric' });
 }

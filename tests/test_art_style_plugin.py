@@ -1,5 +1,4 @@
 import unittest
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 # It's important to be able to import ArtStyle and ArtStylePlugin

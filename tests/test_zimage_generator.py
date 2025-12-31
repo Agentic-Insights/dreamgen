@@ -1,15 +1,13 @@
 """Tests for Z-Image generator."""
 
-import sys
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
 
 from src.generators.base_generator import GenerationResult
 from src.generators.zimage_generator import ZImageGenerator
-from src.utils.config import Config
 
 
 @pytest.fixture

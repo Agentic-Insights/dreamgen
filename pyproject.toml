@@ -129,6 +129,7 @@ dev = [
     "build>=1.0.0",
     "twine>=4.0.0",
     "pre-commit>=4.3.0",
+    "ruff>=0.14.10",
 ]
 
 [tool.uv.sources]

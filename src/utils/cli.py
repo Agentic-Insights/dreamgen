@@ -3,14 +3,12 @@ Command-line interface for the continuous image generation system.
 """
 
 import asyncio
-import os
 import sys
 from pathlib import Path
 from typing import Optional
 
 # Fix Windows Unicode handling
 if sys.platform == "win32":
-    import locale
 
     if sys.stdout.encoding != "utf-8":
         sys.stdout.reconfigure(encoding="utf-8")

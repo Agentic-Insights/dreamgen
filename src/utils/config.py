@@ -4,7 +4,7 @@ Configuration management for the image generation system.
 
 import json
 import os
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -95,7 +95,7 @@ class Config:
         # Lora configuration
         enabled_loras_str = os.getenv("ENABLED_LORAS")
         enabled_loras = (
-            [l.strip() for l in enabled_loras_str.split(",") if l.strip()]
+            [lora.strip() for lora in enabled_loras_str.split(",") if lora.strip()]
             if enabled_loras_str
             else []
         )

@@ -144,7 +144,7 @@ class ConnectionManager:
         for connection in self.active_connections:
             try:
                 await connection.send_text(message)
-            except:
+            except Exception:
                 pass  # Handle disconnected clients
 
 
@@ -171,15 +171,14 @@ async def get_status():
         import torch
 
         gpu_available = torch.cuda.is_available() or torch.backends.mps.is_available()
-    except:
+    except Exception:
         gpu_available = False
 
     # Check Ollama availability
     try:
-        import ollama
 
         ollama_available = True
-    except:
+    except Exception:
         ollama_available = False
 
     # Determine which Flux model is being used
@@ -260,7 +259,7 @@ async def get_model_status():
                 try:
                     total_size = sum(f.stat().st_size for f in blobs_path.iterdir() if f.is_file())
                     size = total_size
-                except:
+                except Exception:
                     size = 0
 
         models.append(
@@ -290,7 +289,7 @@ async def download_model(model_id: str):
         # Import huggingface_hub for downloading
         import asyncio
 
-        from huggingface_hub import hf_hub_download, snapshot_download
+        from huggingface_hub import snapshot_download
 
         # Start download in background
         async def download_in_background():

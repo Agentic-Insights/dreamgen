@@ -3,10 +3,11 @@ Plugin system for adding contextual information to prompts.
 """
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from ..utils.config import Config
-from ..utils.plugin_manager import PluginManager, PluginResult
+from ..utils.plugin_manager import PluginManager
+from ..utils.plugin_manager import PluginResult as PluginResult
 from .art_style import get_art_style
 from .holiday_fact import get_holiday_fact
 from .lora import apply_lora

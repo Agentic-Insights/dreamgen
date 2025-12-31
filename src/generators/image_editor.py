@@ -7,7 +7,7 @@ import io
 import logging
 import os
 from pathlib import Path
-from typing import Optional, Union
+from typing import Union
 
 from huggingface_hub import InferenceClient
 from PIL import Image

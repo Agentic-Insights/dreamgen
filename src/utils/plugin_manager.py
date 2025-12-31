@@ -4,7 +4,7 @@ Plugin management system for controlling and logging plugin execution.
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List
 
 
 @dataclass

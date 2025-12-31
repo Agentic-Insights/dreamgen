@@ -67,11 +67,15 @@ def get_available_models() -> list[str]:
 
     # Check if Z-Image is available
     try:
-        from diffusers import ZImagePipeline
+        import importlib.util
 
-        models.append("zimage")
-        logger.debug("Z-Image available")
-    except ImportError:
+        if importlib.util.find_spec("diffusers") is not None:
+            # Try to access ZImagePipeline
+            from diffusers import ZImagePipeline  # noqa: F401
+
+            models.append("zimage")
+            logger.debug("Z-Image available")
+    except (ImportError, AttributeError):
         logger.debug("Z-Image not available (diffusers from source required)")
 
     return models

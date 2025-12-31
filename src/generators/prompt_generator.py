@@ -4,11 +4,8 @@ Incorporates temporal context (time of day, day of week, and holidays)
 for more contextually aware prompts.
 """
 
-import json
 import logging
-import os
 import time
-from typing import Optional
 
 from ..plugins import get_context_with_descriptions, get_temporal_descriptor
 from ..utils.config import Config
