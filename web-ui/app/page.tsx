@@ -291,6 +291,22 @@ export default function Home() {
                 />
               )}
 
+              {/* Mobile Floating Generate Button */}
+              <motion.button
+                data-testid="mobile-generate-button"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                className="lg:hidden fixed bottom-20 right-4 z-10 w-14 h-14 bg-primary text-primary-foreground rounded-full shadow-lg flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={handleGenerate}
+                disabled={isGenerating}
+              >
+                {isGenerating ? (
+                  <Loader2 className="w-6 h-6 animate-spin" />
+                ) : (
+                  <Sparkles className="w-6 h-6" />
+                )}
+              </motion.button>
+
               {/* Right Panel - Output */}
               <div className="flex-1 flex flex-col min-h-0">
                 {/* Terminal Output - Collapsible on mobile */}
