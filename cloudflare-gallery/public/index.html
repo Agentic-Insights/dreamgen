@@ -303,11 +303,12 @@
       fill: none;
     }
 
-    /* Date display - bottom right */
-    .date {
+    /* Metadata display - bottom right */
+    .metadata {
       position: fixed;
       bottom: 24px;
       right: 28px;
+      text-align: right;
       font-family: var(--font-mono);
       font-size: 11px;
       font-weight: 300;
@@ -316,9 +317,61 @@
       z-index: 50;
       opacity: 0;
       transition: opacity 0.4s;
+      max-width: 300px;
     }
-    body:hover .date {
+    body:hover .metadata {
       opacity: 1;
+    }
+    .metadata-date {
+      color: var(--mist);
+      margin-bottom: 4px;
+    }
+    .metadata-model {
+      font-size: 9px;
+      color: var(--ghost);
+      text-transform: uppercase;
+      letter-spacing: 2px;
+    }
+
+    /* Caption overlay - appears on click/tap */
+    .caption-overlay {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: linear-gradient(transparent, rgba(0,0,0,0.95));
+      padding: 80px 28px 28px;
+      z-index: 45;
+      transform: translateY(100%);
+      transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .caption-overlay.visible {
+      transform: translateY(0);
+    }
+    .caption-text {
+      font-family: var(--font-display);
+      font-size: 16px;
+      font-weight: 300;
+      line-height: 1.6;
+      color: var(--light);
+      max-width: 800px;
+      margin: 0 auto;
+      text-align: center;
+    }
+    .caption-hint {
+      position: fixed;
+      bottom: 70px;
+      right: 28px;
+      font-family: var(--font-mono);
+      font-size: 9px;
+      letter-spacing: 1px;
+      color: var(--ghost);
+      opacity: 0;
+      transition: opacity 0.4s;
+      z-index: 50;
+    }
+    body:hover .caption-hint {
+      opacity: 0.5;
     }
 
     /* Loading state */
@@ -371,7 +424,8 @@
       .cursor { display: none; }
       .hints { display: none; }
       .controls { opacity: 1; }
-      .date { opacity: 1; }
+      .metadata { opacity: 1; }
+      .caption-hint { opacity: 0.5; }
       .info-panel { width: 100%; }
       .title { opacity: 0.6; }
     }
@@ -462,15 +516,28 @@
   <div class="hints">
     <span class="hint"><kbd>←</kbd><kbd>→</kbd> Navigate</span>
     <span class="hint"><kbd>Space</kbd> Pause</span>
+    <span class="hint"><kbd>C</kbd> Caption</span>
   </div>
 
-  <div class="date" id="date"></div>
+  <div class="caption-hint" id="captionHint">tap for caption</div>
+
+  <div class="metadata" id="metadata">
+    <div class="metadata-date" id="metaDate"></div>
+    <div class="metadata-model" id="metaModel">Flux Schnell</div>
+  </div>
+
+  <div class="caption-overlay" id="captionOverlay">
+    <div class="caption-text" id="captionText"></div>
+  </div>
 
   <script>
     // State
     let images = [];
+    let imageData = [];
+    let captions = {};
     let current = 0;
     let paused = false;
+    let captionVisible = false;
     let rotateInterval = null;
     let progressInterval = null;
     const ROTATE_TIME = 8000;
@@ -513,6 +580,7 @@
 
         // Shuffle and load images
         const shuffled = [...imagesList].sort(() => Math.random() - 0.5);
+        imageData = shuffled;
         const gallery = document.getElementById('gallery');
         document.getElementById('loading').classList.add('hidden');
 
@@ -520,11 +588,18 @@
           const img = document.createElement('img');
           img.src = `/api/images/${item.key}`;
           img.dataset.date = item.dateStr || formatDate(parseDate(item.key));
+          img.dataset.captionKey = item.captionKey;
+          img.dataset.index = i;
           img.loading = i < 3 ? 'eager' : 'lazy';
           if (i === 0) img.classList.add('active');
           gallery.appendChild(img);
           images.push(img);
         });
+
+        // Preload first few captions
+        for (let i = 0; i < Math.min(3, imageData.length); i++) {
+          loadCaption(imageData[i].captionKey);
+        }
 
         updateUI();
         startRotation();
@@ -534,6 +609,23 @@
         document.getElementById('loading').textContent = 'Error loading gallery';
         console.error(error);
       }
+    }
+
+    async function loadCaption(captionKey) {
+      if (captions[captionKey] !== undefined) return captions[captionKey];
+      try {
+        const res = await fetch(`/api/images/${captionKey}`);
+        if (res.ok) {
+          const text = await res.text();
+          // Clean up the caption - take first line or first 200 chars
+          let caption = text.trim().split('\n')[0];
+          if (caption.length > 200) caption = caption.substring(0, 200) + '...';
+          captions[captionKey] = caption;
+          return caption;
+        }
+      } catch (e) {}
+      captions[captionKey] = null;
+      return null;
     }
 
     function parseDate(filename) {
@@ -551,9 +643,33 @@
       });
     }
 
-    function updateUI() {
+    async function updateUI() {
       document.getElementById('counter').textContent = `${current + 1} / ${images.length}`;
-      document.getElementById('date').textContent = images[current]?.dataset?.date || '';
+      document.getElementById('metaDate').textContent = images[current]?.dataset?.date || '';
+
+      // Preload next caption
+      const nextIdx = (current + 1) % imageData.length;
+      if (imageData[nextIdx]) loadCaption(imageData[nextIdx].captionKey);
+
+      // Update caption if visible
+      if (captionVisible) {
+        await showCaption();
+      }
+    }
+
+    async function showCaption() {
+      const captionKey = images[current]?.dataset?.captionKey;
+      if (captionKey) {
+        const caption = await loadCaption(captionKey);
+        document.getElementById('captionText').textContent = caption || 'No caption available';
+      }
+    }
+
+    function toggleCaption() {
+      captionVisible = !captionVisible;
+      const overlay = document.getElementById('captionOverlay');
+      overlay.classList.toggle('visible', captionVisible);
+      if (captionVisible) showCaption();
     }
 
     function rotate(direction = 1) {
@@ -607,9 +723,20 @@
       if (e.key === 'ArrowLeft') rotate(-1);
       if (e.key === 'ArrowRight') rotate(1);
       if (e.key === ' ') { e.preventDefault(); togglePause(); }
-      if (e.key === 'Escape' && infoPanel.classList.contains('open')) {
-        infoPanel.classList.remove('open');
-        infoToggle.classList.remove('active');
+      if (e.key === 'c' || e.key === 'C') toggleCaption();
+      if (e.key === 'Escape') {
+        if (captionVisible) toggleCaption();
+        else if (infoPanel.classList.contains('open')) {
+          infoPanel.classList.remove('open');
+          infoToggle.classList.remove('active');
+        }
+      }
+    });
+
+    // Click on gallery to toggle caption
+    document.getElementById('gallery').addEventListener('click', e => {
+      if (e.target.tagName === 'IMG') {
+        toggleCaption();
       }
     });
 
