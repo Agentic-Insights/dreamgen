@@ -131,7 +131,7 @@ hooks-update:
 # Docker
 # =============================================================================
 
-# Start full stack
+# Start full stack (production - backend + frontend in containers)
 up:
     docker-compose up
 
@@ -155,6 +155,36 @@ logs service="":
     else
         docker-compose logs -f {{service}}
     fi
+
+# =============================================================================
+# Development Mode
+# =============================================================================
+
+# Start local backend with hot reload (GPU enabled)
+dev-backend:
+    uv run uvicorn src.api.server:app --host 0.0.0.0 --port 8000 --reload
+
+# Start frontend container pointing to local backend
+dev-frontend:
+    docker-compose -f docker-compose.yml -f docker-compose.dev.yml up --no-deps frontend
+
+# Start dev frontend in background
+dev-frontend-d:
+    docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --no-deps frontend
+
+# Full dev mode: local backend + containerized frontend
+dev:
+    @echo "Starting development environment..."
+    @echo "  Backend: http://localhost:8000 (local, GPU enabled)"
+    @echo "  Frontend: http://localhost:22023 (containerized)"
+    @echo ""
+    @echo "Run in separate terminals:"
+    @echo "  just dev-backend   # Terminal 1"
+    @echo "  just dev-frontend  # Terminal 2"
+
+# Stop dev frontend
+dev-down:
+    docker-compose -f docker-compose.yml -f docker-compose.dev.yml down
 
 # =============================================================================
 # Cloudflare R2 Sync (using rclone)

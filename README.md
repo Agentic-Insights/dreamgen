@@ -20,7 +20,7 @@ Beautiful, VS Code-inspired dark theme with real-time generation and organized g
 uv tool install dreamgen
 
 # Clone for web interface (optional)
-git clone https://github.com/killerapp/dreamgen
+git clone https://github.com/Agentic-Insights/dreamgen
 cd dreamgen/web-ui && npm install
 
 # Set up your environment
@@ -151,4 +151,4 @@ curl https://your-worker.pages.dev/api/images/2024/week_52/image.png
 
 ---
 
-Built by [Agentic Insights](https://agenticinsights.com) • [Report Issues](https://github.com/killerapp/dreamgen/issues)
+Built by [Agentic Insights](https://agenticinsights.com) • [Report Issues](https://github.com/Agentic-Insights/dreamgen/issues)

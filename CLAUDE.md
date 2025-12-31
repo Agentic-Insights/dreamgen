@@ -35,11 +35,34 @@ uv run isort src/ tests/                    # Sort imports
 uv sync                                     # Install dependencies
 ```
 
-### Docker
+### Docker - Production
 ```bash
-docker-compose up                           # Full stack (backend + frontend)
-docker-compose up backend                   # API only
+docker-compose up                           # Full stack (backend + frontend in containers)
+docker-compose up backend                   # API only (mock mode by default)
 ```
+
+### Docker - Development Mode
+For local development with GPU access, run the backend locally and frontend in Docker:
+
+```bash
+# Terminal 1: Local backend with GPU + hot reload
+just dev-backend
+# or: uv run uvicorn src.api.server:app --host 0.0.0.0 --port 8000 --reload
+
+# Terminal 2: Frontend container pointing to local backend
+just dev-frontend
+# or: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up frontend
+```
+
+**Why this setup?**
+- Backend runs locally with direct GPU access (CUDA) and your HuggingFace model cache
+- Frontend runs in Docker for consistent Node.js environment
+- Frontend connects to `host.docker.internal:8000` to reach local backend
+- Hot reload enabled for both backend (uvicorn --reload) and frontend (next dev)
+
+**Ports:**
+- Backend API: `http://localhost:8000`
+- Frontend: `http://localhost:22023`
 
 ## Architecture
 

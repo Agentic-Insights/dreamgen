@@ -10,12 +10,13 @@ export async function onRequestGet(ctx) {
       .map(o => ({
         key: o.key,
         uploaded: o.uploaded,
-        dateStr: extractDateFromFilename(o.key)
+        dateStr: extractDateFromFilename(o.key),
+        captionKey: o.key.replace(/\.(png|jpg|jpeg|webp|gif)$/i, '.txt')
       }));
     return Response.json(images);
   }
 
-  // Serve individual image
+  // Serve individual file (image or txt)
   const file = await ctx.env.GALLERY.get(path);
   if (!file) {
     return new Response('Not found', { status: 404 });
@@ -27,13 +28,14 @@ export async function onRequestGet(ctx) {
     jpg: 'image/jpeg',
     jpeg: 'image/jpeg',
     webp: 'image/webp',
-    gif: 'image/gif'
+    gif: 'image/gif',
+    txt: 'text/plain'
   };
 
   return new Response(file.body, {
     headers: {
-      'Content-Type': file.httpMetadata?.contentType || contentTypes[ext] || 'image/png',
-      'Cache-Control': 'public, max-age=31536000',
+      'Content-Type': file.httpMetadata?.contentType || contentTypes[ext] || 'application/octet-stream',
+      'Cache-Control': ext === 'txt' ? 'public, max-age=3600' : 'public, max-age=31536000',
       'Access-Control-Allow-Origin': '*'
     }
   });
