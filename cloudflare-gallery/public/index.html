@@ -333,16 +333,16 @@
       letter-spacing: 2px;
     }
 
-    /* Caption overlay - appears on click/tap */
+    /* Caption overlay - appears on click/tap, positioned at top */
     .caption-overlay {
       position: fixed;
-      bottom: 0;
+      top: 60px;
       left: 0;
       right: 0;
-      background: linear-gradient(transparent, rgba(0,0,0,0.95));
-      padding: 80px 28px 28px;
+      background: linear-gradient(rgba(0,0,0,0.95), transparent);
+      padding: 28px 28px 80px;
       z-index: 45;
-      transform: translateY(100%);
+      transform: translateY(-100%);
       transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     }
     .caption-overlay.visible {
@@ -360,8 +360,8 @@
     }
     .caption-hint {
       position: fixed;
-      bottom: 70px;
-      right: 28px;
+      top: 60px;
+      left: 28px;
       font-family: var(--font-mono);
       font-size: 9px;
       letter-spacing: 1px;
