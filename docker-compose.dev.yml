@@ -52,7 +52,10 @@ services:
       - /app/.next         # Exclude build artifacts
     environment:
       - NODE_ENV=development
-      - NEXT_PUBLIC_API_URL=http://localhost:22022
+      # Point to local dev backend (WSL host IP for Docker->host communication)
+      - NEXT_PUBLIC_API_URL=http://host.docker.internal:8000
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     # Override entrypoint for dev
     entrypoint: []
     command: ["npm", "run", "dev"]
