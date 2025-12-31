@@ -18,7 +18,7 @@ from PIL import Image
 from ..plugins import plugin_manager, register_lora_plugin
 from ..plugins.lora import get_lora_path
 from ..utils.config import Config
-from ..utils.error_handler import ModelError, ResourceError, handle_errors
+from ..utils.error_handler import ModelError, handle_errors
 from ..utils.memory_manager import MemoryManager
 from ..utils.metrics import GenerationMetrics
 
@@ -325,7 +325,6 @@ class ImageGenerator:
     @handle_errors(
         error_type=ModelError,
         retries=1,
-        cleanup_func=lambda: self.memory_manager.optimize_memory_usage(),
     )
     async def generate_image(
         self, prompt: str, output_path: Path, force_reinit: bool = False

@@ -45,6 +45,7 @@ repos:
         args: [--unsafe]
       - id: check-json
         name: Check JSON syntax
+        exclude: 'tsconfig\.json$'
       - id: check-toml
         name: Check TOML syntax
       - id: detect-private-key

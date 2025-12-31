@@ -38,6 +38,12 @@
       color: #444;
       font-size: 14px;
       font-family: monospace;
+      text-align: center;
+    }
+    .info-date {
+      color: #666;
+      font-size: 13px;
+      margin-top: 4px;
     }
     .loading {
       color: #666;
@@ -85,6 +91,7 @@
   <div class="info" id="info"></div>
 
   <script>
+    let imagesList = [];
     let images = [];
     let current = 0;
     let interval = null;
@@ -95,9 +102,9 @@
     async function init() {
       try {
         const res = await fetch('/api/images');
-        const list = await res.json();
+        imagesList = await res.json();
 
-        if (list.length === 0) {
+        if (imagesList.length === 0) {
           document.getElementById('loading').textContent = 'No images yet';
           return;
         }
@@ -106,11 +113,12 @@
         document.getElementById('loading').style.display = 'none';
 
         // Shuffle images for variety
-        const shuffled = list.sort(() => Math.random() - 0.5);
+        const shuffled = imagesList.sort(() => Math.random() - 0.5);
 
-        shuffled.forEach((key, i) => {
+        shuffled.forEach((item, i) => {
           const img = document.createElement('img');
-          img.src = `/api/images/${key}`;
+          img.src = `/api/images/${item.key}`;
+          img.dataset.date = item.dateStr;
           img.loading = 'lazy';
           if (i === 0) img.classList.add('active');
           gallery.appendChild(img);
@@ -135,7 +143,14 @@
     }
 
     function updateInfo() {
-      document.getElementById('info').textContent = `${current + 1} / ${images.length}`;
+      const currentImg = images[current];
+      const date = currentImg?.dataset?.date || '';
+      const countText = `${current + 1} / ${images.length}`;
+      let infoHtml = countText;
+      if (date) {
+        infoHtml += `<div class="info-date">${date}</div>`;
+      }
+      document.getElementById('info').innerHTML = infoHtml;
     }
 
     function startProgress() {

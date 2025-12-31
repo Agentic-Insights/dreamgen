@@ -3,15 +3,12 @@ Command-line interface for the continuous image generation system.
 """
 
 import asyncio
-import os
 import sys
 from pathlib import Path
 from typing import Optional
 
 # Fix Windows Unicode handling
 if sys.platform == "win32":
-    import locale
-
     if sys.stdout.encoding != "utf-8":
         sys.stdout.reconfigure(encoding="utf-8")
     if sys.stderr.encoding != "utf-8":
@@ -31,8 +28,7 @@ from rich.progress import (
 )
 from rich.table import Table
 
-from ..generators.image_generator import ImageGenerator
-from ..generators.mock_image_generator import MockImageGenerator
+from ..generators.factory import get_available_models, get_image_generator
 from ..generators.prompt_generator import PromptGenerator
 from ..plugins import ensure_initialized, plugin_manager
 from .config import Config
@@ -150,10 +146,19 @@ def main(
 @app.command(help="Generate a single image with optional interactive prompt refinement")
 def generate(
     interactive: bool = typer.Option(
-        False, "--interactive", "-i", help="Enable interactive mode with prompt feedback"
+        False,
+        "--interactive",
+        "-i",
+        help="Enable interactive mode with prompt feedback",
     ),
     prompt: Optional[str] = typer.Option(
         None, "--prompt", "-p", help="Provide a custom prompt for direct inference"
+    ),
+    model: Optional[str] = typer.Option(
+        None,
+        "--model",
+        "-m",
+        help="Image generation model to use (flux, zimage). Defaults to IMAGE_MODEL from .env",
     ),
     mock: bool = typer.Option(
         False,
@@ -181,16 +186,31 @@ def generate(
                     # Update config with CLI options
                     app.state.config.system.mps_use_fp16 = mps_use_fp16
 
+                    # Override model if specified via CLI
+                    if model:
+                        available = get_available_models()
+                        if model not in available:
+                            console.print(
+                                f"[red]Error: Model '{model}' not available.[/red]\n"
+                                f"Available models: {', '.join(available)}\n\n"
+                                f"Note: Z-Image requires diffusers from source:\n"
+                                f"  pip install git+https://github.com/huggingface/diffusers"
+                            )
+                            raise typer.Exit(1)
+                        app.state.config.model.image_model = model
+                        console.print(f"[cyan]Using model:[/cyan] {model}")
+
                     # Initialize components
                     init_task = progress.add_task("[cyan]Initializing components...", total=None)
                     prompt_gen = PromptGenerator(app.state.config)
+
+                    # Use factory to create image generator
                     if mock:
                         console.print(
                             "[yellow]Using mock image generator (no GPU required)[/yellow]"
                         )
-                        image_gen = MockImageGenerator(app.state.config)
-                    else:
-                        image_gen = ImageGenerator(app.state.config)
+                    image_gen = get_image_generator(app.state.config, mock=mock)
+
                     storage = StorageManager()
                     metrics = MetricsCollector(app.state.config.system.log_dir / "metrics")
                     progress.remove_task(init_task)
@@ -317,7 +337,12 @@ def diagnose(
 @app.command(help="Generate multiple images in a batch with configurable settings")
 def loop(
     batch_size: int = typer.Option(
-        5, "--batch-size", "-b", help="Number of images to generate per run", min=1, max=100
+        5,
+        "--batch-size",
+        "-b",
+        help="Number of images to generate per run",
+        min=1,
+        max=100,
     ),
     interval: Optional[int] = typer.Option(
         None, "--interval", "-n", help="Interval in seconds between generations", min=0
@@ -358,9 +383,8 @@ def loop(
                         console.print(
                             "[yellow]Using mock image generator (no GPU required)[/yellow]"
                         )
-                        image_gen = MockImageGenerator(app.state.config)
-                    else:
-                        image_gen = ImageGenerator(app.state.config)
+                    # Use factory to create image generator
+                    image_gen = get_image_generator(app.state.config, mock=mock)
                     storage = StorageManager()
                     metrics = MetricsCollector(app.state.config.system.log_dir / "metrics")
                     progress.remove_task(init_task)
@@ -380,8 +404,8 @@ def loop(
                             prompt = await prompt_gen.generate_prompt()
                             console.print(
                                 Panel(
-                                    f"[bold]Generated prompt for image {i+1}:[/bold]\n\n{prompt}",
-                                    title=f"Prompt {i+1}/{batch_size}",
+                                    f"[bold]Generated prompt for image {i + 1}:[/bold]\n\n{prompt}",
+                                    title=f"Prompt {i + 1}/{batch_size}",
                                     border_style="blue",
                                 )
                             )
@@ -389,12 +413,16 @@ def loop(
                             # Get output path and generate
                             output_path = storage.get_output_path(prompt)
                             force_reinit = i > 0 and i % 5 == 0  # Reinit every 5 images
-                            output_path, gen_time, model_name = await image_gen.generate_image(
+                            (
+                                output_path,
+                                gen_time,
+                                model_name,
+                            ) = await image_gen.generate_image(
                                 prompt, output_path, force_reinit=force_reinit
                             )
 
                             console.print(
-                                f"[green]✓[/green] Image {i+1} generated in {gen_time:.1f}s using {model_name}\n"
+                                f"[green]✓[/green] Image {i + 1} generated in {gen_time:.1f}s using {model_name}\n"
                                 f"   📁 {output_path}"
                             )
 
@@ -406,7 +434,7 @@ def loop(
                                 await asyncio.sleep(wait_time)
 
                         except Exception as e:
-                            console.print(f"[red]Error generating image {i+1}: {str(e)}[/red]")
+                            console.print(f"[red]Error generating image {i + 1}: {str(e)}[/red]")
                             if i < batch_size - 1:
                                 console.print("[yellow]Attempting recovery...[/yellow]")
                                 await asyncio.sleep(2)  # Wait for cleanup
@@ -425,7 +453,7 @@ def loop(
                             f"[dim]Performance Metrics:\n"
                             f"Average Generation Time: {perf_metrics.get('avg_generation_time', 0):.1f}s\n"
                             f"Average GPU Memory: {perf_metrics.get('avg_gpu_memory', 0):.1f} GB\n"
-                            f"Success Rate: {perf_metrics.get('success_rate', 0)*100:.1f}%[/dim]",
+                            f"Success Rate: {perf_metrics.get('success_rate', 0) * 100:.1f}%[/dim]",
                             title="Success",
                             border_style="green",
                         )

@@ -4,7 +4,7 @@ Configuration management for the image generation system.
 
 import json
 import os
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -24,9 +24,13 @@ class LoraConfig:
 class ModelConfig:
     """Model-specific configuration."""
 
+    image_model: str  # "flux" or "zimage"
     ollama_model: str
     ollama_temperature: float
     flux_model: str
+    zimage_model_path: Path  # Local path to Z-Image model weights
+    zimage_attention: str
+    zimage_compile: bool
     max_sequence_length: int
     lora: LoraConfig
 
@@ -91,7 +95,7 @@ class Config:
         # Lora configuration
         enabled_loras_str = os.getenv("ENABLED_LORAS")
         enabled_loras = (
-            [l.strip() for l in enabled_loras_str.split(",") if l.strip()]
+            [lora.strip() for lora in enabled_loras_str.split(",") if lora.strip()]
             if enabled_loras_str
             else []
         )
@@ -111,6 +115,8 @@ class Config:
         )
 
         # Model configuration
+        image_model = os.getenv("IMAGE_MODEL", "flux")  # Default to flux for backward compat
+
         ollama_model = os.getenv("OLLAMA_MODEL")
         if not ollama_model:
             raise ValueError("OLLAMA_MODEL environment variable is required")
@@ -123,14 +129,28 @@ class Config:
         if not flux_model:
             raise ValueError("FLUX_MODEL environment variable is required")
 
+        # Z-Image configuration (optional, only required if IMAGE_MODEL=zimage)
+        zimage_model_path = Path(os.getenv("ZIMAGE_MODEL_PATH", "ckpts/Z-Image-Turbo"))
+        zimage_attention = os.getenv("ZIMAGE_ATTENTION", "_sdpa")
+        zimage_compile = os.getenv("ZIMAGE_COMPILE", "false").lower() in (
+            "true",
+            "1",
+            "yes",
+            "on",
+        )
+
         max_seq_len = os.getenv("MAX_SEQUENCE_LENGTH")
         if not max_seq_len:
             raise ValueError("MAX_SEQUENCE_LENGTH environment variable is required")
 
         self.model = ModelConfig(
+            image_model=image_model,
             ollama_model=ollama_model,
             ollama_temperature=float(ollama_temp),
             flux_model=flux_model,
+            zimage_model_path=zimage_model_path,
+            zimage_attention=zimage_attention,
+            zimage_compile=zimage_compile,
             max_sequence_length=int(max_seq_len),
             lora=lora_config,
         )
