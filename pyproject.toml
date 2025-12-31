@@ -45,8 +45,8 @@ dependencies = [
     "python-multipart>=0.0.6",
     "websockets>=12.0",
     "aiofiles>=23.0.0",
-    "huggingface_hub[inference]>=0.20.0",  # For InferenceClient image editing
-    "loguru>=0.7.0",  # For Z-Image generator logging
+    "huggingface_hub[inference]>=0.20.0", # For InferenceClient image editing
+    "loguru>=0.7.0", # For Z-Image generator logging
 ]
 
 [project.optional-dependencies]
@@ -137,6 +137,7 @@ torch = { index = "pytorch-cu124" }
 torchvision = { index = "pytorch-cu124" }
 torchaudio = { index = "pytorch-cu124" }
 markupsafe = { index = "pypi" }
+diffusers = { git = "https://github.com/huggingface/diffusers" }
 
 [[tool.uv.index]]
 name = "pypi"

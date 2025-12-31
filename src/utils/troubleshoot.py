@@ -207,7 +207,9 @@ class SystemDiagnostics:
 
         return result
 
-    def determine_optimal_device(self) -> Tuple[Literal["cpu", "cuda", "mps"], List[str]]:
+    def determine_optimal_device(
+        self,
+    ) -> Tuple[Literal["cpu", "cuda", "mps"], List[str]]:
         """Determine the optimal device for running the application."""
         recommendations = []
 

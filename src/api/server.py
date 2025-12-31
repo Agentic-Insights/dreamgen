@@ -176,7 +176,6 @@ async def get_status():
 
     # Check Ollama availability
     try:
-
         ollama_available = True
     except Exception:
         ollama_available = False
@@ -223,13 +222,21 @@ async def get_model_status():
     models = []
     model_configs = [
         {"id": "Qwen/Qwen-Image", "name": "Qwen-Image", "type": "text-to-image"},
-        {"id": "Qwen/Qwen-Image-Edit", "name": "Qwen-Image-Edit", "type": "image-to-image"},
+        {
+            "id": "Qwen/Qwen-Image-Edit",
+            "name": "Qwen-Image-Edit",
+            "type": "image-to-image",
+        },
         {
             "id": "black-forest-labs/FLUX.1-schnell",
             "name": "FLUX.1 Schnell",
             "type": "text-to-image",
         },
-        {"id": "black-forest-labs/FLUX.1-dev", "name": "FLUX.1 Dev", "type": "text-to-image"},
+        {
+            "id": "black-forest-labs/FLUX.1-dev",
+            "name": "FLUX.1 Dev",
+            "type": "text-to-image",
+        },
     ]
 
     for model_config in model_configs:
@@ -308,7 +315,8 @@ async def download_model(model_id: str):
                 # Use snapshot_download to get the entire model
                 loop = asyncio.get_event_loop()
                 await loop.run_in_executor(
-                    None, lambda: snapshot_download(repo_id=model_id, resume_download=True)
+                    None,
+                    lambda: snapshot_download(repo_id=model_id, resume_download=True),
                 )
 
                 logger.info(f"Download completed for model: {model_id}")
@@ -438,7 +446,11 @@ async def generate_image(request: GenerateRequest):
             # Broadcast prompt generated event
             await manager.broadcast(
                 json.dumps(
-                    {"type": "prompt_generated", "id": generation_id, "prompt": final_prompt}
+                    {
+                        "type": "prompt_generated",
+                        "id": generation_id,
+                        "prompt": final_prompt,
+                    }
                 )
             )
 
@@ -464,14 +476,26 @@ async def generate_image(request: GenerateRequest):
             )
             logger.error(f"Memory error loading Flux model: {str(e)}")
             await manager.broadcast(
-                json.dumps({"type": "generation_error", "id": generation_id, "error": error_msg})
+                json.dumps(
+                    {
+                        "type": "generation_error",
+                        "id": generation_id,
+                        "error": error_msg,
+                    }
+                )
             )
             raise HTTPException(status_code=507, detail=error_msg)
         except Exception as e:
             error_msg = f"Failed to load Flux model: {str(e)}"
             logger.error(error_msg)
             await manager.broadcast(
-                json.dumps({"type": "generation_error", "id": generation_id, "error": error_msg})
+                json.dumps(
+                    {
+                        "type": "generation_error",
+                        "id": generation_id,
+                        "error": error_msg,
+                    }
+                )
             )
             raise HTTPException(status_code=500, detail=error_msg)
 
@@ -562,7 +586,12 @@ async def get_gallery(limit: int = 50, offset: int = 0):
             }
         )
 
-    return {"images": images, "total": len(image_files), "limit": limit, "offset": offset}
+    return {
+        "images": images,
+        "total": len(image_files),
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @app.delete("/api/gallery/{image_path:path}")
@@ -620,7 +649,7 @@ async def batch_generate(count: int = 5, delay: int = 0):
             result = await generate_image(request)
             results.append(result.dict())
         except Exception as e:
-            logger.error(f"Batch generation {i+1}/{count} failed: {str(e)}")
+            logger.error(f"Batch generation {i + 1}/{count} failed: {str(e)}")
             results.append({"error": str(e)})
 
     return {"batch_id": batch_id, "count": count, "results": results}
@@ -635,7 +664,11 @@ async def edit_image(request: EditRequest, file: UploadFile = File(...)):
         # Broadcast start event
         await manager.broadcast(
             json.dumps(
-                {"type": "edit_started", "id": edit_id, "timestamp": datetime.now().isoformat()}
+                {
+                    "type": "edit_started",
+                    "id": edit_id,
+                    "timestamp": datetime.now().isoformat(),
+                }
             )
         )
 

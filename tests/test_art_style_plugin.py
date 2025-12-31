@@ -9,7 +9,6 @@ from src.plugins.art_style import ArtStyle, ArtStylePlugin, get_art_style
 
 
 class TestArtStylePlugin(unittest.TestCase):
-
     def setUp(self):
         # Reset singleton instance or its state for each test
         # One way: set _instance to None, so __new__ runs again.

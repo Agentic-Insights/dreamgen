@@ -56,6 +56,23 @@ install:
 test:
     uv run pytest tests/
 
+# Benchmark FLUX vs Z-Image models
+benchmark:
+    uv run scripts/benchmark_models.py
+
+# Benchmark specific model
+benchmark-model model:
+    uv run scripts/benchmark_models.py --models {{model}}
+
+# Generate with Z-Image
+gen-zimage prompt="":
+    #!/usr/bin/env bash
+    if [ -z "{{prompt}}" ]; then
+        uv run dreamgen generate --model zimage
+    else
+        uv run dreamgen generate --model zimage -p "{{prompt}}"
+    fi
+
 # Run tests with coverage
 test-cov:
     uv run pytest tests/ --cov=src --cov-report=html --cov-report=term

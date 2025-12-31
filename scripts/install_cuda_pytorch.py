@@ -2,6 +2,7 @@
 """
 Script to install CUDA-enabled PyTorch for Windows with RTX 4090
 """
+
 import subprocess
 import sys
 
@@ -15,7 +16,7 @@ def check_cuda():
         if cuda_available:
             device_name = torch.cuda.get_device_name(0)
             torch_version = torch.__version__
-            print(f"✓ CUDA is available")
+            print("✓ CUDA is available")
             print(f"  Device: {device_name}")
             print(f"  PyTorch version: {torch_version}")
             return True
@@ -35,7 +36,16 @@ def install_cuda_pytorch():
     # Uninstall existing torch packages
     print("Uninstalling existing torch packages...")
     subprocess.run(
-        [sys.executable, "-m", "uv", "pip", "uninstall", "torch", "torchvision", "torchaudio"],
+        [
+            sys.executable,
+            "-m",
+            "uv",
+            "pip",
+            "uninstall",
+            "torch",
+            "torchvision",
+            "torchaudio",
+        ],
         check=False,
     )
 

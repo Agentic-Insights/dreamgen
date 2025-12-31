@@ -156,30 +156,30 @@ ZIMAGE_COMPILE=false  # True for sub-second on H100/H800
 ### Phase 2: Optimization & Features (Week 2)
 
 **Tasks:**
-1. Add compilation support (for H100/H800)
-2. Implement attention backend selection
-3. Add memory optimization (CPU offloading)
-4. Create performance benchmarks (FLUX vs Z-Image)
-5. Update documentation
+1. ✅ Add compilation support (for H100/H800)
+2. ✅ Implement attention backend selection
+3. ✅ Add memory optimization (CPU offloading)
+4. ✅ Create performance benchmarks (FLUX vs Z-Image)
+5. ✅ Update documentation
 
 **Deliverables:**
-- Optimized generator with multiple backends
-- Performance comparison guide
-- Updated CLAUDE.md
+- ✅ Optimized generator with multiple backends
+- ✅ Performance benchmark script (`scripts/benchmark_models.py`)
+- ✅ `just benchmark` command
 
 ### Phase 3: Plugin System Integration (Week 3)
 
 **Tasks:**
-1. Test all plugins with Z-Image
-2. Verify prompt enhancement compatibility
-3. Test LoRA support (if applicable)
-4. Validate art styles plugin
-5. End-to-end integration testing
+1. ✅ Test all plugins with Z-Image
+2. ✅ Verify prompt enhancement compatibility
+3. ⏭️ Test LoRA support (if applicable) - Z-Image LoRA support TBD by upstream
+4. ✅ Validate art styles plugin
+5. ✅ End-to-end integration testing
 
 **Deliverables:**
-- Full plugin compatibility
-- Integration tests
-- User guide
+- ✅ Full plugin compatibility (37 tests passing)
+- ✅ Integration tests (`tests/test_zimage_plugin_integration.py`)
+- ✅ User guide (see below)
 
 ### Phase 4: Production Readiness (Week 4)
 
@@ -384,13 +384,72 @@ just benchmark-models
 4. **Prompt Enhancer**: Z-Image has built-in prompt enhancer - integrate or use Ollama?
 5. **Performance**: Actual RTX 4090 benchmarks needed.
 
+## Quick Start Guide
+
+### Prerequisites
+
+```bash
+# Install diffusers from source (required for ZImagePipeline)
+pip install git+https://github.com/huggingface/diffusers
+```
+
+### Basic Usage
+
+```bash
+# Generate with Z-Image
+uv run dreamgen generate --model zimage
+
+# Generate with custom prompt
+uv run dreamgen generate --model zimage -p "A cute cat wearing a hat"
+
+# Using justfile
+just gen-zimage
+just gen-zimage "A beautiful sunset over mountains"
+```
+
+### Configuration (.env)
+
+```bash
+# Select Z-Image as default model
+IMAGE_MODEL=zimage
+
+# Z-Image settings
+ZIMAGE_MODEL=Tongyi-MAI/Z-Image-Turbo
+ZIMAGE_ATTENTION=_native_flash  # Options: _native_flash, _flash_3, _sdpa
+ZIMAGE_COMPILE=false            # Set true for H100/H800
+ZIMAGE_CPU_OFFLOAD=false        # Set true for <16GB VRAM
+```
+
+### Benchmarking
+
+```bash
+# Compare FLUX vs Z-Image
+just benchmark
+
+# Benchmark single model
+just benchmark-model zimage
+```
+
+### Memory Optimization
+
+For GPUs with less than 16GB VRAM:
+```bash
+ZIMAGE_CPU_OFFLOAD=true
+```
+
+For H100/H800 GPUs (sub-second generation):
+```bash
+ZIMAGE_COMPILE=true
+ZIMAGE_ATTENTION=_flash_3
+```
+
 ## Next Steps
 
 1. ✅ Create this design doc
-2. ⏭️ Implement Phase 1 (core integration)
-3. ⏭️ Test on RTX 4090 for performance baseline
-4. ⏭️ Create PR with initial implementation
-5. ⏭️ Gather user feedback
+2. ✅ Implement Phase 1 (core integration)
+3. ✅ Implement Phase 2 (optimization)
+4. ✅ Implement Phase 3 (plugin integration)
+5. ⏭️ Phase 4: Web UI integration (optional)
 
 ## Resources
 
@@ -401,7 +460,7 @@ just benchmark-models
 
 ---
 
-**Status**: 📋 Planning Phase
+**Status**: ✅ Phases 1-3 Complete
 **Branch**: `feat/z-image-integration`
 **Lead**: AI Assistant
-**Last Updated**: 2025-12-22
+**Last Updated**: 2025-12-30

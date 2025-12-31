@@ -42,7 +42,11 @@ class PluginManager:
     ):
         """Register a new plugin with the system."""
         self.plugins[name] = PluginInfo(
-            name=name, description=description, function=function, enabled=enabled, order=order
+            name=name,
+            description=description,
+            function=function,
+            enabled=enabled,
+            order=order,
         )
         self.logger.debug(
             "Registered plugin: %s (enabled=%s, order=%s)",

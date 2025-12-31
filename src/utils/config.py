@@ -28,7 +28,7 @@ class ModelConfig:
     ollama_model: str
     ollama_temperature: float
     flux_model: str
-    zimage_model: str
+    zimage_model_path: Path  # Local path to Z-Image model weights
     zimage_attention: str
     zimage_compile: bool
     max_sequence_length: int
@@ -130,9 +130,14 @@ class Config:
             raise ValueError("FLUX_MODEL environment variable is required")
 
         # Z-Image configuration (optional, only required if IMAGE_MODEL=zimage)
-        zimage_model = os.getenv("ZIMAGE_MODEL", "Tongyi-MAI/Z-Image-Turbo")
-        zimage_attention = os.getenv("ZIMAGE_ATTENTION", "_native_flash")
-        zimage_compile = os.getenv("ZIMAGE_COMPILE", "false").lower() in ("true", "1", "yes", "on")
+        zimage_model_path = Path(os.getenv("ZIMAGE_MODEL_PATH", "ckpts/Z-Image-Turbo"))
+        zimage_attention = os.getenv("ZIMAGE_ATTENTION", "_sdpa")
+        zimage_compile = os.getenv("ZIMAGE_COMPILE", "false").lower() in (
+            "true",
+            "1",
+            "yes",
+            "on",
+        )
 
         max_seq_len = os.getenv("MAX_SEQUENCE_LENGTH")
         if not max_seq_len:
@@ -143,7 +148,7 @@ class Config:
             ollama_model=ollama_model,
             ollama_temperature=float(ollama_temp),
             flux_model=flux_model,
-            zimage_model=zimage_model,
+            zimage_model_path=zimage_model_path,
             zimage_attention=zimage_attention,
             zimage_compile=zimage_compile,
             max_sequence_length=int(max_seq_len),

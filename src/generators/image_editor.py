@@ -44,7 +44,10 @@ class ImageEditor:
 
     @handle_errors(error_type=ModelError, retries=2)
     async def edit_image(
-        self, input_image: Union[str, Path, Image.Image, bytes], prompt: str, strength: float = 0.8
+        self,
+        input_image: Union[str, Path, Image.Image, bytes],
+        prompt: str,
+        strength: float = 0.8,
     ) -> Image.Image:
         """Edit an image using the specified prompt.
 

@@ -38,7 +38,10 @@ def register_base_plugins():
     )
 
     plugin_manager.register(
-        "holiday_fact", "Enriches holiday context with interesting facts", get_holiday_fact, order=3
+        "holiday_fact",
+        "Enriches holiday context with interesting facts",
+        get_holiday_fact,
+        order=3,
     )
 
     plugin_manager.register(
@@ -103,7 +106,10 @@ def get_context_with_descriptions() -> Dict[str, Any]:
     for result in results:
         logger.info(f"Plugin contribution - {result.name}: {result.value} ({result.description})")
 
-    return {"results": results, "descriptions": plugin_manager.get_plugin_descriptions()}
+    return {
+        "results": results,
+        "descriptions": plugin_manager.get_plugin_descriptions(),
+    }
 
 
 def get_temporal_descriptor() -> str:

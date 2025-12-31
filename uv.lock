@@ -479,10 +479,11 @@ wheels = [
 
 [[package]]
 name = "diffusers"
-version = "0.35.1"
-source = { registry = "https://pypi.org/simple" }
+version = "0.36.0.dev0"
+source = { git = "https://github.com/huggingface/diffusers#1cdb8723b85f1b427031e390e0bd0bebfe92454e" }
 dependencies = [
     { name = "filelock" },
+    { name = "httpx" },
     { name = "huggingface-hub" },
     { name = "importlib-metadata" },
     { name = "numpy" },
@@ -490,10 +491,6 @@ dependencies = [
     { name = "regex" },
     { name = "requests" },
     { name = "safetensors" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/49/05/c4c8736c14e0efe9a835fb91c6ff5e1abddf9894a2f2a28fffe6429378a6/diffusers-0.35.1.tar.gz", hash = "sha256:6f4dc0c9d309a4c4914a2179646f2bc801b5e395a43295fff3b5f9dbd3e28fd3", size = 3369127, upload-time = "2025-08-20T04:16:10.668Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/06/a7/c53f294f34d9e1584388721b3d7aa024ea1ac46e86d0c302fc3db40ed960/diffusers-0.35.1-py3-none-any.whl", hash = "sha256:fe29ff10200970c7c5934c6488c213e2a77a03dad5e6fa00bbd8e1d04234cb0e", size = 4121424, upload-time = "2025-08-20T04:16:08.359Z" },
 ]
 
 [[package]]
@@ -595,7 +592,7 @@ requires-dist = [
     { name = "aiofiles", specifier = ">=23.0.0" },
     { name = "black", marker = "extra == 'dev'", specifier = ">=23.0.0" },
     { name = "build", marker = "extra == 'dev'", specifier = ">=1.0.0" },
-    { name = "diffusers", specifier = ">=0.29.0" },
+    { name = "diffusers", git = "https://github.com/huggingface/diffusers" },
     { name = "fastapi", specifier = ">=0.100.0" },
     { name = "huggingface-hub", extras = ["inference"], specifier = ">=0.20.0" },
     { name = "isort", marker = "extra == 'dev'", specifier = ">=5.12.0" },

@@ -99,7 +99,7 @@ class PromptGenerator:
                 # Create user message with examples
                 user_message_parts = [
                     "Here are some example prompts:",
-                    *[f"Example {i+1}: {prompt}" for i, prompt in enumerate(example_prompts)],
+                    *[f"Example {i + 1}: {prompt}" for i, prompt in enumerate(example_prompts)],
                     "\nGenerate a new prompt that is different from these examples but equally creative.",
                 ]
 

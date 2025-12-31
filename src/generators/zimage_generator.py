@@ -1,8 +1,9 @@
-"""Z-Image generator implementation."""
+"""Z-Image generator implementation using native Z-Image API."""
 
 import asyncio
 import gc
 import hashlib
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -14,7 +15,7 @@ from .base_generator import GenerationResult, ImageGenerator
 
 
 class ZImageGenerator(ImageGenerator):
-    """Z-Image text-to-image generator.
+    """Z-Image text-to-image generator using native implementation.
 
     Uses Tongyi-MAI/Z-Image-Turbo for high-quality photorealistic generation
     with excellent bilingual text rendering capabilities.
@@ -33,57 +34,62 @@ class ZImageGenerator(ImageGenerator):
             config: Configuration object with Z-Image settings
         """
         super().__init__(config)
-        self.model_id = config.model.zimage_model
+        self.model_path = Path(config.model.zimage_model_path)
         self.attention_backend = config.model.zimage_attention
         self.compile_model = config.model.zimage_compile
+        self.components = None  # Will hold transformer, vae, text_encoder, tokenizer, scheduler
+
+    def _get_zimage_src_path(self) -> Path:
+        """Get the path to Z-Image source code."""
+        # Look for Z-Image in ref-repos relative to project root
+        project_root = Path(__file__).parent.parent.parent
+        zimage_src = project_root / "ref-repos" / "Z-Image" / "src"
+        if zimage_src.exists():
+            return zimage_src
+        raise ImportError(
+            f"Z-Image source not found at {zimage_src}. "
+            "Clone Z-Image repo: git clone https://github.com/Tongyi-MAI/Z-Image ref-repos/Z-Image"
+        )
 
     def load_model(self):
-        """Load Z-Image model into memory."""
+        """Load Z-Image model components into memory."""
+        # Add Z-Image source to path
+        zimage_src = self._get_zimage_src_path()
+        if str(zimage_src) not in sys.path:
+            sys.path.insert(0, str(zimage_src))
+
         try:
-            from diffusers import ZImagePipeline
-        except ImportError:
+            from utils import load_from_local_dir, set_attention_backend
+        except ImportError as e:
             logger.error(
-                "ZImagePipeline not found. Install diffusers from source:\n"
-                "  pip install git+https://github.com/huggingface/diffusers"
+                f"Failed to import Z-Image utilities: {e}\n"
+                "Make sure Z-Image repo is cloned to ref-repos/Z-Image"
             )
             raise
 
-        logger.info(f"Loading Z-Image model: {self.model_id}")
+        logger.info(f"Loading Z-Image model from: {self.model_path}")
         logger.info(f"Device: {self.device}")
         logger.info(f"Attention backend: {self.attention_backend}")
+        logger.info(f"Compile: {self.compile_model}")
 
-        self.pipe = ZImagePipeline.from_pretrained(
-            self.model_id,
-            torch_dtype=torch.bfloat16,  # Z-Image uses bfloat16
-            low_cpu_mem_usage=True,
-            use_safetensors=True,
+        if not self.model_path.exists():
+            raise FileNotFoundError(
+                f"Z-Image model not found at {self.model_path}. "
+                "Download from HuggingFace: huggingface-cli download Tongyi-MAI/Z-Image-Turbo --local-dir <path>"
+            )
+
+        # Load all components
+        self.components = load_from_local_dir(
+            model_dir=self.model_path,
+            device=self.device,
+            dtype=torch.bfloat16,
+            verbose=True,
+            compile=self.compile_model,
         )
 
-        # Move to device
-        if self.device == "cuda":
-            self.pipe = self.pipe.to("cuda")
-
-            # Enable memory optimizations
-            if hasattr(self.pipe, "enable_attention_slicing"):
-                self.pipe.enable_attention_slicing(1)
-                logger.info("Enabled attention slicing for memory efficiency")
-
-            if hasattr(self.pipe, "enable_vae_tiling"):
-                self.pipe.enable_vae_tiling()
-                logger.info("Enabled VAE tiling for memory efficiency")
-
-        elif self.device == "mps":
-            self.pipe = self.pipe.to("mps")
-            # MPS-specific optimizations if any
-        else:
-            # CPU mode
-            logger.warning("Running on CPU - generation will be slow")
-
-        # Model compilation (for H100/H800 optimal performance)
-        if self.compile_model and self.device == "cuda":
-            logger.info("Compiling model for optimal performance...")
-            self.pipe.unet = torch.compile(self.pipe.unet, mode="reduce-overhead", fullgraph=True)
-            logger.info("Model compilation complete")
+        # Set attention backend
+        set_attention_backend(self.attention_backend)
+        logger.info(f"Set attention backend to: {self.attention_backend}")
 
         logger.info("Z-Image model loaded successfully")
 
@@ -113,8 +119,14 @@ class ZImageGenerator(ImageGenerator):
         Returns:
             GenerationResult with generated image
         """
-        if self.pipe is None:
+        if self.components is None:
             self.load_model()
+
+        # Import generate function
+        zimage_src = self._get_zimage_src_path()
+        if str(zimage_src) not in sys.path:
+            sys.path.insert(0, str(zimage_src))
+        from zimage import generate as zimage_generate
 
         # Apply defaults from config
         height = height or self.config.image.height
@@ -139,17 +151,20 @@ class ZImageGenerator(ImageGenerator):
 
         # Generate in separate thread to avoid blocking
         loop = asyncio.get_event_loop()
-        image = await loop.run_in_executor(
+        images = await loop.run_in_executor(
             None,
-            lambda: self.pipe(
+            lambda: zimage_generate(
                 prompt=prompt,
+                **self.components,
                 height=height,
                 width=width,
                 num_inference_steps=num_inference_steps,
                 guidance_scale=guidance_scale,
                 generator=generator,
-            ).images[0],
+            ),
         )
+
+        image = images[0]
 
         # Save image
         output_path = self._save_image(image, prompt, seed)
@@ -157,7 +172,7 @@ class ZImageGenerator(ImageGenerator):
         # Create metadata
         metadata = {
             "model": "Z-Image-Turbo",
-            "model_id": self.model_id,
+            "model_path": str(self.model_path),
             "height": height,
             "width": width,
             "steps": num_inference_steps,
@@ -212,8 +227,47 @@ class ZImageGenerator(ImageGenerator):
 
         return output_path
 
+    async def generate_image(
+        self,
+        prompt: str,
+        output_path: Path,
+        force_reinit: bool = False,
+    ) -> tuple[Path, float, str]:
+        """Generate an image from the given prompt (CLI-compatible interface).
+
+        This method provides compatibility with the existing CLI which expects
+        the (Path, float, str) return signature.
+
+        Args:
+            prompt: Text description of the image
+            output_path: Ignored (Z-Image uses its own output path logic)
+            force_reinit: Whether to force model reinitialization
+
+        Returns:
+            Tuple of (output_path, generation_time, model_name)
+        """
+        import time
+
+        start_time = time.time()
+
+        if force_reinit and self.components is not None:
+            self.cleanup()
+            self.components = None
+
+        result = await self.generate(prompt=prompt)
+
+        generation_time = time.time() - start_time
+
+        return (result.image_path, generation_time, "Z-Image-Turbo")
+
     def cleanup(self):
         """Clean up GPU memory after generation."""
+        if self.components is not None:
+            # Delete component references
+            for key in list(self.components.keys()):
+                del self.components[key]
+            self.components = None
+
         super().cleanup()
 
         # Additional cleanup
@@ -233,7 +287,7 @@ class ZImageGenerator(ImageGenerator):
         info.update(
             {
                 "model_name": "Z-Image-Turbo",
-                "model_id": self.model_id,
+                "model_path": str(self.model_path),
                 "parameters": "6B",
                 "architecture": "Single-Stream DiT (S3-DiT)",
                 "inference_steps": 8,

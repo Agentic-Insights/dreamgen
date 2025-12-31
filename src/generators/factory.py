@@ -37,10 +37,12 @@ def get_image_generator(config: Config, mock: bool = False) -> ImageGenerator:
         except ImportError as e:
             logger.error(
                 "Failed to import ZImageGenerator. "
-                "Make sure diffusers is installed from source:\n"
-                "  pip install git+https://github.com/huggingface/diffusers"
+                "Make sure Z-Image repo is cloned:\n"
+                "  git clone https://github.com/Tongyi-MAI/Z-Image ref-repos/Z-Image"
             )
-            raise ImportError("ZImagePipeline not available. Install diffusers from source.") from e
+            raise ImportError(
+                "Z-Image not available. Clone Z-Image repo to ref-repos/Z-Image"
+            ) from e
 
     elif model_type == "flux":
         logger.info("Creating FluxImageGenerator")
@@ -65,17 +67,15 @@ def get_available_models() -> list[str]:
     """
     models = ["flux"]  # FLUX is always available
 
-    # Check if Z-Image is available
-    try:
-        import importlib.util
+    # Check if Z-Image is available (look for ref-repos/Z-Image/src)
+    from pathlib import Path
 
-        if importlib.util.find_spec("diffusers") is not None:
-            # Try to access ZImagePipeline
-            from diffusers import ZImagePipeline  # noqa: F401
-
-            models.append("zimage")
-            logger.debug("Z-Image available")
-    except (ImportError, AttributeError):
-        logger.debug("Z-Image not available (diffusers from source required)")
+    project_root = Path(__file__).parent.parent.parent
+    zimage_src = project_root / "ref-repos" / "Z-Image" / "src"
+    if zimage_src.exists() and (zimage_src / "zimage").exists():
+        models.append("zimage")
+        logger.debug("Z-Image available")
+    else:
+        logger.debug("Z-Image not available (clone repo to ref-repos/Z-Image)")
 
     return models
