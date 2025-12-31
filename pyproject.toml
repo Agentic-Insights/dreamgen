@@ -61,10 +61,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/killerapp/dreamgen"
-Documentation = "https://github.com/killerapp/dreamgen#readme"
-Repository = "https://github.com/killerapp/dreamgen"
-Issues = "https://github.com/killerapp/dreamgen/issues"
+Homepage = "https://github.com/Agentic-Insights/dreamgen"
+Documentation = "https://github.com/Agentic-Insights/dreamgen#readme"
+Repository = "https://github.com/Agentic-Insights/dreamgen"
+Issues = "https://github.com/Agentic-Insights/dreamgen/issues"
 
 [project.scripts]
 dreamgen = "src.main:main"

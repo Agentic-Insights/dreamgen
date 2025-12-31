@@ -1,4 +1,19 @@
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:22022';
+// API_BASE: Use env var if set, otherwise detect from window.location
+// In production Docker, set NEXT_PUBLIC_API_URL at build time
+function getApiBase(): string {
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL;
+  }
+  // In browser, use same hostname as frontend but port 8000
+  if (typeof window !== 'undefined') {
+    const hostname = window.location.hostname;
+    return `http://${hostname}:8000`;
+  }
+  // Server-side fallback
+  return 'http://localhost:8000';
+}
+
+export const API_BASE = getApiBase();
 
 export function getImageUrl(path: string): string {
   return `${API_BASE}${path}`;

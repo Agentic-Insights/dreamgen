@@ -16,7 +16,7 @@ Thank you for your interest in contributing to DreamGen! This guide will help yo
 
 ```bash
 # Clone the repository
-git clone https://github.com/killerapp/dreamgen
+git clone https://github.com/Agentic-Insights/dreamgen
 cd dreamgen
 
 # Run sanity checks to verify your environment
@@ -275,8 +275,8 @@ We use [Conventional Commits](https://www.conventionalcommits.org/):
 
 ## Getting Help
 
-- **Issues**: https://github.com/killerapp/dreamgen/issues
-- **Discussions**: https://github.com/killerapp/dreamgen/discussions
+- **Issues**: https://github.com/Agentic-Insights/dreamgen/issues
+- **Discussions**: https://github.com/Agentic-Insights/dreamgen/discussions
 - **Documentation**: See README.md and CLAUDE.md
 
 ## License

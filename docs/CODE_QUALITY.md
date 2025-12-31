@@ -297,7 +297,7 @@ GitHub Actions runs on every push and PR:
 Add to README.md:
 
 ```markdown
-![CI](https://github.com/killerapp/dreamgen/workflows/CI/badge.svg)
+![CI](https://github.com/Agentic-Insights/dreamgen/workflows/CI/badge.svg)
 ```
 
 ## Common Issues
