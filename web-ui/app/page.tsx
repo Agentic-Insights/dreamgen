@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Image from "next/image";
 import { Terminal, Image as ImageIcon, Settings as SettingsIcon, Sparkles, Loader2, Menu, X, Upload, Edit3 } from "lucide-react";
-import { api, GenerateResponse, PluginInfo, SystemStatus, EditResponse } from "@/lib/api";
+import { api, GenerateResponse, PluginInfo, SystemStatus, EditResponse, API_BASE } from "@/lib/api";
 import Gallery from "@/components/Gallery";
 import Settings from "@/components/Settings";
 import { cn } from "@/lib/utils";
@@ -11,7 +11,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import galleryCache from "@/lib/cache";
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState("generate");
+  const [activeTab, setActiveTab] = useState("playground");
   const [prompt, setPrompt] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [currentImage, setCurrentImage] = useState<GenerateResponse | null>(null);
@@ -54,7 +54,6 @@ export default function Home() {
         } else if (msg.type === 'generation_error') {
           addLog(`Error: ${msg.error}`, 'error');
           setGenerationStatus("");
-          setIsGenerating(false);
         } else if (msg.type === 'model_download_started') {
           addLog(`Model download started: ${msg.model_id}`);
         } else if (msg.type === 'model_download_completed') {
@@ -116,7 +115,7 @@ export default function Home() {
   };
 
   const tabs = [
-    { id: "generate", label: "Generate", icon: Sparkles },
+    { id: "playground", label: "Playground", icon: Sparkles },
     { id: "gallery", label: "Gallery", icon: ImageIcon },
     { id: "settings", label: "Settings", icon: SettingsIcon },
   ];
@@ -194,6 +193,18 @@ export default function Home() {
       {/* Main Content Area - Responsive */}
       <main className="flex-1 overflow-hidden relative">
         <AnimatePresence mode="wait">
+          {activeTab === "playground" && (
+            <motion.div
+              key="playground"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="h-full"
+            >
+              <iframe src="/playground" className="w-full h-full border-0" />
+            </motion.div>
+          )}
+
           {activeTab === "generate" && (
             <motion.div
               key="generate"
@@ -368,7 +379,7 @@ export default function Home() {
                       className="max-w-full max-h-full"
                     >
                       <img
-                        src={`http://localhost:8000${currentImage.image_path}`}
+                        src={`${API_BASE}${currentImage.image_path}`}
                         alt="Generated image"
                         className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
                       />

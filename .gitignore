@@ -11,6 +11,9 @@ thoughts/
 
 # Virtual environments
 .venv
+.claude/
+.pytest_cache/
+.cache/
 
 # Environment variables
 .env
@@ -58,6 +61,7 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.bak
+*.log
 
 # Large image files
 *.png

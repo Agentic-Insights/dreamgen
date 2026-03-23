@@ -1,52 +1,57 @@
-version: '3.8'
+# Simple Docker Compose configuration
+# Usage:
+#   docker compose --env-file .env.docker up --build
 
 services:
   backend:
     build:
       context: .
       dockerfile: Dockerfile.backend
+      target: production
     container_name: imagegen-backend
+    gpus: all
     ports:
       - "${BACKEND_PORT:-25800}:8000"
     volumes:
-      # Mount models from host to avoid re-downloading
-      # Windows path for Hugging Face cache
-      - ${USERPROFILE}/.cache/huggingface:/app/models:ro
-
-      # Mount output directory for generated images
+      - ${AI_CACHE_DIR:-./.cache}/huggingface:/app/models
+      - ${AI_CACHE_DIR:-./.cache}/torch:/app/.cache/torch
       - ./output:/app/output
-
-      # Mount source code for development (hot reload)
-      - ./src:/app/src:ro
-      - ./data:/app/data:ro
-
-      # Mount logs
       - ./logs:/app/logs
+      - ./loras:/app/loras
     environment:
-      # API Configuration
       - HOST=0.0.0.0
       - PORT=8000
-
-      # Model Configuration
       - USE_MOCK_GENERATOR=${USE_MOCK_GENERATOR:-true}
       - MOCK_MODE=${MOCK_MODE:-true}
+      - IMAGE_BACKEND=${IMAGE_BACKEND:-auto}
       - HF_TOKEN=${HF_TOKEN:-}
       - HF_HOME=/app/models
       - TRANSFORMERS_CACHE=/app/models
-
-      # Flux Model Configuration
+      - TINY_SD_MODEL=${TINY_SD_MODEL:-hf-internal-testing/tiny-stable-diffusion-torch}
       - FLUX_MODEL=${FLUX_MODEL:-black-forest-labs/FLUX.1-schnell}
-
-      # Ollama Configuration (if available)
       - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
-
-      # Output Configuration
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2:3b}
+      - OLLAMA_TEMPERATURE=${OLLAMA_TEMPERATURE:-0.7}
+      - ENABLED_PLUGINS=${ENABLED_PLUGINS:-time_of_day,art_style}
+      - PLUGIN_ORDER=${PLUGIN_ORDER:-time_of_day:1,art_style:2}
+      - LORA_DIR=${LORA_DIR:-/app/loras}
+      - ENABLED_LORAS=${ENABLED_LORAS:-}
+      - LORA_APPLICATION_PROBABILITY=${LORA_APPLICATION_PROBABILITY:-0.7}
       - OUTPUT_DIR=/app/output
-
-      # Logging
+      - LOG_DIR=/app/logs
+      - CACHE_DIR=/app/.cache
+      - CPU_ONLY=${CPU_ONLY:-false}
+      - MPS_USE_FP16=${MPS_USE_FP16:-false}
+      - IMAGE_WIDTH=${IMAGE_WIDTH:-1024}
+      - IMAGE_HEIGHT=${IMAGE_HEIGHT:-1024}
+      - GUIDANCE_SCALE=${GUIDANCE_SCALE:-0.0}
+      - NUM_INFERENCE_STEPS=${NUM_INFERENCE_STEPS:-4}
+      - TRUE_CFG_SCALE=${TRUE_CFG_SCALE:-1.0}
+      - MAX_SEQUENCE_LENGTH=${MAX_SEQUENCE_LENGTH:-512}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-    networks:
-      - imagegen-network
+      - CORS_ORIGINS=http://localhost:${FRONTEND_PORT:-7860},http://127.0.0.1:${FRONTEND_PORT:-7860},http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/status"]
@@ -60,16 +65,14 @@ services:
       context: .
       dockerfile: Dockerfile.frontend
       args:
-        - NEXT_PUBLIC_API_URL=http://localhost:8000
+        - NEXT_PUBLIC_API_URL=http://localhost:${BACKEND_PORT:-25800}
     container_name: imagegen-frontend
     ports:
-      - "7860:7860"
+      - "${FRONTEND_PORT:-7860}:7860"
     environment:
-      - NODE_ENV=${NODE_ENV:-production}
-      - NEXT_PUBLIC_API_URL=http://backend:8000
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=http://localhost:${BACKEND_PORT:-25800}
       - PORT=7860
-    networks:
-      - imagegen-network
     depends_on:
       - backend
     restart: unless-stopped
@@ -79,24 +82,3 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-
-  # Optional: Ollama service for local LLM
-  # Uncomment if you want to run Ollama in Docker
-  # ollama:
-  #   image: ollama/ollama:latest
-  #   container_name: imagegen-ollama
-  #   ports:
-  #     - "11434:11434"
-  #   volumes:
-  #     - ollama-data:/root/.ollama
-  #   networks:
-  #     - imagegen-network
-  #   restart: unless-stopped
-
-networks:
-  imagegen-network:
-    driver: bridge
-
-volumes:
-  ollama-data:
-    driver: local

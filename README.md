@@ -40,6 +40,7 @@ npm run dev
 - **🌐 Modern UI**: Professional web interface with galleries and real-time updates
 - **💰 Zero Cost**: Generate unlimited images after initial setup
 - **🔌 Extensible**: Plugin system for custom prompt enhancements
+- **🧪 First-run fallback**: Tiny public image model for smoke tests before FLUX is installed
 
 ## 🎮 Quick Commands
 

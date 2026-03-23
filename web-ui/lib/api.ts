@@ -1,4 +1,15 @@
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:25800';
+const normalizeBase = (value: string | undefined, fallback: string) =>
+  (value || fallback).replace(/\/$/, '');
+
+export const API_BASE = normalizeBase(
+  process.env.NEXT_PUBLIC_API_URL,
+  'http://localhost:25800'
+);
+
+const WS_BASE = normalizeBase(
+  process.env.NEXT_PUBLIC_WS_URL,
+  API_BASE.replace(/^http/, 'ws')
+);
 
 export interface GenerateRequest {
   prompt?: string;
@@ -23,6 +34,7 @@ export interface PluginInfo {
   name: string;
   enabled: boolean;
   description: string;
+  order: number;
 }
 
 export interface SystemStatus {
@@ -71,6 +83,32 @@ export interface EditResponse {
   created_at: string;
 }
 
+export interface PromptResponse {
+  prompt: string;
+}
+
+export interface OllamaModel {
+  name: string;
+  size: number;
+  modified: string;
+  digest: string;
+}
+
+export interface OllamaModelsResponse {
+  models: OllamaModel[];
+  current: string;
+  host: string;
+}
+
+export interface GenerationConfig {
+  width: number;
+  height: number;
+  num_inference_steps: number;
+  guidance_scale: number;
+  true_cfg_scale: number;
+  ollama_temperature: number;
+}
+
 export class ImageGenAPI {
   private baseUrl: string;
   private ws: WebSocket | null = null;
@@ -97,6 +135,18 @@ export class ImageGenAPI {
       method: 'POST',
     });
     if (!response.ok) throw new Error('Failed to toggle plugin');
+    return response.json();
+  }
+
+  async setPluginOrder(orderedNames: string[]): Promise<{ ordered_names: string[] }> {
+    const response = await fetch(`${this.baseUrl}/api/plugins/order`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ ordered_names: orderedNames }),
+    });
+    if (!response.ok) throw new Error('Failed to update plugin order');
     return response.json();
   }
 
@@ -142,11 +192,25 @@ export class ImageGenAPI {
     return response.json();
   }
 
+  async generatePrompt(metaPrompt?: string): Promise<PromptResponse> {
+    const response = await fetch(`${this.baseUrl}/api/prompt`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ meta_prompt: metaPrompt }),
+    });
+    if (!response.ok) throw new Error('Failed to generate prompt');
+    return response.json();
+  }
+
   connectWebSocket(onMessage: (data: unknown) => void): void {
-    const wsUrl = this.baseUrl.replace('http://', 'ws://').replace('https://', 'wss://');
+    const wsBase = process.env.NEXT_PUBLIC_WS_URL
+      ? normalizeBase(process.env.NEXT_PUBLIC_WS_URL, WS_BASE)
+      : this.baseUrl.replace(/^http/, 'ws');
 
     try {
-      this.ws = new WebSocket(`${wsUrl}/ws`);
+      this.ws = new WebSocket(`${wsBase}/ws`);
 
       this.ws.onopen = () => {
         console.log('WebSocket connected');
@@ -242,6 +306,42 @@ export class ImageGenAPI {
       body: formData,
     });
     if (!response.ok) throw new Error('Failed to edit image');
+    return response.json();
+  }
+
+  async getOllamaModels(): Promise<OllamaModelsResponse> {
+    const response = await fetch(`${this.baseUrl}/api/ollama/models`);
+    if (!response.ok) throw new Error('Failed to get Ollama models');
+    return response.json();
+  }
+
+  async setOllamaModel(model: string): Promise<{ message: string; model: string }> {
+    const response = await fetch(`${this.baseUrl}/api/ollama/model`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ model }),
+    });
+    if (!response.ok) throw new Error('Failed to set Ollama model');
+    return response.json();
+  }
+
+  async getGenerationConfig(): Promise<GenerationConfig> {
+    const response = await fetch(`${this.baseUrl}/api/config/generation`);
+    if (!response.ok) throw new Error('Failed to get generation config');
+    return response.json();
+  }
+
+  async setGenerationConfig(config: Partial<GenerationConfig>): Promise<{ message: string; config: Partial<GenerationConfig> }> {
+    const response = await fetch(`${this.baseUrl}/api/config/generation`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(config),
+    });
+    if (!response.ok) throw new Error('Failed to set generation config');
     return response.json();
   }
 }

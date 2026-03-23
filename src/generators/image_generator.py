@@ -147,10 +147,23 @@ class ImageGenerator:
             try:
                 # Load model with memory optimizations
                 logger.info(f"Loading model from {self.model_name}")
+
+                # Determine cache directory from environment
+                cache_dir = None
+                if os.getenv("HF_HOME"):
+                    cache_dir = os.path.join(os.getenv("HF_HOME"), "hub")
+                    logger.info(f"Using HF_HOME cache directory: {cache_dir}")
+                elif os.getenv("TRANSFORMERS_CACHE"):
+                    cache_dir = os.path.join(os.getenv("TRANSFORMERS_CACHE"), "hub")
+                    logger.info(f"Using TRANSFORMERS_CACHE directory: {cache_dir}")
+                else:
+                    logger.info("Using default HuggingFace cache directory")
+
                 try:
                     self.pipe = DiffusionPipeline.from_pretrained(
                         self.model_name,
                         torch_dtype=torch_dtype,
+                        cache_dir=cache_dir,
                         use_auth_token=(
                             hf_token
                             if hf_token and hf_token != "your_hugging_face_token_here"

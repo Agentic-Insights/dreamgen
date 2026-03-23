@@ -18,11 +18,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from src.generators.image_generator import ImageGenerator
-from src.generators.mock_image_generator import MockImageGenerator
+from src.generators.factory import (
+    backend_label,
+    create_image_generator,
+    is_model_cached,
+    resolve_image_backend,
+)
 from src.generators.prompt_generator import PromptGenerator
+from src.plugins import plugin_manager, register_lora_plugin
 from src.utils.config import Config
-from src.utils.plugin_manager import PluginManager
 from src.utils.storage import save_image_and_prompt
 
 # Configure logging
@@ -39,15 +43,26 @@ app = FastAPI(
 )
 
 # Configure CORS for Next.js frontend
+# Get CORS origins from environment variable or use defaults
+cors_origins_env = os.getenv("CORS_ORIGINS", "")
+if cors_origins_env:
+    # Split by comma and strip whitespace
+    cors_origins = [origin.strip() for origin in cors_origins_env.split(",")]
+else:
+    # Default origins for development
+    cors_origins = [
+        "http://localhost:7860",  # Next.js on custom port
+        "http://127.0.0.1:7860",  # Frontend on loopback
+        "http://localhost:3000",  # Next.js default dev server
+        "http://127.0.0.1:3000",  # Next.js default dev server on loopback
+        "http://localhost:3001",  # Alternative port
+        "http://127.0.0.1:3001",  # Alternative port on loopback
+        "https://imagegen.agenticinsights.com",  # Production
+    ]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:7860",  # Next.js on custom port
-        "http://localhost:25801",  # Next.js on Docker dev port
-        "http://localhost:3000",  # Next.js default dev server
-        "http://localhost:3001",  # Alternative port
-        "https://imagegen.agenticinsights.com",  # Production
-    ],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -55,17 +70,31 @@ app.add_middleware(
 
 # Global state
 config = Config()
-plugin_manager = PluginManager()
 state = {
-    "use_mock": os.getenv("USE_MOCK_GENERATOR", "true").lower() == "true"
-}  # Use mock or real generation
+    "configured_backend": config.model.image_backend,
+    "use_mock": config.model.image_backend == "mock",
+}
 
-# Register plugins - simplified for now
-# TODO: Properly integrate plugins once their interfaces are standardized
+
+def configure_plugins() -> None:
+    """Apply config-driven enabled state and ordering to the shared plugin registry."""
+    register_lora_plugin(config)
+
+    enabled_plugins = set(config.plugins.enabled_plugins)
+    plugin_order = config.plugins.plugin_order
+
+    for name, info in plugin_manager.plugins.items():
+        if enabled_plugins:
+            info.enabled = name in enabled_plugins
+        if name in plugin_order:
+            info.order = plugin_order[name]
+
+
+configure_plugins()
 
 # Output directory setup
-OUTPUT_DIR = Path("output")
-OUTPUT_DIR.mkdir(exist_ok=True)
+OUTPUT_DIR = config.system.output_dir
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # Mount static files for serving generated images
 app.mount("/images", StaticFiles(directory=str(OUTPUT_DIR)), name="images")
@@ -97,6 +126,14 @@ class EditRequest(BaseModel):
     strength: float = Field(0.8, ge=0.0, le=1.0, description="Edit strength (0.0 to 1.0)")
 
 
+class PromptRequest(BaseModel):
+    """Request model for prompt generation."""
+
+    meta_prompt: Optional[str] = Field(
+        None, description="Optional system prompt used to steer prompt generation"
+    )
+
+
 class EditResponse(BaseModel):
     """Response model for image editing"""
 
@@ -114,6 +151,19 @@ class PluginInfo(BaseModel):
     name: str
     enabled: bool
     description: str
+    order: int
+
+
+class PluginOrderRequest(BaseModel):
+    """Request model for plugin ordering."""
+
+    ordered_names: List[str] = Field(..., description="Plugin names in desired execution order")
+
+
+class PromptResponse(BaseModel):
+    """Response model for prompt generation."""
+
+    prompt: str = Field(..., description="Generated prompt text")
 
 
 class SystemStatus(BaseModel):
@@ -155,6 +205,29 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
+async def prefetch_tiny_model() -> None:
+    """Fetch the tiny public fallback model in the background when needed."""
+    if resolve_image_backend(config) != "tiny":
+        return
+
+    if is_model_cached(config.model.tiny_sd_model):
+        return
+
+    try:
+        from huggingface_hub import snapshot_download
+
+        logger.info("Prefetching tiny fallback model: %s", config.model.tiny_sd_model)
+        await asyncio.to_thread(snapshot_download, repo_id=config.model.tiny_sd_model)
+        logger.info("Tiny fallback model is ready")
+    except Exception as e:
+        logger.warning("Tiny fallback prefetch failed: %s", e)
+
+
+@app.on_event("startup")
+async def startup_event() -> None:
+    asyncio.create_task(prefetch_tiny_model())
+
+
 # API Endpoints
 @app.get("/")
 async def root():
@@ -182,21 +255,12 @@ async def get_status():
     try:
         import ollama
 
+        ollama.Client(host=os.getenv("OLLAMA_HOST", "http://localhost:11434")).list()
         ollama_available = True
     except:
         ollama_available = False
 
-    # Determine which Flux model is being used
-    if state["use_mock"]:
-        backend_name = "mock"
-    else:
-        flux_model = config.model.flux_model
-        if "schnell" in flux_model.lower():
-            backend_name = "flux-schnell"
-        elif "dev" in flux_model.lower():
-            backend_name = "flux-dev"
-        else:
-            backend_name = "flux"
+    backend_name = backend_label(config, resolve_image_backend(config))
 
     return SystemStatus(
         status="ready",
@@ -212,8 +276,18 @@ async def get_status():
 async def get_plugins():
     """Get list of available plugins and their states"""
     plugins = []
-    for name, info in plugin_manager.plugins.items():
-        plugins.append(PluginInfo(name=name, enabled=info.enabled, description=info.description))
+    sorted_plugins = sorted(
+        plugin_manager.plugins.values(), key=lambda info: (info.order, info.name)
+    )
+    for info in sorted_plugins:
+        plugins.append(
+            PluginInfo(
+                name=info.name,
+                enabled=info.enabled,
+                description=info.description,
+                order=info.order,
+            )
+        )
     return plugins
 
 
@@ -223,10 +297,26 @@ async def get_model_status():
     import os
     from pathlib import Path
 
-    hf_cache_dir = Path(os.getenv("HF_HUB_CACHE", os.path.expanduser("~/.cache/huggingface/hub")))
+    # Use HF_HOME if set, otherwise use TRANSFORMERS_CACHE, fallback to default
+    hf_home = os.getenv("HF_HOME")
+    if hf_home:
+        hf_cache_dir = Path(hf_home) / "hub"
+    else:
+        transformers_cache = os.getenv("TRANSFORMERS_CACHE")
+        if transformers_cache:
+            hf_cache_dir = Path(transformers_cache) / "hub"
+        else:
+            hf_cache_dir = Path(
+                os.getenv("HF_HUB_CACHE", os.path.expanduser("~/.cache/huggingface/hub"))
+            )
 
     models = []
     model_configs = [
+        {
+            "id": config.model.tiny_sd_model,
+            "name": "Tiny Stable Diffusion",
+            "type": "text-to-image",
+        },
         {"id": "Qwen/Qwen-Image", "name": "Qwen-Image", "type": "text-to-image"},
         {"id": "Qwen/Qwen-Image-Edit", "name": "Qwen-Image-Edit", "type": "image-to-image"},
         {
@@ -363,6 +453,7 @@ async def set_hf_token(token_data: dict):
         import os
         from pathlib import Path
 
+        # Use configured HF_HOME or fallback
         hf_cache_dir = Path(os.getenv("HF_HOME", os.path.expanduser("~/.cache/huggingface")))
         hf_cache_dir.mkdir(parents=True, exist_ok=True)
         token_file = hf_cache_dir / "token"
@@ -391,7 +482,7 @@ async def get_hf_token_status():
     if os.getenv("HF_TOKEN"):
         return {"configured": True, "source": "environment"}
 
-    # Check token file
+    # Check token file using configured HF_HOME
     hf_cache_dir = Path(os.getenv("HF_HOME", os.path.expanduser("~/.cache/huggingface")))
     token_file = hf_cache_dir / "token"
 
@@ -414,6 +505,135 @@ async def toggle_plugin(plugin_name: str):
         plugin_manager.enable_plugin(plugin_name)
 
     return {"plugin": plugin_name, "enabled": not current_state}
+
+
+@app.post("/api/plugins/order")
+async def set_plugin_order(request: PluginOrderRequest):
+    """Update plugin execution order."""
+    existing_names = set(plugin_manager.plugins.keys())
+    requested_names = set(request.ordered_names)
+
+    if existing_names != requested_names:
+        missing = sorted(existing_names - requested_names)
+        extra = sorted(requested_names - existing_names)
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Ordered plugin list must contain every registered plugin exactly once",
+                "missing": missing,
+                "extra": extra,
+            },
+        )
+
+    for index, name in enumerate(request.ordered_names, start=1):
+        plugin_manager.set_plugin_order(name, index)
+
+    return {"ordered_names": request.ordered_names}
+
+
+@app.get("/api/ollama/models")
+async def get_ollama_models():
+    """Get list of available Ollama models"""
+    try:
+        import ollama
+
+        # Get list of models from Ollama
+        models_response = ollama.list()
+
+        # Extract model information
+        models = []
+        for model in models_response.get("models", []):
+            models.append(
+                {
+                    "name": model.get("name") or model.get("model", ""),
+                    "size": model.get("size", 0),
+                    "modified": model.get("modified_at", ""),
+                    "digest": model.get("digest", ""),
+                }
+            )
+
+        # Get current model from config
+        current_model = config.model.ollama_model
+
+        return {
+            "models": models,
+            "current": current_model,
+            "host": os.getenv("OLLAMA_HOST", "http://localhost:11434"),
+        }
+    except Exception as e:
+        logger.error(f"Failed to get Ollama models: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get Ollama models: {str(e)}")
+
+
+@app.post("/api/ollama/model")
+async def set_ollama_model(data: dict):
+    """Set the active Ollama model"""
+    model_name = data.get("model")
+
+    if not model_name:
+        raise HTTPException(status_code=400, detail="Model name is required")
+
+    try:
+        # Update config
+        config.model.ollama_model = model_name
+
+        # Also update environment variable for persistence
+        os.environ["OLLAMA_MODEL"] = model_name
+
+        logger.info(f"Ollama model set to: {model_name}")
+        return {"message": f"Ollama model set to {model_name}", "model": model_name}
+    except Exception as e:
+        logger.error(f"Failed to set Ollama model: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to set Ollama model: {str(e)}")
+
+
+@app.get("/api/config/generation")
+async def get_generation_config():
+    """Get current generation configuration parameters"""
+    return {
+        "width": config.image.width,
+        "height": config.image.height,
+        "num_inference_steps": config.image.num_inference_steps,
+        "guidance_scale": config.image.guidance_scale,
+        "true_cfg_scale": config.image.true_cfg_scale,
+        "ollama_temperature": config.model.ollama_temperature,
+    }
+
+
+@app.post("/api/config/generation")
+async def set_generation_config(data: dict):
+    """Update generation configuration parameters"""
+    try:
+        if "width" in data:
+            config.image.width = int(data["width"])
+        if "height" in data:
+            config.image.height = int(data["height"])
+        if "num_inference_steps" in data:
+            config.image.num_inference_steps = int(data["num_inference_steps"])
+        if "guidance_scale" in data:
+            config.image.guidance_scale = float(data["guidance_scale"])
+        if "true_cfg_scale" in data:
+            config.image.true_cfg_scale = float(data["true_cfg_scale"])
+        if "ollama_temperature" in data:
+            config.model.ollama_temperature = float(data["ollama_temperature"])
+
+        logger.info(f"Generation config updated: {data}")
+        return {"message": "Configuration updated successfully", "config": data}
+    except Exception as e:
+        logger.error(f"Failed to update generation config: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to update configuration: {str(e)}")
+
+
+@app.post("/api/prompt", response_model=PromptResponse)
+async def generate_prompt(request: PromptRequest):
+    """Generate a prompt without creating an image."""
+    try:
+        prompt_gen = PromptGenerator(config)
+        prompt = await prompt_gen.generate_prompt(meta_prompt=request.meta_prompt)
+        return PromptResponse(prompt=prompt)
+    except Exception as e:
+        logger.error(f"Prompt generation failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/generate", response_model=GenerateResponse)
@@ -447,50 +667,45 @@ async def generate_image(request: GenerateRequest):
                 )
             )
 
-        # Generate image
-        logger.info("Using REAL Flux image generator")
-
-        # Broadcast model loading event
-        await manager.broadcast(
-            json.dumps(
-                {
-                    "type": "model_loading",
-                    "id": generation_id,
-                    "message": "Loading Flux model (this may take several minutes on first run)...",
-                }
-            )
-        )
-
         try:
-            # Use MockImageGenerator if USE_MOCK_GENERATOR is enabled
-            if state["use_mock"]:
-                logger.info("Using MockImageGenerator")
-                image_gen = MockImageGenerator(config)
-            else:
-                logger.info("Using real Flux ImageGenerator")
-                image_gen = ImageGenerator(config)
+            image_gen, backend_name = create_image_generator(config)
+            logger.info("Using image backend: %s", backend_name)
         except MemoryError as e:
-            error_msg = (
-                "Insufficient memory to load Flux model. This model requires significant RAM/VRAM."
-            )
+            error_msg = "Insufficient memory to load the configured image backend."
             logger.error(f"Memory error loading Flux model: {str(e)}")
             await manager.broadcast(
                 json.dumps({"type": "generation_error", "id": generation_id, "error": error_msg})
             )
             raise HTTPException(status_code=507, detail=error_msg)
         except Exception as e:
-            error_msg = f"Failed to load Flux model: {str(e)}"
+            error_msg = f"Failed to load image backend: {str(e)}"
             logger.error(error_msg)
             await manager.broadcast(
                 json.dumps({"type": "generation_error", "id": generation_id, "error": error_msg})
             )
             raise HTTPException(status_code=500, detail=error_msg)
 
+        backend_name = backend_label(config, resolve_image_backend(config))
+        loading_message = {
+            "mock": "Using mock image generator.",
+            "tiny-sd": "Loading tiny Stable Diffusion smoke-test model.",
+        }.get(backend_name, "Loading Flux model (this may take several minutes on first run)...")
+
+        await manager.broadcast(
+            json.dumps(
+                {
+                    "type": "model_loading",
+                    "id": generation_id,
+                    "message": loading_message,
+                }
+            )
+        )
+
         # Generate the image
         image = await image_gen.generate(final_prompt, seed=request.seed)
 
         # Save image and prompt
-        image_path = save_image_and_prompt(image, final_prompt)
+        image_path = save_image_and_prompt(image, final_prompt, str(OUTPUT_DIR))
 
         # Create relative path for API response
         relative_path = f"/images/{image_path.relative_to(OUTPUT_DIR).as_posix()}"
@@ -506,15 +721,6 @@ async def generate_image(request: GenerateRequest):
                 }
             )
         )
-
-        # Determine backend name
-        flux_model = config.model.flux_model
-        if "schnell" in flux_model.lower():
-            backend_name = "flux-schnell"
-        elif "dev" in flux_model.lower():
-            backend_name = "flux-dev"
-        else:
-            backend_name = "flux"
 
         return GenerateResponse(
             id=generation_id,
@@ -627,7 +833,7 @@ async def batch_generate(count: int = 5, delay: int = 0):
 
         try:
             # Generate each image
-            request = GenerateRequest(use_mock=state["use_mock"])
+            request = GenerateRequest()
             result = await generate_image(request)
             results.append(result.dict())
         except Exception as e:
@@ -675,10 +881,14 @@ async def edit_image(request: EditRequest, file: UploadFile = File(...)):
         from src.utils.storage import save_image_and_prompt
 
         original_img = Image.open(io.BytesIO(image_bytes))
-        original_path = save_image_and_prompt(original_img, f"ORIGINAL: {request.prompt}")
+        original_path = save_image_and_prompt(
+            original_img, f"ORIGINAL: {request.prompt}", str(OUTPUT_DIR)
+        )
 
         # Save edited
-        edited_path = save_image_and_prompt(edited_image, f"EDITED: {request.prompt}")
+        edited_path = save_image_and_prompt(
+            edited_image, f"EDITED: {request.prompt}", str(OUTPUT_DIR)
+        )
 
         # Create relative paths for API response
         original_relative = f"/images/{original_path.relative_to(OUTPUT_DIR).as_posix()}"

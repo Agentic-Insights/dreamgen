@@ -24,6 +24,8 @@ class LoraConfig:
 class ModelConfig:
     """Model-specific configuration."""
 
+    image_backend: str
+    tiny_sd_model: str
     ollama_model: str
     ollama_temperature: float
     flux_model: str
@@ -68,7 +70,7 @@ class Config:
             load_dotenv(env_file, override=True)
         elif env_file is None:
             load_dotenv(
-                override=True
+                override=False
             )  # Load from default .env in current directory only if not explicitly overridden
 
         # Plugin configuration
@@ -115,6 +117,16 @@ class Config:
         )
 
         # Model configuration
+        use_mock_generator = os.getenv("USE_MOCK_GENERATOR", "false").lower()
+        if use_mock_generator in ("true", "1", "yes", "on"):
+            image_backend = "mock"
+        else:
+            image_backend = os.getenv("IMAGE_BACKEND", "auto")
+
+        tiny_sd_model = os.getenv(
+            "TINY_SD_MODEL", "hf-internal-testing/tiny-stable-diffusion-torch"
+        )
+
         ollama_model = os.getenv("OLLAMA_MODEL")
         if not ollama_model:
             raise ValueError("OLLAMA_MODEL environment variable is required")
@@ -132,6 +144,8 @@ class Config:
             raise ValueError("MAX_SEQUENCE_LENGTH environment variable is required")
 
         self.model = ModelConfig(
+            image_backend=image_backend.lower(),
+            tiny_sd_model=tiny_sd_model,
             ollama_model=ollama_model,
             ollama_temperature=float(ollama_temp),
             flux_model=flux_model,
@@ -251,6 +265,11 @@ class Config:
             errors.append(f"Invalid width: {self.image.width} (must be between 128 and 2048)")
 
         # Validate model parameters
+        if self.model.image_backend not in {"auto", "flux", "tiny", "mock"}:
+            errors.append(
+                f"Invalid image backend: {self.model.image_backend} "
+                "(must be one of auto, flux, tiny, mock)"
+            )
         if not (1 <= self.image.num_inference_steps <= 150):
             errors.append(
                 f"Invalid inference steps: {self.image.num_inference_steps} (must be between 1 and 150)"

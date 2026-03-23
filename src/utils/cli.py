@@ -31,8 +31,7 @@ from rich.progress import (
 )
 from rich.table import Table
 
-from ..generators.image_generator import ImageGenerator
-from ..generators.mock_image_generator import MockImageGenerator
+from ..generators.factory import create_image_generator
 from ..generators.prompt_generator import PromptGenerator
 from .config import Config
 from .logging_config import setup_logging
@@ -151,12 +150,20 @@ def generate(
                         console.print(
                             "[yellow]Using mock image generator (no GPU required)[/yellow]"
                         )
-                        image_gen = MockImageGenerator(app.state.config)
+                        original_backend = app.state.config.model.image_backend
+                        try:
+                            app.state.config.model.image_backend = "mock"
+                            image_gen, backend_name = create_image_generator(app.state.config)
+                        finally:
+                            app.state.config.model.image_backend = original_backend
                     else:
-                        image_gen = ImageGenerator(app.state.config)
+                        image_gen, backend_name = create_image_generator(app.state.config)
                     storage = StorageManager()
                     metrics = MetricsCollector(app.state.config.system.log_dir / "metrics")
                     progress.remove_task(init_task)
+
+                    if not mock:
+                        console.print(f"[cyan]Using image backend:[/cyan] {backend_name}")
 
                     # Start metrics collection
                     metrics.start_batch()
@@ -321,12 +328,20 @@ def loop(
                         console.print(
                             "[yellow]Using mock image generator (no GPU required)[/yellow]"
                         )
-                        image_gen = MockImageGenerator(app.state.config)
+                        original_backend = app.state.config.model.image_backend
+                        try:
+                            app.state.config.model.image_backend = "mock"
+                            image_gen, backend_name = create_image_generator(app.state.config)
+                        finally:
+                            app.state.config.model.image_backend = original_backend
                     else:
-                        image_gen = ImageGenerator(app.state.config)
+                        image_gen, backend_name = create_image_generator(app.state.config)
                     storage = StorageManager()
                     metrics = MetricsCollector(app.state.config.system.log_dir / "metrics")
                     progress.remove_task(init_task)
+
+                    if not mock:
+                        console.print(f"[cyan]Using image backend:[/cyan] {backend_name}")
 
                     # Start metrics collection
                     metrics.start_batch()

@@ -1,233 +1,59 @@
-# Docker Setup for Continuous Image Generator
+# Docker Setup
 
-This guide explains how to run the Continuous Image Generator using Docker.
+This repo now uses a single simple Docker flow aimed at end users: start the stack, open the UI, generate prompts, generate images.
 
 ## Quick Start
 
-1. **Copy environment configuration:**
+1. Copy the example env file:
    ```bash
-   cp .env.docker .env
+   cp .env.docker.example .env.docker
    ```
 
-2. **Edit `.env` file** and set your configuration:
-   - Set `HF_TOKEN` if using real Flux models
-   - Adjust `USE_MOCK_GENERATOR` based on GPU availability
-   - Configure Ollama endpoint if available
+2. Set the values you care about in `.env.docker`:
+   - `HF_TOKEN` for real model downloads
+   - `IMAGE_BACKEND=auto` for the default behavior: use FLUX when cached, otherwise fall back to the tiny public smoke-test model
+   - `IMAGE_BACKEND=mock` if you want placeholder images instead of real generation
+   - `OLLAMA_HOST` if Ollama is not running on the same machine
 
-3. **Build and run with Docker Compose:**
+3. Start the app:
    ```bash
-   # Production mode
-   docker-compose up --build
-
-   # Development mode with hot-reload
-   docker-compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+   docker compose --env-file .env.docker up --build
    ```
 
-4. **Access the application:**
-   - Frontend: http://localhost:7860
-   - Backend API: http://localhost:8000
-   - API Docs: http://localhost:8000/docs
+4. Open the UI:
+   - Frontend: `http://localhost:7860`
+   - Backend API: `http://localhost:25800`
+   - API docs: `http://localhost:25800/api/docs`
 
-## Configuration
+## Defaults
 
-### Mock Mode vs Production Mode
+- Backend listens on `25800`
+- Frontend listens on `7860`
+- Model/cache files are stored under `./.cache`
+- Generated images are stored under `./output`
+- Logs are stored under `./logs`
 
-**Mock Mode (Default):**
-- No GPU required
-- No model downloads needed
-- Generates placeholder images
-- Fast startup
-- Ideal for development and testing
-
-**Production Mode:**
-- Requires GPU (NVIDIA CUDA or Apple MPS)
-- Downloads Flux models (~15GB on first run)
-- Generates real AI images
-- Set `USE_MOCK_GENERATOR=false` in `.env`
-
-### Volume Mounts
-
-The Docker setup uses several volume mounts:
-
-1. **Model Cache** (Read-only):
-   - Mounts `~/.cache/huggingface` from host
-   - Avoids re-downloading models
-   - Saves ~15GB bandwidth
-
-2. **Output Directory**:
-   - Mounts `./output` for generated images
-   - Persists across container restarts
-
-3. **Development Mounts** (dev mode only):
-   - Source code for hot-reload
-   - Logs directory
-
-### Using Existing Flux Models
-
-If you've already downloaded Flux models locally:
-
-1. Models are typically stored in:
-   - Windows: `%USERPROFILE%\.cache\huggingface`
-   - Linux/Mac: `~/.cache/huggingface`
-
-2. The Docker setup automatically mounts this directory
-3. No re-download needed!
-
-## Docker Commands
-
-### Build Images
+## Useful Commands
 
 ```bash
-# Build both services
-docker-compose build
+# Start in the background
+docker compose --env-file .env.docker up -d --build
 
-# Build specific service
-docker-compose build backend
-docker-compose build frontend
+# Follow logs
+docker compose --env-file .env.docker logs -f
+
+# Stop the stack
+docker compose --env-file .env.docker down
+
+# Rebuild from scratch
+docker compose --env-file .env.docker build --no-cache
+docker compose --env-file .env.docker up -d
 ```
 
-### Run Services
+## Notes
 
-```bash
-# Start all services
-docker-compose up
-
-# Start in background
-docker-compose up -d
-
-# Start specific service
-docker-compose up backend
-
-# View logs
-docker-compose logs -f
-docker-compose logs -f backend
-```
-
-### Stop Services
-
-```bash
-# Stop all services
-docker-compose down
-
-# Stop and remove volumes
-docker-compose down -v
-```
-
-### Development Mode
-
-```bash
-# Run with hot-reload
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
-
-# Rebuild after dependency changes
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml up --build
-```
-
-## GPU Support
-
-### NVIDIA GPUs (Linux/Windows WSL2)
-
-1. Install NVIDIA Container Toolkit
-2. Add to docker-compose.yml:
-   ```yaml
-   backend:
-     deploy:
-       resources:
-         reservations:
-           devices:
-             - driver: nvidia
-               count: 1
-               capabilities: [gpu]
-   ```
-
-### Apple Silicon (MPS)
-
-MPS support works automatically when running on macOS with Apple Silicon.
-
-## Troubleshooting
-
-### Backend won't start
-
-Check logs:
-```bash
-docker-compose logs backend
-```
-
-Common issues:
-- Missing HF_TOKEN for model downloads
-- Insufficient disk space for models
-- Port 8000 already in use
-
-### Frontend can't connect to backend
-
-- Ensure both services are running
-- Check network connectivity:
-  ```bash
-  docker-compose exec frontend ping backend
-  ```
-- Verify API endpoint in browser: http://localhost:8000/api/status
-
-### Out of memory errors
-
-- Use mock mode: `USE_MOCK_GENERATOR=true`
-- Reduce batch size in configuration
-- Allocate more memory to Docker
-
-### Models downloading every time
-
-Ensure volume mount is correct:
-- Windows: Check `%USERPROFILE%\.cache\huggingface` exists
-- Linux/Mac: Check `~/.cache/huggingface` exists
-- Verify mount in container:
-  ```bash
-  docker-compose exec backend ls -la /app/models
-  ```
-
-## CSO Module Deployment
-
-This Docker setup is designed to be compatible with CloudStack Orchestrator deployment:
-
-1. Production images are optimized for Kubernetes
-2. Configuration follows CSO module patterns
-3. Resource limits match CSO specifications
-4. Security best practices implemented
-
-For CSO deployment, see `cso-deployment/README.md`.
-
-## Security Notes
-
-- Containers run as non-root user (UID 1000/1001)
-- Read-only root filesystem where possible
-- Secrets should be provided via environment variables
-- Never commit `.env` file with real tokens
-
-## Performance Optimization
-
-- Multi-stage builds reduce image size
-- Model cache prevents redundant downloads
-- Standalone Next.js build for production
-- Health checks ensure service availability
-
-## Additional Services
-
-### Ollama (Optional)
-
-To run Ollama in Docker:
-```bash
-# Uncomment ollama service in docker-compose.yml
-docker-compose up ollama
-```
-
-### Database (Future)
-
-PostgreSQL support is prepared for future features:
-- Generation history
-- User management
-- Analytics
-
-## Links
-
-- [Backend API Docs](http://localhost:8000/docs)
-- [Frontend](http://localhost:7860)
-- [Health Check](http://localhost:8000/api/status)
-- [Metrics](http://localhost:8000/metrics) (when enabled)
+- The frontend talks directly to the published backend port, which keeps browser routing, image URLs, and WebSocket updates simple.
+- `AI_CACHE_DIR` defaults to `./.cache`, so users do not need to create a machine-specific cache folder first.
+- Ollama is expected to run outside Docker by default. `host.docker.internal` is mapped for Docker Desktop and Linux host-gateway setups.
+- The tiny fallback model is public and does not require a Hugging Face token.
+- If you do not have a compatible GPU and only want placeholder images, set `IMAGE_BACKEND=mock`.
