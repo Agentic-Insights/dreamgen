@@ -10,11 +10,11 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Continuous Image Generator — Agentic Insights",
-  description: "AI-powered continuous image generation system with dynamic prompt enhancement",
+  title: "DreamGen — Recurring Local Image Generator",
+  description: "Generate images locally on a recurring rhythm with simple prompts, entropy plugins, and a lightweight fallback model.",
   openGraph: {
-    title: "Continuous Image Generator — Agentic Insights",
-    description: "AI-powered continuous image generation system",
+    title: "DreamGen — Recurring Local Image Generator",
+    description: "Generate images locally on a recurring rhythm.",
     images: ["/logo_mark.png"],
     siteName: "Agentic Insights",
     type: "website",

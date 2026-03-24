@@ -15,7 +15,6 @@ import {
   Key,
   Cpu,
   HardDrive,
-  Clock,
   RefreshCw,
   ArrowUp,
   ArrowDown
@@ -51,8 +50,6 @@ export default function Settings({ systemStatus }: SettingsProps) {
   useEffect(() => {
     // Handle WebSocket messages for model download progress
     if (api) {
-      const originalConnectWebSocket = api.connectWebSocket.bind(api);
-      // Store the original onMessage handler to avoid breaking existing functionality
       const handleWebSocketMessage = (data: unknown) => {
         if (typeof data === 'object' && data !== null && 'type' in data) {
           const msg = data as Record<string, unknown>;
