@@ -4,7 +4,7 @@ Configuration management for the image generation system.
 
 import json
 import os
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -25,7 +25,9 @@ class ModelConfig:
     """Model-specific configuration."""
 
     image_backend: str
-    tiny_sd_model: str
+    smoke_test_model: str
+    small_sd_model: str
+    turbo_model: str
     ollama_model: str
     ollama_temperature: float
     flux_model: str
@@ -123,9 +125,18 @@ class Config:
         else:
             image_backend = os.getenv("IMAGE_BACKEND", "auto")
 
-        tiny_sd_model = os.getenv(
-            "TINY_SD_MODEL", "hf-internal-testing/tiny-stable-diffusion-torch"
+        if image_backend == "tiny":
+            image_backend = "smoke"
+
+        smoke_test_model = os.getenv(
+            "SMOKE_TEST_MODEL", "hf-internal-testing/tiny-stable-diffusion-torch"
         )
+        small_sd_model = os.getenv("SMALL_SD_MODEL", "segmind/tiny-sd")
+        turbo_model = os.getenv("TURBO_MODEL", "stabilityai/sd-turbo")
+
+        legacy_tiny_model = os.getenv("TINY_SD_MODEL")
+        if legacy_tiny_model and not os.getenv("SMOKE_TEST_MODEL"):
+            smoke_test_model = legacy_tiny_model
 
         ollama_model = os.getenv("OLLAMA_MODEL")
         if not ollama_model:
@@ -145,7 +156,9 @@ class Config:
 
         self.model = ModelConfig(
             image_backend=image_backend.lower(),
-            tiny_sd_model=tiny_sd_model,
+            smoke_test_model=smoke_test_model,
+            small_sd_model=small_sd_model,
+            turbo_model=turbo_model,
             ollama_model=ollama_model,
             ollama_temperature=float(ollama_temp),
             flux_model=flux_model,
@@ -265,10 +278,10 @@ class Config:
             errors.append(f"Invalid width: {self.image.width} (must be between 128 and 2048)")
 
         # Validate model parameters
-        if self.model.image_backend not in {"auto", "flux", "tiny", "mock"}:
+        if self.model.image_backend not in {"auto", "flux", "small", "turbo", "smoke", "mock"}:
             errors.append(
                 f"Invalid image backend: {self.model.image_backend} "
-                "(must be one of auto, flux, tiny, mock)"
+                "(must be one of auto, flux, small, turbo, smoke, mock)"
             )
         if not (1 <= self.image.num_inference_steps <= 150):
             errors.append(

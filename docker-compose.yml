@@ -27,7 +27,9 @@ services:
       - HF_TOKEN=${HF_TOKEN:-}
       - HF_HOME=/app/models
       - TRANSFORMERS_CACHE=/app/models
-      - TINY_SD_MODEL=${TINY_SD_MODEL:-hf-internal-testing/tiny-stable-diffusion-torch}
+      - SMOKE_TEST_MODEL=${SMOKE_TEST_MODEL:-hf-internal-testing/tiny-stable-diffusion-torch}
+      - SMALL_SD_MODEL=${SMALL_SD_MODEL:-segmind/tiny-sd}
+      - TURBO_MODEL=${TURBO_MODEL:-stabilityai/sd-turbo}
       - FLUX_MODEL=${FLUX_MODEL:-black-forest-labs/FLUX.1-schnell}
       - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2:3b}

@@ -11,7 +11,10 @@ This repo now uses a single simple Docker flow aimed at end users: start the sta
 
 2. Set the values you care about in `.env.docker`:
    - `HF_TOKEN` for real model downloads
-   - `IMAGE_BACKEND=auto` for the default behavior: use FLUX when cached, otherwise fall back to the tiny public smoke-test model
+   - `IMAGE_BACKEND=auto` for the default behavior: use FLUX when cached, otherwise fall back to the small public model
+   - `IMAGE_BACKEND=small` for the usable first-run fallback
+   - `IMAGE_BACKEND=turbo` for the fast few-step turbo backend
+   - `IMAGE_BACKEND=smoke` only for diagnostics and smoke tests
    - `IMAGE_BACKEND=mock` if you want placeholder images instead of real generation
    - `OLLAMA_HOST` if Ollama is not running on the same machine
 
@@ -55,5 +58,6 @@ docker compose --env-file .env.docker up -d
 - The frontend talks directly to the published backend port, which keeps browser routing, image URLs, and WebSocket updates simple.
 - `AI_CACHE_DIR` defaults to `./.cache`, so users do not need to create a machine-specific cache folder first.
 - Ollama is expected to run outside Docker by default. `host.docker.internal` is mapped for Docker Desktop and Linux host-gateway setups.
-- The tiny fallback model is public and does not require a Hugging Face token.
+- The small and turbo fallback models are public and do not normally require a Hugging Face token.
+- The smoke backend is only for diagnostics; it is not expected to produce good-looking images.
 - If you do not have a compatible GPU and only want placeholder images, set `IMAGE_BACKEND=mock`.

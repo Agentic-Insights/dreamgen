@@ -41,6 +41,30 @@ uv run pylint src/
 uv sync
 ```
 
+### Docker review quickstart
+```bash
+# 1. Create local Docker env
+cp .env.docker.example .env.docker
+
+# 2. Start the full stack
+docker compose --env-file .env.docker up --build
+
+# 3. Verify the running app
+# UI:    http://localhost:7860
+# API:   http://localhost:25800/api/status
+# Model: http://localhost:25800/api/models/status
+
+# 4. Stop the stack
+docker compose --env-file .env.docker down
+```
+
+Docker notes for reviewers:
+- Default path is `IMAGE_BACKEND=auto`: use FLUX if already cached, otherwise fall back to the smaller public model.
+- `HF_TOKEN` is optional for `auto`, `small`, `turbo`, and `smoke`; it is required if Docker needs to download gated Hugging Face models such as some FLUX variants.
+- Backend runs on `25800`, frontend runs on `7860`.
+- Ollama is expected on `http://host.docker.internal:11434` from inside Docker on this machine.
+- If generated images look like diagnostic noise, the stack is likely on `smoke`; use `auto` or `small` for a real visual check.
+
 ## Architecture Overview
 
 This is a Python-based AI image generation system with the following architecture:
@@ -50,7 +74,8 @@ This is a Python-based AI image generation system with the following architectur
 1. **Generator System** (`src/generators/`)
    - `prompt_generator.py`: Uses Ollama to generate creative prompts with plugin context
    - `image_generator.py`: Uses Flux transformers for image generation with CUDA/MPS support
-   - `tiny_image_generator.py`: Uses a tiny Stable Diffusion checkpoint as a smoke-test fallback
+   - `stable_diffusion_image_generator.py`: Uses the small public Stable Diffusion fallback model
+   - `turbo_image_generator.py`: Uses the fast turbo backend for low-step generation
    - `mock_image_generator.py`: Placeholder generator for testing without GPU
 
 2. **Plugin System** (`src/plugins/`)

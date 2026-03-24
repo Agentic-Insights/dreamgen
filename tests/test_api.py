@@ -55,7 +55,14 @@ def test_status_endpoint(client):
     assert "status" in data
     assert "backend" in data
     assert data["status"] == "ready"
-    assert data["backend"] in ["mock", "flux-schnell", "flux-dev"]
+    assert data["backend"] in [
+        "mock",
+        "smoke-test",
+        "small-sd",
+        "sd-turbo",
+        "flux-schnell",
+        "flux-dev",
+    ]
 
 
 def test_plugins_endpoint(client):

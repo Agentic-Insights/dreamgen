@@ -205,27 +205,27 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
-async def prefetch_tiny_model() -> None:
-    """Fetch the tiny public fallback model in the background when needed."""
-    if resolve_image_backend(config) != "tiny":
+async def prefetch_default_fallback_model() -> None:
+    """Fetch the default public fallback model in the background when needed."""
+    if resolve_image_backend(config) != "small":
         return
 
-    if is_model_cached(config.model.tiny_sd_model):
+    if is_model_cached(config.model.small_sd_model):
         return
 
     try:
         from huggingface_hub import snapshot_download
 
-        logger.info("Prefetching tiny fallback model: %s", config.model.tiny_sd_model)
-        await asyncio.to_thread(snapshot_download, repo_id=config.model.tiny_sd_model)
-        logger.info("Tiny fallback model is ready")
+        logger.info("Prefetching small fallback model: %s", config.model.small_sd_model)
+        await asyncio.to_thread(snapshot_download, repo_id=config.model.small_sd_model)
+        logger.info("Small fallback model is ready")
     except Exception as e:
-        logger.warning("Tiny fallback prefetch failed: %s", e)
+        logger.warning("Small fallback prefetch failed: %s", e)
 
 
 @app.on_event("startup")
 async def startup_event() -> None:
-    asyncio.create_task(prefetch_tiny_model())
+    asyncio.create_task(prefetch_default_fallback_model())
 
 
 # API Endpoints
@@ -313,8 +313,18 @@ async def get_model_status():
     models = []
     model_configs = [
         {
-            "id": config.model.tiny_sd_model,
-            "name": "Tiny Stable Diffusion",
+            "id": config.model.smoke_test_model,
+            "name": "Smoke Test SD",
+            "type": "text-to-image",
+        },
+        {
+            "id": config.model.small_sd_model,
+            "name": "Small Stable Diffusion",
+            "type": "text-to-image",
+        },
+        {
+            "id": config.model.turbo_model,
+            "name": "Turbo Stable Diffusion",
             "type": "text-to-image",
         },
         {"id": "Qwen/Qwen-Image", "name": "Qwen-Image", "type": "text-to-image"},
@@ -688,7 +698,9 @@ async def generate_image(request: GenerateRequest):
         backend_name = backend_label(config, resolve_image_backend(config))
         loading_message = {
             "mock": "Using mock image generator.",
-            "tiny-sd": "Loading tiny Stable Diffusion smoke-test model.",
+            "smoke-test": "Loading smoke-test image model.",
+            "small-sd": "Loading small Stable Diffusion fallback model.",
+            "sd-turbo": "Loading turbo image model.",
         }.get(backend_name, "Loading Flux model (this may take several minutes on first run)...")
 
         await manager.broadcast(

@@ -9,7 +9,8 @@ from typing import Tuple
 from ..utils.config import Config
 from .image_generator import ImageGenerator
 from .mock_image_generator import MockImageGenerator
-from .tiny_image_generator import TinyImageGenerator
+from .stable_diffusion_image_generator import StableDiffusionImageGenerator
+from .turbo_image_generator import TurboImageGenerator
 
 
 def _hf_cache_root() -> Path:
@@ -32,23 +33,29 @@ def is_model_cached(model_id: str) -> bool:
 
 def resolve_image_backend(config: Config) -> str:
     backend = config.model.image_backend
+    if backend == "tiny":
+        backend = "smoke"
     if backend != "auto":
         return backend
 
     if is_model_cached(config.model.flux_model):
         return "flux"
 
-    if is_model_cached(config.model.tiny_sd_model):
-        return "tiny"
+    if is_model_cached(config.model.small_sd_model):
+        return "small"
 
-    return "tiny"
+    return "small"
 
 
 def backend_label(config: Config, backend: str) -> str:
     if backend == "mock":
         return "mock"
-    if backend == "tiny":
-        return "tiny-sd"
+    if backend == "smoke":
+        return "smoke-test"
+    if backend == "small":
+        return "small-sd"
+    if backend == "turbo":
+        return "sd-turbo"
 
     flux_model = config.model.flux_model.lower()
     if "schnell" in flux_model:
@@ -62,6 +69,30 @@ def create_image_generator(config: Config) -> Tuple[object, str]:
     backend = resolve_image_backend(config)
     if backend == "mock":
         return MockImageGenerator(config), backend_label(config, backend)
-    if backend == "tiny":
-        return TinyImageGenerator(config), backend_label(config, backend)
+    if backend == "smoke":
+        return (
+            StableDiffusionImageGenerator(
+                config,
+                model_name=config.model.smoke_test_model,
+                backend_name="smoke",
+                max_size=512,
+                min_steps=10,
+                default_guidance_scale=7.5,
+            ),
+            backend_label(config, backend),
+        )
+    if backend == "small":
+        return (
+            StableDiffusionImageGenerator(
+                config,
+                model_name=config.model.small_sd_model,
+                backend_name="small",
+                max_size=512,
+                min_steps=25,
+                default_guidance_scale=7.5,
+            ),
+            backend_label(config, backend),
+        )
+    if backend == "turbo":
+        return TurboImageGenerator(config), backend_label(config, backend)
     return ImageGenerator(config), backend_label(config, backend)

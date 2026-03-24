@@ -1,4 +1,4 @@
-"""Tiny Stable Diffusion generator for smoke tests and first-run installs."""
+"""Turbo text-to-image backend for fast real image generation."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Literal, Optional, Tuple
 
 import torch
-from diffusers import StableDiffusionPipeline
+from diffusers import AutoPipelineForText2Image
 from PIL import Image
 
 from ..utils.config import Config
@@ -19,30 +19,27 @@ from ..utils.config import Config
 logger = logging.getLogger(__name__)
 
 
-class TinyImageGenerator:
-    """Lightweight Stable Diffusion backend for validation and simple demos."""
+class TurboImageGenerator:
+    """Fast few-step text-to-image backend for sd-turbo / sdxl-turbo style models."""
 
     def __init__(self, config: Config):
         self.config = config
-        self.model_name = config.model.tiny_sd_model
-        self.pipe: Optional[StableDiffusionPipeline] = None
+        self.model_name = config.model.turbo_model
+        self.pipe = None
         self.device = self._determine_device(config.system.cpu_only)
 
-        # Keep dimensions and defaults conservative for the tiny smoke-test model.
         self.height = min(config.image.height, 512)
         self.width = min(config.image.width, 512)
-        self.num_inference_steps = max(config.image.num_inference_steps, 10)
-        self.guidance_scale = (
-            config.image.guidance_scale if config.image.guidance_scale > 0 else 7.5
-        )
+        self.num_inference_steps = min(max(config.image.num_inference_steps, 1), 4)
+        self.guidance_scale = 0.0
 
         if self.device == "cuda":
-            logger.info("Using NVIDIA GPU for tiny backend: %s", torch.cuda.get_device_name())
+            logger.info("Using NVIDIA GPU for turbo backend: %s", torch.cuda.get_device_name())
             torch.cuda.set_device(0)
         elif self.device == "mps":
-            logger.info("Using Apple Silicon GPU for tiny backend: %s", platform.processor())
+            logger.info("Using Apple Silicon GPU for turbo backend: %s", platform.processor())
         else:
-            logger.info("Using CPU for tiny backend")
+            logger.info("Using CPU for turbo backend")
 
     def _determine_device(self, cpu_only: bool) -> Literal["cpu", "cuda", "mps"]:
         if cpu_only:
@@ -69,7 +66,7 @@ class TinyImageGenerator:
 
         torch_dtype = torch.float16 if self.device == "cuda" else torch.float32
 
-        self.pipe = StableDiffusionPipeline.from_pretrained(
+        self.pipe = AutoPipelineForText2Image.from_pretrained(
             self.model_name,
             torch_dtype=torch_dtype,
             cache_dir=cache_dir,
