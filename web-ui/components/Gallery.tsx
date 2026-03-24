@@ -6,7 +6,7 @@ import {
   Trash2, Download, X, Loader2, Clock, FileText, ZoomIn,
   Calendar, Grid, ChevronDown, ChevronRight, Folder
 } from "lucide-react";
-import { api, getImageUrl } from "@/lib/api";
+import { api, API_BASE } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import galleryCache from "@/lib/cache";
@@ -220,7 +220,7 @@ export default function Gallery() {
   const handleDownload = (imagePath: string, prompt: string, event: React.MouseEvent) => {
     event.stopPropagation();
     const link = document.createElement("a");
-    link.href = getImageUrl(imagePath);
+    link.href = `${API_BASE}${imagePath}`;
     const filename = imagePath.split("/").pop() || "image.png";
     link.download = filename;
     document.body.appendChild(link);
@@ -261,7 +261,7 @@ export default function Gallery() {
           onClick={() => setSelectedImage(image)}
         >
           <img
-            src={getImageUrl(image.path)}
+            src={`${API_BASE}${image.path}`}
             alt={image.prompt}
             className="w-full h-full object-cover"
             loading="lazy"
@@ -447,7 +447,7 @@ export default function Gallery() {
                             onClick={(e) => e.stopPropagation()}
                           >
                             <img
-                              src={getImageUrl(img.path)}
+                              src={`${API_BASE}${img.path}`}
                               alt=""
                               className="w-full h-full object-cover"
                             />
@@ -546,7 +546,7 @@ export default function Gallery() {
             {/* Modal Body - Image */}
             <div className="flex items-center justify-center">
               <img
-                src={getImageUrl(selectedImage.path)}
+                src={`${API_BASE}${selectedImage.path}`}
                 alt={selectedImage.prompt}
                 className="max-w-full max-h-[80vh] object-contain"
               />

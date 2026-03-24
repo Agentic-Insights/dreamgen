@@ -614,7 +614,7 @@ requires-dist = [
     { name = "torch", specifier = "==2.6.0+cu124", index = "https://download.pytorch.org/whl/cu124" },
     { name = "torchaudio", specifier = "==2.6.0+cu124", index = "https://download.pytorch.org/whl/cu124" },
     { name = "torchvision", specifier = "==0.21.0+cu124", index = "https://download.pytorch.org/whl/cu124" },
-    { name = "transformers", specifier = ">=4.30.0" },
+    { name = "transformers", specifier = ">=4.30.0,<4.55.0" },
     { name = "typer", specifier = ">=0.9.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.23.0" },
     { name = "websockets", specifier = ">=12.0" },
@@ -2467,12 +2467,12 @@ dependencies = [
     { name = "torch" },
 ]
 wheels = [
-    { url = "https://download.pytorch.org/whl/cu124/torchaudio-2.6.0%2Bcu124-cp311-cp311-linux_x86_64.whl", hash = "sha256:b8c15d7e0e81a23630a2de552ebacfe6643990dc890f83f426e43ff62efe8651" },
-    { url = "https://download.pytorch.org/whl/cu124/torchaudio-2.6.0%2Bcu124-cp311-cp311-win_amd64.whl", hash = "sha256:a25e146ce66ea9a6aed39008cc2001891bdf75253af479a4c32096678b2073b3" },
-    { url = "https://download.pytorch.org/whl/cu124/torchaudio-2.6.0%2Bcu124-cp312-cp312-linux_x86_64.whl", hash = "sha256:3e5ffa69606171c74f3e2b969785ead50b782ca657e746aaee1ee7cc88dcfc08" },
-    { url = "https://download.pytorch.org/whl/cu124/torchaudio-2.6.0%2Bcu124-cp312-cp312-win_amd64.whl", hash = "sha256:004ff6bcee0ac78747253c09db67d281add4308a9b87a7bf1769da5914998639" },
-    { url = "https://download.pytorch.org/whl/cu124/torchaudio-2.6.0%2Bcu124-cp313-cp313-linux_x86_64.whl", hash = "sha256:1bc23963f447c910a0060b130b04b407d2ea218b2a553e674c829d5f17eb8c8e" },
-    { url = "https://download.pytorch.org/whl/cu124/torchaudio-2.6.0%2Bcu124-cp313-cp313-win_amd64.whl", hash = "sha256:231eddbfd8bafd06b2c9f55cd6f33e61f58b25b19f2d51382a95e8f12887689f" },
+    { url = "https://download-r2.pytorch.org/whl/cu124/torchaudio-2.6.0%2Bcu124-cp311-cp311-linux_x86_64.whl", hash = "sha256:b8c15d7e0e81a23630a2de552ebacfe6643990dc890f83f426e43ff62efe8651" },
+    { url = "https://download-r2.pytorch.org/whl/cu124/torchaudio-2.6.0%2Bcu124-cp311-cp311-win_amd64.whl", hash = "sha256:a25e146ce66ea9a6aed39008cc2001891bdf75253af479a4c32096678b2073b3" },
+    { url = "https://download-r2.pytorch.org/whl/cu124/torchaudio-2.6.0%2Bcu124-cp312-cp312-linux_x86_64.whl", hash = "sha256:3e5ffa69606171c74f3e2b969785ead50b782ca657e746aaee1ee7cc88dcfc08" },
+    { url = "https://download-r2.pytorch.org/whl/cu124/torchaudio-2.6.0%2Bcu124-cp312-cp312-win_amd64.whl", hash = "sha256:004ff6bcee0ac78747253c09db67d281add4308a9b87a7bf1769da5914998639" },
+    { url = "https://download-r2.pytorch.org/whl/cu124/torchaudio-2.6.0%2Bcu124-cp313-cp313-linux_x86_64.whl", hash = "sha256:1bc23963f447c910a0060b130b04b407d2ea218b2a553e674c829d5f17eb8c8e" },
+    { url = "https://download-r2.pytorch.org/whl/cu124/torchaudio-2.6.0%2Bcu124-cp313-cp313-win_amd64.whl", hash = "sha256:231eddbfd8bafd06b2c9f55cd6f33e61f58b25b19f2d51382a95e8f12887689f" },
 ]
 
 [[package]]
@@ -2485,12 +2485,12 @@ dependencies = [
     { name = "torch" },
 ]
 wheels = [
-    { url = "https://download.pytorch.org/whl/cu124/torchvision-0.21.0%2Bcu124-cp311-cp311-linux_x86_64.whl", hash = "sha256:137376805aca5ba57bd2c7a3ecb8569df961dbe82b128aac9b3b0a7125ef9385" },
-    { url = "https://download.pytorch.org/whl/cu124/torchvision-0.21.0%2Bcu124-cp311-cp311-win_amd64.whl", hash = "sha256:000a013584ad2304ab30496318145f284ac364622addb5ee3a5abd2769ba146f" },
-    { url = "https://download.pytorch.org/whl/cu124/torchvision-0.21.0%2Bcu124-cp312-cp312-linux_x86_64.whl", hash = "sha256:efb53ea0af7bf09b7b53e2a18b9be6d245f7d46a90b51d5cf97f37e9b929a991" },
-    { url = "https://download.pytorch.org/whl/cu124/torchvision-0.21.0%2Bcu124-cp312-cp312-win_amd64.whl", hash = "sha256:ec63c2ee792757492da40590e34b14f2fceda29050558c215f0c1f3b08149c0f" },
-    { url = "https://download.pytorch.org/whl/cu124/torchvision-0.21.0%2Bcu124-cp313-cp313-linux_x86_64.whl", hash = "sha256:4b70acf3b4b96a0ceb1374116626c9bef9e8be016b57b1284e482260ca1896d6" },
-    { url = "https://download.pytorch.org/whl/cu124/torchvision-0.21.0%2Bcu124-cp313-cp313-win_amd64.whl", hash = "sha256:8fcf55321b206de70ff8e01c884fa42e57a60b1cb749341b96e0f22c8a7c9ec7" },
+    { url = "https://download-r2.pytorch.org/whl/cu124/torchvision-0.21.0%2Bcu124-cp311-cp311-linux_x86_64.whl", hash = "sha256:137376805aca5ba57bd2c7a3ecb8569df961dbe82b128aac9b3b0a7125ef9385" },
+    { url = "https://download-r2.pytorch.org/whl/cu124/torchvision-0.21.0%2Bcu124-cp311-cp311-win_amd64.whl", hash = "sha256:000a013584ad2304ab30496318145f284ac364622addb5ee3a5abd2769ba146f" },
+    { url = "https://download-r2.pytorch.org/whl/cu124/torchvision-0.21.0%2Bcu124-cp312-cp312-linux_x86_64.whl", hash = "sha256:efb53ea0af7bf09b7b53e2a18b9be6d245f7d46a90b51d5cf97f37e9b929a991" },
+    { url = "https://download-r2.pytorch.org/whl/cu124/torchvision-0.21.0%2Bcu124-cp312-cp312-win_amd64.whl", hash = "sha256:ec63c2ee792757492da40590e34b14f2fceda29050558c215f0c1f3b08149c0f" },
+    { url = "https://download-r2.pytorch.org/whl/cu124/torchvision-0.21.0%2Bcu124-cp313-cp313-linux_x86_64.whl", hash = "sha256:4b70acf3b4b96a0ceb1374116626c9bef9e8be016b57b1284e482260ca1896d6" },
+    { url = "https://download-r2.pytorch.org/whl/cu124/torchvision-0.21.0%2Bcu124-cp313-cp313-win_amd64.whl", hash = "sha256:8fcf55321b206de70ff8e01c884fa42e57a60b1cb749341b96e0f22c8a7c9ec7" },
 ]
 
 [[package]]
@@ -2507,7 +2507,7 @@ wheels = [
 
 [[package]]
 name = "transformers"
-version = "4.55.2"
+version = "4.54.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "filelock" },
@@ -2521,9 +2521,9 @@ dependencies = [
     { name = "tokenizers" },
     { name = "tqdm" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/70/a5/d8b8a1f3a051daeb5f11253bb69fc241f193d1c0566e299210ed9220ff4e/transformers-4.55.2.tar.gz", hash = "sha256:a45ec60c03474fd67adbce5c434685051b7608b3f4f167c25aa6aeb1cad16d4f", size = 9571466, upload-time = "2025-08-13T18:25:43.767Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/21/6c/4caeb57926f91d943f309b062e22ad1eb24a9f530421c5a65c1d89378a7a/transformers-4.54.1.tar.gz", hash = "sha256:b2551bb97903f13bd90c9467d0a144d41ca4d142defc044a99502bb77c5c1052", size = 9514288, upload-time = "2025-07-29T15:57:22.826Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/db/5a/022ac010bedfb5119734cf9d743cf1d830cb4c604f53bb1552216f4344dc/transformers-4.55.2-py3-none-any.whl", hash = "sha256:097e3c2e2c0c9681db3da9d748d8f9d6a724c644514673d0030e8c5a1109f1f1", size = 11269748, upload-time = "2025-08-13T18:25:40.394Z" },
+    { url = "https://files.pythonhosted.org/packages/cf/18/eb7578f84ef5a080d4e5ca9bc4f7c68e7aa9c1e464f1b3d3001e4c642fce/transformers-4.54.1-py3-none-any.whl", hash = "sha256:c89965a4f62a0d07009d45927a9c6372848a02ab9ead9c318c3d082708bab529", size = 11176397, upload-time = "2025-07-29T15:57:19.692Z" },
 ]
 
 [[package]]

@@ -22,7 +22,7 @@ RUN npm ci
 COPY web-ui/ .
 
 # Set build-time environment variables
-ARG NEXT_PUBLIC_API_URL=http://localhost:8000
+ARG NEXT_PUBLIC_API_URL=http://localhost:25800
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 
 # Build the application
@@ -47,16 +47,16 @@ RUN chown -R nextjs:nodejs /app
 USER nextjs
 
 # Expose port
-EXPOSE 3000
+EXPOSE 7860
 
 # Set production environment
 ENV NODE_ENV=production
-ENV PORT=3000
+ENV PORT=7860
 ENV HOSTNAME="0.0.0.0"
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD node -e "require('http').get('http://localhost:3000/api/health', (r) => {r.statusCode === 200 ? process.exit(0) : process.exit(1)})" || exit 1
+    CMD node -e "require('http').get('http://localhost:7860', (r) => {r.statusCode < 500 ? process.exit(0) : process.exit(1)})" || exit 1
 
 # Start the application directly
 ENTRYPOINT ["node", "server.js"]

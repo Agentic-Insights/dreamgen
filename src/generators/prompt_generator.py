@@ -6,6 +6,7 @@ for more contextually aware prompts.
 
 import logging
 import time
+from typing import Optional
 
 from ..plugins import get_context_with_descriptions, get_temporal_descriptor
 from ..utils.config import Config
@@ -31,7 +32,7 @@ class PromptGenerator:
         self.logger = logging.getLogger(__name__)
 
     @handle_errors(error_type=PromptError, retries=2)
-    async def generate_prompt(self) -> str:
+    async def generate_prompt(self, meta_prompt: Optional[str] = None) -> str:
         """Generate a 60 word image prompt using Ollama with conversation context."""
         try:
             import ollama
@@ -55,13 +56,23 @@ class PromptGenerator:
                     lora_keyword = result.value
                     break
 
+            base_system_prompt = (
+                meta_prompt.strip()
+                if meta_prompt
+                else "\n".join(
+                    [
+                        "You are a creative prompt generator for image generation.",
+                        "Generate unique and imaginative prompts that would inspire beautiful AI-generated images.",
+                        "IMPORTANT: Prompts MUST be concise and fit within 77 tokens (approximately 60 words).",
+                        "IMPORTANT: Do not have a preamble or explain the prompt, output ONLY the prompt itself.",
+                        "Focus on vivid, impactful descriptions using fewer, carefully chosen words.",
+                    ]
+                )
+            )
+
             # Build system context with plugin information
             system_context_parts = [
-                "You are a creative prompt generator for image generation.",
-                "Generate unique and imaginative prompts that would inspire beautiful AI-generated images.",
-                "IMPORTANT: Prompts MUST be concise and fit within 77 tokens (approximately 60 words).",
-                "IMPORTANT: Do not have a preamble or explain the prompt, output ONLY the prompt itself.",
-                "Focus on vivid, impactful descriptions using fewer, carefully chosen words.",
+                base_system_prompt,
                 "\nAvailable context from plugins:",
                 *[f"- {desc}" for desc in context_data["descriptions"]],
                 f"\nCurrent temporal context: {temporal_context}",

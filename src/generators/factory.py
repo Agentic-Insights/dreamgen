@@ -1,81 +1,98 @@
-"""Factory for creating image generators based on configuration."""
+"""Shared image backend selection for API and CLI."""
 
-from loguru import logger
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Tuple
 
 from ..utils.config import Config
-from .base_generator import ImageGenerator
+from .image_generator import ImageGenerator
+from .mock_image_generator import MockImageGenerator
+from .stable_diffusion_image_generator import StableDiffusionImageGenerator
+from .turbo_image_generator import TurboImageGenerator
 
 
-def get_image_generator(config: Config, mock: bool = False) -> ImageGenerator:
-    """Create an image generator based on configuration.
+def _hf_cache_root() -> Path:
+    hf_home = os.getenv("HF_HOME")
+    if hf_home:
+        return Path(hf_home) / "hub"
 
-    Args:
-        config: Configuration object
-        mock: If True, return MockImageGenerator regardless of config
+    transformers_cache = os.getenv("TRANSFORMERS_CACHE")
+    if transformers_cache:
+        return Path(transformers_cache) / "hub"
 
-    Returns:
-        ImageGenerator instance (FLUX, Z-Image, or Mock)
+    return Path(os.getenv("HF_HUB_CACHE", os.path.expanduser("~/.cache/huggingface/hub")))
 
-    Raises:
-        ValueError: If unknown model type specified
-        ImportError: If required dependencies not available
-    """
-    if mock:
-        logger.info("Creating MockImageGenerator (no GPU required)")
-        from .mock_image_generator import MockImageGenerator
 
-        return MockImageGenerator(config)
+def is_model_cached(model_id: str) -> bool:
+    model_path = _hf_cache_root() / f"models--{model_id.replace('/', '--')}"
+    snapshots_path = model_path / "snapshots"
+    return model_path.exists() and snapshots_path.exists() and any(snapshots_path.iterdir())
 
-    model_type = config.model.image_model.lower()
 
-    if model_type == "zimage":
-        logger.info("Creating ZImageGenerator")
-        try:
-            from .zimage_generator import ZImageGenerator
+def resolve_image_backend(config: Config) -> str:
+    backend = config.model.image_backend
+    if backend == "tiny":
+        backend = "smoke"
+    if backend != "auto":
+        return backend
 
-            return ZImageGenerator(config)
-        except ImportError as e:
-            logger.error(
-                "Failed to import ZImageGenerator. "
-                "Make sure Z-Image repo is cloned:\n"
-                "  git clone https://github.com/Tongyi-MAI/Z-Image ref-repos/Z-Image"
-            )
-            raise ImportError(
-                "Z-Image not available. Clone Z-Image repo to ref-repos/Z-Image"
-            ) from e
+    if is_model_cached(config.model.flux_model):
+        return "flux"
 
-    elif model_type == "flux":
-        logger.info("Creating FluxImageGenerator")
-        # Import the existing ImageGenerator (which is actually FLUX)
-        # We'll rename it later for clarity, but for now it works
-        from .image_generator import ImageGenerator as FluxImageGenerator
+    if is_model_cached(config.model.small_sd_model):
+        return "small"
 
-        return FluxImageGenerator(config)
+    return "small"
 
-    else:
-        raise ValueError(
-            f"Unknown image model type: {model_type}. "
-            f"Expected 'flux' or 'zimage', got '{model_type}'"
+
+def backend_label(config: Config, backend: str) -> str:
+    if backend == "mock":
+        return "mock"
+    if backend == "smoke":
+        return "smoke-test"
+    if backend == "small":
+        return "small-sd"
+    if backend == "turbo":
+        return "sd-turbo"
+
+    flux_model = config.model.flux_model.lower()
+    if "schnell" in flux_model:
+        return "flux-schnell"
+    if "dev" in flux_model:
+        return "flux-dev"
+    return "flux"
+
+
+def create_image_generator(config: Config) -> Tuple[object, str]:
+    backend = resolve_image_backend(config)
+    if backend == "mock":
+        return MockImageGenerator(config), backend_label(config, backend)
+    if backend == "smoke":
+        return (
+            StableDiffusionImageGenerator(
+                config,
+                model_name=config.model.smoke_test_model,
+                backend_name="smoke",
+                max_size=512,
+                min_steps=10,
+                default_guidance_scale=7.5,
+            ),
+            backend_label(config, backend),
         )
-
-
-def get_available_models() -> list[str]:
-    """Get list of available model types.
-
-    Returns:
-        List of model type strings (e.g., ['flux', 'zimage'])
-    """
-    models = ["flux"]  # FLUX is always available
-
-    # Check if Z-Image is available (look for ref-repos/Z-Image/src)
-    from pathlib import Path
-
-    project_root = Path(__file__).parent.parent.parent
-    zimage_src = project_root / "ref-repos" / "Z-Image" / "src"
-    if zimage_src.exists() and (zimage_src / "zimage").exists():
-        models.append("zimage")
-        logger.debug("Z-Image available")
-    else:
-        logger.debug("Z-Image not available (clone repo to ref-repos/Z-Image)")
-
-    return models
+    if backend == "small":
+        return (
+            StableDiffusionImageGenerator(
+                config,
+                model_name=config.model.small_sd_model,
+                backend_name="small",
+                max_size=512,
+                min_steps=25,
+                default_guidance_scale=7.5,
+            ),
+            backend_label(config, backend),
+        )
+    if backend == "turbo":
+        return TurboImageGenerator(config), backend_label(config, backend)
+    return ImageGenerator(config), backend_label(config, backend)

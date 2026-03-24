@@ -24,13 +24,13 @@ class LoraConfig:
 class ModelConfig:
     """Model-specific configuration."""
 
-    image_model: str  # "flux" or "zimage"
+    image_backend: str
+    smoke_test_model: str
+    small_sd_model: str
+    turbo_model: str
     ollama_model: str
     ollama_temperature: float
     flux_model: str
-    zimage_model_path: Path  # Local path to Z-Image model weights
-    zimage_attention: str
-    zimage_compile: bool
     max_sequence_length: int
     lora: LoraConfig
 
@@ -72,30 +72,34 @@ class Config:
             load_dotenv(env_file, override=True)
         elif env_file is None:
             load_dotenv(
-                override=True
+                override=False
             )  # Load from default .env in current directory only if not explicitly overridden
 
         # Plugin configuration
-        enabled_plugins_str = os.getenv("ENABLED_PLUGINS")
-        if not enabled_plugins_str:
-            raise ValueError("ENABLED_PLUGINS environment variable is required")
+        enabled_plugins_str = os.getenv("ENABLED_PLUGINS", "")
         enabled_plugins = [p.strip() for p in enabled_plugins_str.split(",") if p.strip()]
 
         plugin_order_str = os.getenv("PLUGIN_ORDER")
-        if not plugin_order_str:
-            raise ValueError("PLUGIN_ORDER environment variable is required")
-        plugin_order = {}
-        for item in plugin_order_str.split(","):
-            if ":" in item:
-                name, order = item.split(":", 1)
-                plugin_order[name.strip()] = int(order.strip())
+        plugin_order: Dict[str, int] = {}
+        if plugin_order_str:
+            for item in plugin_order_str.split(","):
+                if ":" in item:
+                    name, order = item.split(":", 1)
+                    name = name.strip()
+                    try:
+                        plugin_order[name] = int(order.strip())
+                    except ValueError:
+                        continue
+
+        if not plugin_order and enabled_plugins:
+            plugin_order = {name: index for index, name in enumerate(enabled_plugins, start=1)}
 
         self.plugins = PluginConfig(enabled_plugins=enabled_plugins, plugin_order=plugin_order)
 
         # Lora configuration
         enabled_loras_str = os.getenv("ENABLED_LORAS")
         enabled_loras = (
-            [lora.strip() for lora in enabled_loras_str.split(",") if lora.strip()]
+            [l.strip() for l in enabled_loras_str.split(",") if l.strip()]
             if enabled_loras_str
             else []
         )
@@ -115,7 +119,24 @@ class Config:
         )
 
         # Model configuration
-        image_model = os.getenv("IMAGE_MODEL", "flux")  # Default to flux for backward compat
+        use_mock_generator = os.getenv("USE_MOCK_GENERATOR", "false").lower()
+        if use_mock_generator in ("true", "1", "yes", "on"):
+            image_backend = "mock"
+        else:
+            image_backend = os.getenv("IMAGE_BACKEND", "auto")
+
+        if image_backend == "tiny":
+            image_backend = "smoke"
+
+        smoke_test_model = os.getenv(
+            "SMOKE_TEST_MODEL", "hf-internal-testing/tiny-stable-diffusion-torch"
+        )
+        small_sd_model = os.getenv("SMALL_SD_MODEL", "segmind/tiny-sd")
+        turbo_model = os.getenv("TURBO_MODEL", "stabilityai/sd-turbo")
+
+        legacy_tiny_model = os.getenv("TINY_SD_MODEL")
+        if legacy_tiny_model and not os.getenv("SMOKE_TEST_MODEL"):
+            smoke_test_model = legacy_tiny_model
 
         ollama_model = os.getenv("OLLAMA_MODEL")
         if not ollama_model:
@@ -129,28 +150,18 @@ class Config:
         if not flux_model:
             raise ValueError("FLUX_MODEL environment variable is required")
 
-        # Z-Image configuration (optional, only required if IMAGE_MODEL=zimage)
-        zimage_model_path = Path(os.getenv("ZIMAGE_MODEL_PATH", "ckpts/Z-Image-Turbo"))
-        zimage_attention = os.getenv("ZIMAGE_ATTENTION", "_sdpa")
-        zimage_compile = os.getenv("ZIMAGE_COMPILE", "false").lower() in (
-            "true",
-            "1",
-            "yes",
-            "on",
-        )
-
         max_seq_len = os.getenv("MAX_SEQUENCE_LENGTH")
         if not max_seq_len:
             raise ValueError("MAX_SEQUENCE_LENGTH environment variable is required")
 
         self.model = ModelConfig(
-            image_model=image_model,
+            image_backend=image_backend.lower(),
+            smoke_test_model=smoke_test_model,
+            small_sd_model=small_sd_model,
+            turbo_model=turbo_model,
             ollama_model=ollama_model,
             ollama_temperature=float(ollama_temp),
             flux_model=flux_model,
-            zimage_model_path=zimage_model_path,
-            zimage_attention=zimage_attention,
-            zimage_compile=zimage_compile,
             max_sequence_length=int(max_seq_len),
             lora=lora_config,
         )
@@ -267,6 +278,11 @@ class Config:
             errors.append(f"Invalid width: {self.image.width} (must be between 128 and 2048)")
 
         # Validate model parameters
+        if self.model.image_backend not in {"auto", "flux", "small", "turbo", "smoke", "mock"}:
+            errors.append(
+                f"Invalid image backend: {self.model.image_backend} "
+                "(must be one of auto, flux, small, turbo, smoke, mock)"
+            )
         if not (1 <= self.image.num_inference_steps <= 150):
             errors.append(
                 f"Invalid inference steps: {self.image.num_inference_steps} (must be between 1 and 150)"

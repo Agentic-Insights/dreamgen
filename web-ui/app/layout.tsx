@@ -1,26 +1,26 @@
 import type { Metadata } from "next";
-import { JetBrains_Mono, IBM_Plex_Sans } from "next/font/google";
+import { JetBrains_Mono, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 
-const jetbrainsMono = JetBrains_Mono({
+const spaceGrotesk = Space_Grotesk({
   subsets: ["latin"],
-  variable: "--font-mono",
   display: "swap",
+  variable: "--font-display",
 });
 
-const ibmPlexSans = IBM_Plex_Sans({
-  weight: ["300", "400", "500", "600", "700"],
+const jetbrainsMono = JetBrains_Mono({
+  weight: ["300", "400", "500", "700"],
   subsets: ["latin"],
-  variable: "--font-sans",
   display: "swap",
+  variable: "--font-mono",
 });
 
 export const metadata: Metadata = {
-  title: "DreamGen — Agentic Insights",
-  description: "AI-powered continuous image generation system with dynamic prompt enhancement",
+  title: "DreamGen — Recurring Local Image Generator",
+  description: "Generate images locally on a recurring rhythm with simple prompts, entropy plugins, and a lightweight fallback model.",
   openGraph: {
-    title: "DreamGen — Agentic Insights",
-    description: "AI-powered continuous image generation system",
+    title: "DreamGen — Recurring Local Image Generator",
+    description: "Generate images locally on a recurring rhythm.",
     images: ["/logo_mark.png"],
     siteName: "Agentic Insights",
     type: "website",
@@ -36,8 +36,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark antialiased">
-      <body className={`${ibmPlexSans.variable} ${jetbrainsMono.variable} font-sans flex flex-col min-h-screen`}>
+    <html lang="en" className="dark">
+      <body className={`${spaceGrotesk.variable} ${jetbrainsMono.variable} font-sans antialiased`}>
         {children}
       </body>
     </html>

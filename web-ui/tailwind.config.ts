@@ -19,8 +19,8 @@ const config: Config = {
     },
     extend: {
       fontFamily: {
-        sans: ['var(--font-sans)', 'sans-serif'],
-        mono: ['var(--font-mono)', 'monospace'],
+        sans: ["var(--font-display)", "ui-sans-serif", "system-ui"],
+        mono: ["var(--font-mono)", "ui-monospace", "SFMono-Regular"],
       },
       colors: {
         border: "hsl(var(--border))",
@@ -56,8 +56,6 @@ const config: Config = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
-        // Agentic Insights brand colors
-        "terminal-green": "#00FF41",
       },
       borderRadius: {
         lg: "var(--radius)",
@@ -73,15 +71,10 @@ const config: Config = {
           from: { height: "var(--radix-accordion-content-height)" },
           to: { height: "0" },
         },
-        blink: {
-          "0%, 49%": { opacity: "1" },
-          "50%, 100%": { opacity: "0" },
-        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
-        blink: "blink 1s step-end infinite",
       },
     },
   },

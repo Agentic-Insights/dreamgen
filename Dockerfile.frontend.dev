@@ -8,7 +8,7 @@ RUN apk add --no-cache libc6-compat git
 WORKDIR /app
 
 # Copy package files
-COPY web-ui/package*.json ./
+COPY package*.json ./
 
 # Install dependencies (including dev dependencies)
 RUN npm ci
