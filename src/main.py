@@ -2,9 +2,6 @@
 Main entry point for the continuous image generation system.
 """
 
-import os
-from pathlib import Path
-
 from .utils.cli import app
 from .utils.config import Config
 

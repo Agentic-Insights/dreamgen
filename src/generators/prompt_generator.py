@@ -4,9 +4,7 @@ Incorporates temporal context (time of day, day of week, and holidays)
 for more contextually aware prompts.
 """
 
-import json
 import logging
-import os
 import time
 from typing import Optional
 
@@ -112,7 +110,7 @@ class PromptGenerator:
                 # Create user message with examples
                 user_message_parts = [
                     "Here are some example prompts:",
-                    *[f"Example {i+1}: {prompt}" for i, prompt in enumerate(example_prompts)],
+                    *[f"Example {i + 1}: {prompt}" for i, prompt in enumerate(example_prompts)],
                     "\nGenerate a new prompt that is different from these examples but equally creative.",
                 ]
 

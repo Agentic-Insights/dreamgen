@@ -6,7 +6,7 @@ import gc
 import os
 import platform
 import time
-from typing import Literal, Optional
+from typing import Literal
 
 import psutil
 import torch

@@ -4,7 +4,7 @@ Plugin management system for controlling and logging plugin execution.
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List
 
 
 @dataclass
@@ -42,7 +42,11 @@ class PluginManager:
     ):
         """Register a new plugin with the system."""
         self.plugins[name] = PluginInfo(
-            name=name, description=description, function=function, enabled=enabled, order=order
+            name=name,
+            description=description,
+            function=function,
+            enabled=enabled,
+            order=order,
         )
         self.logger.debug(
             "Registered plugin: %s (enabled=%s, order=%s)",

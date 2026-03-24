@@ -2,8 +2,6 @@ import json
 from datetime import datetime
 from unittest.mock import mock_open
 
-import pytest
-
 from src.plugins.holiday_fact import HolidayFact, get_holiday_fact
 from src.plugins.nearest_holiday import get_nearest_holiday
 from src.plugins.time_of_day import get_time_of_day

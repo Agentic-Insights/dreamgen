@@ -63,13 +63,11 @@ def handle_errors(
         @functools.wraps(func)
         async def wrapper(*args, **kwargs):
             attempts = retries + 1
-            last_error = None
 
             for attempt in range(attempts):
                 try:
                     return await func(*args, **kwargs)
                 except Exception as e:
-                    last_error = e
                     logger.error(f"Error in {func.__name__}: {str(e)}")
 
                     if cleanup_func:

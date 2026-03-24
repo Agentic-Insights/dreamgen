@@ -45,7 +45,8 @@ dependencies = [
     "python-multipart>=0.0.6",
     "websockets>=12.0",
     "aiofiles>=23.0.0",
-    "huggingface_hub[inference]>=0.20.0",  # For InferenceClient image editing
+    "huggingface_hub[inference]>=0.20.0", # For InferenceClient image editing
+    "loguru>=0.7.0", # For Z-Image generator logging
 ]
 
 [project.optional-dependencies]
@@ -60,10 +61,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/killerapp/dreamgen"
-Documentation = "https://github.com/killerapp/dreamgen#readme"
-Repository = "https://github.com/killerapp/dreamgen"
-Issues = "https://github.com/killerapp/dreamgen/issues"
+Homepage = "https://github.com/Agentic-Insights/dreamgen"
+Documentation = "https://github.com/Agentic-Insights/dreamgen#readme"
+Repository = "https://github.com/Agentic-Insights/dreamgen"
+Issues = "https://github.com/Agentic-Insights/dreamgen/issues"
 
 [project.scripts]
 dreamgen = "src.main:main"
@@ -91,6 +92,9 @@ disable = ["C0111", "C0103"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]
 
 [tool.semantic_release]
 version_variables = [
@@ -112,8 +116,8 @@ minor_tags = ["feat"]
 patch_tags = ["fix", "perf"]
 allowed_tags = ["build", "chore", "ci", "docs", "feat", "fix", "perf", "style", "refactor", "test"]
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "pytest>=8.4.1",
     "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.0.0",
@@ -125,6 +129,7 @@ dev-dependencies = [
     "build>=1.0.0",
     "twine>=4.0.0",
     "pre-commit>=4.3.0",
+    "ruff>=0.14.10",
 ]
 
 [tool.uv.sources]
@@ -132,6 +137,7 @@ torch = { index = "pytorch-cu124" }
 torchvision = { index = "pytorch-cu124" }
 torchaudio = { index = "pytorch-cu124" }
 markupsafe = { index = "pypi" }
+diffusers = { git = "https://github.com/huggingface/diffusers" }
 
 [[tool.uv.index]]
 name = "pypi"

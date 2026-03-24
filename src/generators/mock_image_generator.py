@@ -78,7 +78,7 @@ class MockImageGenerator:
             font = ImageFont.load_default()
             text = f"Mock Image\n{prompt[:50]}..." if len(prompt) > 50 else f"Mock Image\n{prompt}"
             draw.text((10, 10), text, fill=(200, 200, 200), font=font)
-        except:
+        except Exception:
             pass  # If font loading fails, just return the blank image
 
         return img

@@ -1,0 +1,63 @@
+[MASTER]
+# Use multiple processes for faster linting
+jobs=4
+
+# Pickle collected data for later comparisons
+persistent=yes
+
+# Discover python modules and packages in the file system subtree
+suggestion-mode=yes
+
+# Ignore paths
+ignore=.venv,node_modules,output,.cache,dist,build
+ignore-patterns=test_.*?\.py,conftest\.py
+
+[MESSAGES CONTROL]
+# Disable specific warnings
+disable=
+    C0111,  # missing-docstring
+    C0103,  # invalid-name
+    R0903,  # too-few-public-methods
+    R0913,  # too-many-arguments
+    W0511,  # fixme
+    C0415,  # import-outside-toplevel
+    R0801,  # duplicate-code
+    W0212,  # protected-access
+    R1710,  # inconsistent-return-statements
+    W0613,  # unused-argument (common in callbacks)
+    R0914,  # too-many-locals
+    R0912,  # too-many-branches
+
+[REPORTS]
+output-format=colorized
+reports=no
+score=yes
+
+[REFACTORING]
+max-nested-blocks=5
+
+[BASIC]
+good-names=i,j,k,ex,Run,_,id,e,f,fp,db,df,lr,ax,fig
+
+[FORMAT]
+max-line-length=100
+indent-string='    '
+indent-after-paren=4
+
+[DESIGN]
+max-args=10
+max-attributes=15
+max-bool-expr=5
+max-branches=15
+max-locals=20
+max-parents=7
+max-public-methods=30
+max-returns=6
+max-statements=60
+min-public-methods=0
+
+[IMPORTS]
+allow-wildcard-with-all=no
+
+[EXCEPTIONS]
+overgeneral-exceptions=builtins.Exception

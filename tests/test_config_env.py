@@ -59,7 +59,10 @@ class TestConfigMissingEnv:
         """Test that missing specific environment variables raise appropriate errors."""
         test_cases = [
             ("OLLAMA_MODEL", "OLLAMA_MODEL environment variable is required"),
-            ("OLLAMA_TEMPERATURE", "OLLAMA_TEMPERATURE environment variable is required"),
+            (
+                "OLLAMA_TEMPERATURE",
+                "OLLAMA_TEMPERATURE environment variable is required",
+            ),
             ("FLUX_MODEL", "FLUX_MODEL environment variable is required"),
             ("IMAGE_HEIGHT", "IMAGE_HEIGHT environment variable is required"),
             ("LORA_DIR", "LORA_DIR environment variable is required"),
@@ -170,12 +173,23 @@ MPS_USE_FP16=true
 
             # Verify lora configuration (account for Windows path separators)
             assert str(config.model.lora.lora_dir).replace("\\", "/") == "/tmp/test/loras"
-            assert config.model.lora.enabled_loras == ["style1.safetensors", "style2.safetensors"]
+            assert config.model.lora.enabled_loras == [
+                "style1.safetensors",
+                "style2.safetensors",
+            ]
             assert config.model.lora.application_probability == 0.8
 
             # Verify plugin configuration
-            assert config.plugins.enabled_plugins == ["time_of_day", "art_style", "lora"]
-            assert config.plugins.plugin_order == {"time_of_day": 1, "art_style": 2, "lora": 3}
+            assert config.plugins.enabled_plugins == [
+                "time_of_day",
+                "art_style",
+                "lora",
+            ]
+            assert config.plugins.plugin_order == {
+                "time_of_day": 1,
+                "art_style": 2,
+                "lora": 3,
+            }
 
             # Verify system configuration
             assert str(config.system.output_dir) == "test_output"

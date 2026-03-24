@@ -3,10 +3,11 @@ Plugin system for adding contextual information to prompts.
 """
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from ..utils.config import Config
-from ..utils.plugin_manager import PluginManager, PluginResult
+from ..utils.plugin_manager import PluginManager
+from ..utils.plugin_manager import PluginResult as PluginResult
 from .art_style import get_art_style
 from .holiday_fact import get_holiday_fact
 from .lora import apply_lora
@@ -37,7 +38,10 @@ def register_base_plugins():
     )
 
     plugin_manager.register(
-        "holiday_fact", "Enriches holiday context with interesting facts", get_holiday_fact, order=3
+        "holiday_fact",
+        "Enriches holiday context with interesting facts",
+        get_holiday_fact,
+        order=3,
     )
 
     plugin_manager.register(
@@ -65,6 +69,29 @@ register_base_plugins()
 
 logger = logging.getLogger(__name__)
 
+# Track initialization state
+_initialized = False
+
+
+def initialize_plugins(config: Config) -> None:
+    """Initialize all plugins with the given config."""
+    global _initialized
+    register_lora_plugin(config)
+
+    # Enable plugins based on config
+    for name in config.plugins.enabled_plugins:
+        if name in plugin_manager.plugins:
+            plugin_manager.enable_plugin(name)
+
+    _initialized = True
+
+
+def ensure_initialized(config: Config) -> None:
+    """Ensure plugins are initialized, initializing if needed."""
+    global _initialized
+    if not _initialized:
+        initialize_plugins(config)
+
 
 def get_context_with_descriptions() -> Dict[str, Any]:
     """
@@ -79,7 +106,10 @@ def get_context_with_descriptions() -> Dict[str, Any]:
     for result in results:
         logger.info(f"Plugin contribution - {result.name}: {result.value} ({result.description})")
 
-    return {"results": results, "descriptions": plugin_manager.get_plugin_descriptions()}
+    return {
+        "results": results,
+        "descriptions": plugin_manager.get_plugin_descriptions(),
+    }
 
 
 def get_temporal_descriptor() -> str:
