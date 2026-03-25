@@ -28,14 +28,9 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
       - name: Install dependencies
         run: |
-          npm install -g semantic-release @semantic-release/git @semantic-release/exec @semantic-release/github
+          uv sync --group dev
 
       - name: Release
         env:
@@ -46,8 +41,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Run semantic-release
-          npx semantic-release
+          # Run Python Semantic Release using the repo's pyproject configuration
+          uv run python -m semantic_release version
 
       - name: Publish to PyPI
         if: success()

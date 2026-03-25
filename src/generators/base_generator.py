@@ -106,7 +106,9 @@ class ImageGenerator(ABC):
 
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-            torch.cuda.ipc_collect()
+            # Avoid forcing CUDA initialization on hosts without a working driver.
+            if torch.cuda.is_initialized():
+                torch.cuda.ipc_collect()
 
     def get_model_info(self) -> dict:
         """Get information about the current model.

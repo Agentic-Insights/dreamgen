@@ -16,22 +16,46 @@ Beautiful, VS Code-inspired dark theme with real-time generation and organized g
 ## 🚀 Quick Install
 
 ```bash
-# Install the CLI tool
-uv tool install dreamgen
-
-# Clone for web interface (optional)
+# Clone the repository
 git clone https://github.com/Agentic-Insights/dreamgen
-cd dreamgen/web-ui && npm install
+cd dreamgen
 
-# Set up your environment
-export HF_TOKEN=your_token_here
+# Install Python dependencies
+uv sync
 
-# Start generating images!
-dreamgen generate
+# Configure the app
+cp .env.example .env
+# Edit .env for your machine:
+# - OLLAMA_MODEL must point at a local Ollama model
+# - HF_TOKEN is optional for small/turbo/smoke public models
+# - IMAGE_BACKEND=auto uses FLUX if cached, otherwise the small public fallback
 
-# Launch the web interface
+# Generate from the CLI
+uv run dreamgen generate
+
+# Start the API (terminal 1)
+uv run uvicorn src.api.server:app --host 127.0.0.1 --port 25800
+
+# Start the web UI (terminal 2)
+cd web-ui
+npm install
 npm run dev
 ```
+
+The local dev UI runs at `http://localhost:3000` and talks to the API at `http://localhost:25800`.
+
+For a production-style local run with the shipped ports and wiring:
+
+```bash
+cp .env.docker.example .env.docker
+docker compose --env-file .env.docker up --build
+```
+
+That exposes:
+
+- UI: `http://localhost:7860`
+- API: `http://localhost:25800`
+- API docs: `http://localhost:25800/api/docs`
 
 ## 🔑 Why Choose This?
 
@@ -45,34 +69,40 @@ npm run dev
 
 ```bash
 # Generate a single image
-dreamgen generate
+uv run dreamgen generate
 
 # Generate with interactive prompt refinement
-dreamgen generate --interactive
+uv run dreamgen generate --interactive
 
 # Generate multiple images in a batch
-dreamgen loop --batch-size 10 --interval 300
+uv run dreamgen loop --batch-size 10 --interval 300
 
 # Use mock mode (no GPU required)
-dreamgen generate --mock
+uv run dreamgen generate --mock
 
 # Force the local Z-Image backend
-dreamgen generate --backend zimage
+uv run dreamgen generate --backend zimage
+
+# List prompt plugins
+uv run dreamgen plugins list
 
 # Get help
-dreamgen --help
+uv run dreamgen --help
 ```
 
 ## 🔧 Requirements
 
 - **Python 3.11+** with uv package manager
 - **Ollama** for prompt generation ([ollama.ai](https://ollama.ai))
-- **Hugging Face Token** for model access
+- **Hugging Face Token** for gated/private model downloads only
 - **GPU recommended**: NVIDIA (8GB+ VRAM) or Apple Silicon
 
 ## 📖 Full Documentation
 
-For detailed setup, plugin development, and advanced usage, see [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).
+For detailed setup, Docker usage, and development workflow:
+
+- [docs/DOCKER.md](docs/DOCKER.md)
+- [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)
 
 ## ☁️ Optional: Cloudflare Hosting
 
