@@ -276,7 +276,8 @@ class ZImageGenerator(ImageGenerator):
 
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-            torch.cuda.ipc_collect()
+            if torch.cuda.is_initialized():
+                torch.cuda.ipc_collect()
 
     def get_model_info(self) -> dict:
         """Get Z-Image model information.
