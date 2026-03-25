@@ -232,6 +232,7 @@ class ZImageGenerator(ImageGenerator):
         prompt: str,
         output_path: Path,
         force_reinit: bool = False,
+        seed: Optional[int] = None,
     ) -> tuple[Path, float, str]:
         """Generate an image from the given prompt (CLI-compatible interface).
 
@@ -254,7 +255,7 @@ class ZImageGenerator(ImageGenerator):
             self.cleanup()
             self.components = None
 
-        result = await self.generate(prompt=prompt)
+        result = await self.generate(prompt=prompt, seed=seed)
 
         generation_time = time.time() - start_time
 

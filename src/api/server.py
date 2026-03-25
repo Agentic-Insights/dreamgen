@@ -27,7 +27,7 @@ from src.generators.factory import (
 from src.generators.prompt_generator import PromptGenerator
 from src.plugins import plugin_manager, register_lora_plugin
 from src.utils.config import Config
-from src.utils.storage import save_image_and_prompt
+from src.utils.storage import StorageManager, save_image_and_prompt
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -751,11 +751,15 @@ async def generate_image(request: GenerateRequest):
             )
         )
 
-        # Generate the image
-        image = await image_gen.generate(final_prompt, seed=request.seed)
-
-        # Save image and prompt
-        image_path = save_image_and_prompt(image, final_prompt, str(OUTPUT_DIR))
+        # Generate and save the image through the active backend.
+        storage = StorageManager(str(OUTPUT_DIR))
+        requested_output_path = storage.get_output_path(final_prompt)
+        image_path, _, _ = await image_gen.generate_image(
+            final_prompt,
+            requested_output_path,
+            force_reinit=False,
+            seed=request.seed,
+        )
 
         # Create relative path for API response
         relative_path = f"/images/{image_path.relative_to(OUTPUT_DIR).as_posix()}"
@@ -801,14 +805,12 @@ async def generate_image(request: GenerateRequest):
 async def get_gallery(limit: int = 50, offset: int = 0):
     """Get list of generated images"""
     images = []
+    last_image: Optional[Dict[str, Any]] = None
 
     # Get all image files from output directory
     image_files = sorted(OUTPUT_DIR.glob("**/*.png"), key=lambda x: x.stat().st_mtime, reverse=True)
 
-    # Apply pagination
-    paginated_files = image_files[offset : offset + limit]
-
-    for image_file in paginated_files:
+    for image_file in image_files:
         # Check if corresponding prompt file exists
         prompt_file = image_file.with_suffix(".txt")
         prompt = ""
@@ -820,16 +822,35 @@ async def get_gallery(limit: int = 50, offset: int = 0):
                 logger.warning(f"Failed to read prompt file {prompt_file}: {e}")
                 prompt = "Could not read prompt"
 
-        images.append(
-            {
-                "path": f"/images/{image_file.relative_to(OUTPUT_DIR).as_posix()}",
-                "prompt": prompt.strip(),
-                "created_at": datetime.fromtimestamp(image_file.stat().st_mtime).isoformat(),
-                "size": image_file.stat().st_size,
-            }
-        )
+        created_at = datetime.fromtimestamp(image_file.stat().st_mtime).isoformat()
+        image_entry = {
+            "path": f"/images/{image_file.relative_to(OUTPUT_DIR).as_posix()}",
+            "prompt": prompt.strip(),
+            "created_at": created_at,
+            "size": image_file.stat().st_size,
+        }
 
-    return {"images": images, "total": len(image_files), "limit": limit, "offset": offset}
+        # Collapse historical double-saves created by older API behavior.
+        if last_image is not None:
+            created_delta = abs(
+                (
+                    datetime.fromisoformat(last_image["created_at"])
+                    - datetime.fromisoformat(image_entry["created_at"])
+                ).total_seconds()
+            )
+            if (
+                image_entry["prompt"] == last_image["prompt"]
+                and image_entry["size"] == last_image["size"]
+                and created_delta <= 8
+            ):
+                continue
+
+        images.append(image_entry)
+        last_image = image_entry
+
+    paginated_images = images[offset : offset + limit]
+
+    return {"images": paginated_images, "total": len(images), "limit": limit, "offset": offset}
 
 
 @app.delete("/api/gallery/{image_path:path}")

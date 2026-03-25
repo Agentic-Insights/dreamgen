@@ -28,7 +28,11 @@ class MockImageGenerator:
         return None
 
     async def generate_image(
-        self, prompt: str, output_path: Path, force_reinit: bool = False
+        self,
+        prompt: str,
+        output_path: Path,
+        force_reinit: bool = False,
+        seed: int | None = None,
     ) -> Tuple[Path, float, str]:
         """Generate a simple placeholder image.
 
@@ -36,6 +40,7 @@ class MockImageGenerator:
             prompt: Prompt text (unused but saved alongside image).
             output_path: Where to save the generated image.
             force_reinit: Unused compatibility flag.
+            seed: Unused random seed compatibility flag.
         Returns:
             Tuple of (output_path, generation_time_seconds, model_name)
         """

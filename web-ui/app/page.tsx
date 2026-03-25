@@ -530,7 +530,7 @@ export default function Home() {
 
                     <div className="mt-4 rounded-2xl border border-dashed border-border/80 px-4 py-3 text-xs leading-6 text-muted-foreground">
                       Session loop runs while this browser tab stays open. For true background jobs,
-                      use <code className="mx-1 rounded bg-background px-1 py-0.5">uv run imagegen loop</code>.
+                      use <code className="mx-1 rounded bg-background px-1 py-0.5">uv run dreamgen loop</code>.
                     </div>
                   </div>
 
@@ -565,7 +565,7 @@ export default function Home() {
                   </div>
                 </section>
 
-                <section className="grid min-h-[70vh] gap-6 lg:grid-rows-[minmax(0,1fr)_auto]">
+                <section className="grid content-start gap-6">
                   <div className="ambient-panel rounded-[2rem] border border-border/80 p-5">
                     <div className="mb-4 flex items-center justify-between gap-4">
                       <div>
@@ -591,7 +591,7 @@ export default function Home() {
                       </a>
                     </div>
 
-                    <div className="flex h-[calc(100%-3rem)] min-h-[420px] items-center justify-center rounded-[1.5rem] border border-border/70 bg-background/70 p-4">
+                    <div className="min-h-[420px] rounded-[1.5rem] border border-border/70 bg-background/70 p-4">
                       <AnimatePresence mode="wait">
                         {isGenerating ? (
                           <motion.div
@@ -613,15 +613,15 @@ export default function Home() {
                             initial={{ opacity: 0, scale: 0.97 }}
                             animate={{ opacity: 1, scale: 1 }}
                             exit={{ opacity: 0, scale: 0.97 }}
-                            className="flex h-full w-full flex-col items-center justify-center"
+                            className="flex w-full flex-col items-center"
                           >
-                            <div className="flex w-full max-w-5xl flex-1 items-center justify-center rounded-[1.75rem] border border-border/60 bg-[radial-gradient(circle_at_top,hsl(var(--accent)/0.08),transparent_22rem)] px-4 py-6">
+                            <div className="flex min-h-[380px] w-full items-center justify-center rounded-[1.75rem] border border-border/60 bg-[radial-gradient(circle_at_top,hsl(var(--accent)/0.08),transparent_22rem)] px-4 py-6">
                               {/* Backend-served generated files are not routed through Next image optimization. */}
                               {/* eslint-disable-next-line @next/next/no-img-element */}
                               <img
                                 src={`${API_BASE}${currentImage.image_path}`}
                                 alt="Generated image"
-                                className="max-h-full max-w-full rounded-2xl object-contain shadow-[0_24px_80px_rgba(0,0,0,0.34)]"
+                                className="max-h-[68vh] max-w-full rounded-2xl object-contain shadow-[0_24px_80px_rgba(0,0,0,0.34)]"
                               />
                             </div>
                             <div className="mt-4 w-full max-w-5xl rounded-2xl border border-border/60 bg-background/80 px-4 py-3">

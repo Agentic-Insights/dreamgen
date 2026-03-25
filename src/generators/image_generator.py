@@ -1,5 +1,5 @@
 """
-Image generator using Flux 1.1 transformers model.
+Image generator using FLUX transformer models.
 """
 
 import gc
@@ -340,7 +340,11 @@ class ImageGenerator:
         retries=1,
     )
     async def generate_image(
-        self, prompt: str, output_path: Path, force_reinit: bool = False
+        self,
+        prompt: str,
+        output_path: Path,
+        force_reinit: bool = False,
+        seed: Optional[int] = None,
     ) -> Tuple[Path, float, str]:
         """Generate an image from the given prompt."""
         metrics = GenerationMetrics(prompt=prompt, model_name=self.model_name)
@@ -386,6 +390,13 @@ class ImageGenerator:
                     # Run inference with detailed error handling
                     try:
                         logger.debug("Calling pipe with prompt")
+                        generator = None
+                        if seed is not None:
+                            generator = torch.Generator(
+                                device=self.device if self.device != "mps" else "cpu"
+                            )
+                            generator.manual_seed(seed)
+
                         image = self.pipe(
                             prompt=prompt,
                             prompt_2=prompt,
@@ -395,6 +406,7 @@ class ImageGenerator:
                             height=self.height,
                             width=self.width,
                             max_sequence_length=self.max_sequence_length,
+                            generator=generator,
                         ).images[0]
                         logger.debug("Pipe call completed successfully")
                     except Exception as inference_error:
