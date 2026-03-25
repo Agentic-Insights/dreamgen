@@ -150,8 +150,8 @@ def run_benchmark(
     for model in models:
         console.print(f"\n[bold cyan]Benchmarking {model.upper()}[/bold cyan]")
 
-        # Update config for model
-        config.model.image_model = model
+        # Update config for model backend
+        config.model.image_backend = model
 
         # Determine benchmark function
         if model == "flux":

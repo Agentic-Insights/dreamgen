@@ -1,22 +1,19 @@
 "use client";
+/* eslint-disable @next/next/no-img-element */
 
-import { useState, useEffect } from "react";
-import Image from "next/image";
+import { useEffect, useState } from "react";
 import {
   Sparkles,
   Loader2,
   Settings as SettingsIcon,
   Wand2,
-  Edit3,
   History,
-  RefreshCw,
   ChevronRight,
   ChevronDown,
   Image as ImageIcon,
   Sliders
 } from "lucide-react";
 import { api, GenerateResponse, PluginInfo, API_BASE } from "@/lib/api";
-import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import MetaPromptModal from "@/components/MetaPromptModal";
 import AdvancedControls from "@/components/AdvancedControls";
@@ -29,7 +26,6 @@ export default function Playground() {
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [currentImage, setCurrentImage] = useState<GenerateResponse | null>(null);
-  const [previousImage, setPreviousImage] = useState<GenerateResponse | null>(null);
   const [recentGenerations, setRecentGenerations] = useState<GenerateResponse[]>([]);
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [showMetaPromptModal, setShowMetaPromptModal] = useState(false);
@@ -79,10 +75,6 @@ export default function Playground() {
         seed: seed ?? undefined
       });
 
-      // Move current to previous, new to current
-      if (currentImage) {
-        setPreviousImage(currentImage);
-      }
       setCurrentImage(response);
 
       // Add to recent generations (keep last 10)
@@ -359,7 +351,6 @@ export default function Playground() {
                           <button
                             key={gen.id}
                             onClick={() => {
-                              setPreviousImage(currentImage);
                               setCurrentImage(gen);
                               setFinalPrompt(gen.prompt);
                             }}

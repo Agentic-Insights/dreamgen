@@ -54,6 +54,7 @@ export interface ModelInfo {
   size: number;
   incomplete_files: number;
   path?: string;
+  downloadable?: boolean;
 }
 
 export interface ModelStatus {
@@ -225,7 +226,7 @@ export class ImageGenAPI {
         }
       };
 
-      this.ws.onerror = (event) => {
+      this.ws.onerror = () => {
         // WebSocket error events don't contain much useful information
         // Just log a simple message instead of trying to log the event object
         console.warn('WebSocket connection error occurred');

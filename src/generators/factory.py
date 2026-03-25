@@ -11,6 +11,7 @@ from .image_generator import ImageGenerator
 from .mock_image_generator import MockImageGenerator
 from .stable_diffusion_image_generator import StableDiffusionImageGenerator
 from .turbo_image_generator import TurboImageGenerator
+from .zimage_generator import ZImageGenerator
 
 
 def _hf_cache_root() -> Path:
@@ -56,6 +57,8 @@ def backend_label(config: Config, backend: str) -> str:
         return "small-sd"
     if backend == "turbo":
         return "sd-turbo"
+    if backend == "zimage":
+        return "z-image"
 
     flux_model = config.model.flux_model.lower()
     if "schnell" in flux_model:
@@ -95,4 +98,8 @@ def create_image_generator(config: Config) -> Tuple[object, str]:
         )
     if backend == "turbo":
         return TurboImageGenerator(config), backend_label(config, backend)
-    return ImageGenerator(config), backend_label(config, backend)
+    if backend == "zimage":
+        return ZImageGenerator(config), backend_label(config, backend)
+    if backend == "flux":
+        return ImageGenerator(config), backend_label(config, backend)
+    raise ValueError(f"Unsupported image backend: {backend}")

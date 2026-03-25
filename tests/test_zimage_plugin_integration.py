@@ -5,7 +5,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.generators.factory import get_available_models, get_image_generator
+from src.generators.factory import create_image_generator, resolve_image_backend
+from src.generators.mock_image_generator import MockImageGenerator
 from src.generators.zimage_generator import ZImageGenerator
 from src.plugins import (
     ensure_initialized,
@@ -19,7 +20,9 @@ from src.plugins import (
 def mock_config():
     """Create a mock configuration for testing."""
     config = MagicMock()
-    config.model.image_model = "zimage"
+    config.model.image_backend = "zimage"
+    config.model.flux_model = "black-forest-labs/FLUX.1-schnell"
+    config.model.small_sd_model = "segmind/tiny-sd"
     config.model.zimage_model_path = Path("/tmp/fake_zimage_model")
     config.model.zimage_attention = "_sdpa"
     config.model.zimage_compile = False
@@ -56,15 +59,16 @@ class TestZImagePluginIntegration:
 
     def test_factory_returns_zimage_generator(self, mock_config):
         """Test that factory creates ZImageGenerator when configured."""
-        gen = get_image_generator(mock_config, mock=False)
+        gen, backend_name = create_image_generator(mock_config)
         assert isinstance(gen, ZImageGenerator)
+        assert backend_name == "z-image"
 
     def test_factory_with_mock_mode(self, mock_config):
         """Test factory mock mode returns MockImageGenerator."""
-        from src.generators.mock_image_generator import MockImageGenerator
-
-        gen = get_image_generator(mock_config, mock=True)
+        mock_config.model.image_backend = "mock"
+        gen, backend_name = create_image_generator(mock_config)
         assert isinstance(gen, MockImageGenerator)
+        assert backend_name == "mock"
 
     def test_plugins_initialize(self, mock_config):
         """Test that plugins initialize correctly with Z-Image config."""
@@ -97,12 +101,9 @@ class TestZImagePluginIntegration:
         # Should contain time-related info at minimum
         assert len(descriptor) > 0
 
-    def test_available_models_includes_flux(self):
-        """Test that flux is always listed in available models."""
-        # Flux should always be available
-        models = get_available_models()
-        assert "flux" in models
-        # Note: zimage availability depends on ref-repos/Z-Image/src existing
+    def test_resolve_image_backend_returns_zimage(self, mock_config):
+        """Test that explicit Z-Image backend configuration resolves correctly."""
+        assert resolve_image_backend(mock_config) == "zimage"
 
     def test_attention_backend_configuration(self, mock_config):
         """Test attention backend configuration options."""
@@ -149,7 +150,7 @@ class TestZImageModelInfo:
 
             # Check required fields
             assert info["model_name"] == "Z-Image-Turbo"
-            assert info["model_path"] == "/tmp/fake_zimage_model"
+            assert info["model_path"] == str(Path("/tmp/fake_zimage_model"))
             assert info["parameters"] == "6B"
             assert info["architecture"] == "Single-Stream DiT (S3-DiT)"
             assert info["inference_steps"] == 8

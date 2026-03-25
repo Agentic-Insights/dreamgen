@@ -2,7 +2,6 @@
 Tests for the FastAPI server endpoints
 """
 
-import asyncio
 import os
 from pathlib import Path
 

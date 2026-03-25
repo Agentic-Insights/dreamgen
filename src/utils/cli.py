@@ -3,15 +3,12 @@ Command-line interface for the continuous image generation system.
 """
 
 import asyncio
-import os
 import sys
 from pathlib import Path
 from typing import Optional
 
 # Fix Windows Unicode handling
 if sys.platform == "win32":
-    import locale
-
     if sys.stdout.encoding != "utf-8":
         sys.stdout.reconfigure(encoding="utf-8")
     if sys.stderr.encoding != "utf-8":
@@ -31,8 +28,10 @@ from rich.progress import (
 )
 from rich.table import Table
 
+from .. import __version__
 from ..generators.factory import create_image_generator
 from ..generators.prompt_generator import PromptGenerator
+from ..plugins import ensure_initialized, plugin_manager
 from .config import Config
 from .logging_config import setup_logging
 from .metrics import MetricsCollector
@@ -46,6 +45,7 @@ app = typer.Typer(
     no_args_is_help=True,
     rich_markup_mode="rich",
 )
+plugins_app = typer.Typer(help="Manage prompt entropy plugins")
 
 
 # Initialize app state
@@ -55,6 +55,78 @@ class AppState:
 
 
 app.state = AppState()
+app.add_typer(plugins_app, name="plugins")
+
+
+def get_runtime_config() -> Config:
+    """Get the active runtime config, falling back to defaults if needed."""
+    if app.state.config is None:
+        app.state.config = Config()
+    return app.state.config
+
+
+def create_generator_with_overrides(
+    backend_override: Optional[str] = None,
+    mock: bool = False,
+):
+    """Create an image generator while temporarily overriding the configured backend."""
+    original_backend = app.state.config.model.image_backend
+    effective_backend = "mock" if mock else backend_override
+
+    try:
+        if effective_backend:
+            app.state.config.model.image_backend = effective_backend.lower()
+        return create_image_generator(app.state.config)
+    finally:
+        app.state.config.model.image_backend = original_backend
+
+
+@plugins_app.command("list")
+def list_plugins() -> None:
+    """List registered plugins and their current state."""
+    ensure_initialized(get_runtime_config())
+
+    table = Table(title="DreamGen Plugins")
+    table.add_column("Name", style="cyan")
+    table.add_column("Enabled", style="green")
+    table.add_column("Order", justify="right")
+    table.add_column("Description")
+
+    for plugin in sorted(plugin_manager.plugins.values(), key=lambda item: (item.order, item.name)):
+        table.add_row(
+            plugin.name,
+            "yes" if plugin.enabled else "no",
+            str(plugin.order),
+            plugin.description,
+        )
+
+    console.print(table)
+
+
+@plugins_app.command("enable")
+def enable_plugin(name: str) -> None:
+    """Enable a plugin by name."""
+    ensure_initialized(get_runtime_config())
+
+    if name not in plugin_manager.plugins:
+        console.print(f"[red]Unknown plugin:[/red] {name}")
+        raise typer.Exit(1)
+
+    plugin_manager.enable_plugin(name)
+    console.print(f"[green]Enabled plugin:[/green] {name}")
+
+
+@plugins_app.command("disable")
+def disable_plugin(name: str) -> None:
+    """Disable a plugin by name."""
+    ensure_initialized(get_runtime_config())
+
+    if name not in plugin_manager.plugins:
+        console.print(f"[red]Unknown plugin:[/red] {name}")
+        raise typer.Exit(1)
+
+    plugin_manager.disable_plugin(name)
+    console.print(f"[yellow]Disabled plugin:[/yellow] {name}")
 
 
 def version_callback(value: bool):
@@ -62,9 +134,9 @@ def version_callback(value: bool):
     if value:
         console.print(
             Panel.fit(
-                "[bold green]Continuous Image Generator[/bold green]\n"
-                "Version: 0.1.0\n"
-                "Using: Ollama for prompts, Flux 1.1 for images"
+                "[bold green]DreamGen[/bold green]\n"
+                f"Version: {__version__}\n"
+                "Using: Ollama for prompts and configurable local image backends"
             )
         )
         raise typer.Exit()
@@ -90,11 +162,10 @@ def main(
     ),
 ):
     """
-    🎨 Continuous Image Generation System
+    🎨 DreamGen
 
-    Generate AI images using Ollama for prompts and Flux for image generation.
-    Run `uv run imagegen generate` for CLI usage or `uv run imagegen web` to
-    start the browser UI.
+    Generate AI images using Ollama for prompts and local image backends.
+    Run `uv run dreamgen generate` for CLI usage, or use Docker Compose for the web UI.
     """
     if config_file and config_file.exists():
         app.state.config = Config.from_file(config_file)
@@ -116,6 +187,11 @@ def generate(
     ),
     prompt: Optional[str] = typer.Option(
         None, "--prompt", "-p", help="Provide a custom prompt for direct inference"
+    ),
+    backend: Optional[str] = typer.Option(
+        None,
+        "--backend",
+        help="Override the image backend for this run (flux, zimage, small, turbo, smoke, mock)",
     ),
     mock: bool = typer.Option(
         False,
@@ -150,14 +226,11 @@ def generate(
                         console.print(
                             "[yellow]Using mock image generator (no GPU required)[/yellow]"
                         )
-                        original_backend = app.state.config.model.image_backend
-                        try:
-                            app.state.config.model.image_backend = "mock"
-                            image_gen, backend_name = create_image_generator(app.state.config)
-                        finally:
-                            app.state.config.model.image_backend = original_backend
+                        image_gen, backend_name = create_generator_with_overrides(mock=True)
                     else:
-                        image_gen, backend_name = create_image_generator(app.state.config)
+                        image_gen, backend_name = create_generator_with_overrides(
+                            backend_override=backend
+                        )
                     storage = StorageManager()
                     metrics = MetricsCollector(app.state.config.system.log_dir / "metrics")
                     progress.remove_task(init_task)
@@ -292,6 +365,11 @@ def loop(
     interval: Optional[int] = typer.Option(
         None, "--interval", "-n", help="Interval in seconds between generations", min=0
     ),
+    backend: Optional[str] = typer.Option(
+        None,
+        "--backend",
+        help="Override the image backend for this run (flux, zimage, small, turbo, smoke, mock)",
+    ),
     mock: bool = typer.Option(
         False,
         "--mock",
@@ -328,14 +406,11 @@ def loop(
                         console.print(
                             "[yellow]Using mock image generator (no GPU required)[/yellow]"
                         )
-                        original_backend = app.state.config.model.image_backend
-                        try:
-                            app.state.config.model.image_backend = "mock"
-                            image_gen, backend_name = create_image_generator(app.state.config)
-                        finally:
-                            app.state.config.model.image_backend = original_backend
+                        image_gen, backend_name = create_generator_with_overrides(mock=True)
                     else:
-                        image_gen, backend_name = create_image_generator(app.state.config)
+                        image_gen, backend_name = create_generator_with_overrides(
+                            backend_override=backend
+                        )
                     storage = StorageManager()
                     metrics = MetricsCollector(app.state.config.system.log_dir / "metrics")
                     progress.remove_task(init_task)

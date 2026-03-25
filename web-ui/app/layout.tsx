@@ -16,6 +16,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:7860"),
   title: "DreamGen — Recurring Local Image Generator",
   description: "Generate images locally on a recurring rhythm with simple prompts, entropy plugins, and a lightweight fallback model.",
   openGraph: {

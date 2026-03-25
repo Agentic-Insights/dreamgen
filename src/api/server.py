@@ -35,8 +35,8 @@ logger = logging.getLogger(__name__)
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="Continuous Image Generator API",
-    description="API for AI-powered image generation with plugin architecture",
+    title="DreamGen API",
+    description="API for recurring local image generation with plugin-based prompt entropy",
     version="1.0.0",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
@@ -57,7 +57,7 @@ else:
         "http://127.0.0.1:3000",  # Next.js default dev server on loopback
         "http://localhost:3001",  # Alternative port
         "http://127.0.0.1:3001",  # Alternative port on loopback
-        "https://imagegen.agenticinsights.com",  # Production
+        "https://dreamgen.agenticinsights.com",  # Production
     ]
 
 app.add_middleware(
@@ -198,7 +198,7 @@ class ConnectionManager:
         for connection in self.active_connections:
             try:
                 await connection.send_text(message)
-            except:
+            except Exception:
                 pass  # Handle disconnected clients
 
 
@@ -233,7 +233,7 @@ async def startup_event() -> None:
 async def root():
     """Root endpoint"""
     return {
-        "name": "Continuous Image Generator API",
+        "name": "DreamGen API",
         "version": "1.0.0",
         "docs": "/api/docs",
         "by": "Agentic Insights",
@@ -248,7 +248,7 @@ async def get_status():
         import torch
 
         gpu_available = torch.cuda.is_available() or torch.backends.mps.is_available()
-    except:
+    except Exception:
         gpu_available = False
 
     # Check Ollama availability
@@ -257,7 +257,7 @@ async def get_status():
 
         ollama.Client(host=os.getenv("OLLAMA_HOST", "http://localhost:11434")).list()
         ollama_available = True
-    except:
+    except Exception:
         ollama_available = False
 
     backend_name = backend_label(config, resolve_image_backend(config))
@@ -294,9 +294,6 @@ async def get_plugins():
 @app.get("/api/models/status")
 async def get_model_status():
     """Get status of available models and their download progress"""
-    import os
-    from pathlib import Path
-
     # Use HF_HOME if set, otherwise use TRANSFORMERS_CACHE, fallback to default
     hf_home = os.getenv("HF_HOME")
     if hf_home:
@@ -313,32 +310,81 @@ async def get_model_status():
     models = []
     model_configs = [
         {
+            "id": "local:zimage",
+            "name": "Z-Image-Turbo",
+            "type": "text-to-image",
+            "downloadable": False,
+            "path": str(config.model.zimage_model_path),
+        },
+        {
             "id": config.model.smoke_test_model,
             "name": "Smoke Test SD",
             "type": "text-to-image",
+            "downloadable": True,
         },
         {
             "id": config.model.small_sd_model,
             "name": "Small Stable Diffusion",
             "type": "text-to-image",
+            "downloadable": True,
         },
         {
             "id": config.model.turbo_model,
             "name": "Turbo Stable Diffusion",
             "type": "text-to-image",
+            "downloadable": True,
         },
-        {"id": "Qwen/Qwen-Image", "name": "Qwen-Image", "type": "text-to-image"},
-        {"id": "Qwen/Qwen-Image-Edit", "name": "Qwen-Image-Edit", "type": "image-to-image"},
+        {
+            "id": "Qwen/Qwen-Image",
+            "name": "Qwen-Image",
+            "type": "text-to-image",
+            "downloadable": True,
+        },
+        {
+            "id": "Qwen/Qwen-Image-Edit",
+            "name": "Qwen-Image-Edit",
+            "type": "image-to-image",
+            "downloadable": True,
+        },
         {
             "id": "black-forest-labs/FLUX.1-schnell",
             "name": "FLUX.1 Schnell",
             "type": "text-to-image",
+            "downloadable": True,
         },
-        {"id": "black-forest-labs/FLUX.1-dev", "name": "FLUX.1 Dev", "type": "text-to-image"},
+        {
+            "id": "black-forest-labs/FLUX.1-dev",
+            "name": "FLUX.1 Dev",
+            "type": "text-to-image",
+            "downloadable": True,
+        },
     ]
 
     for model_config in model_configs:
         model_id = model_config["id"]
+        downloadable = model_config.get("downloadable", True)
+
+        if not downloadable:
+            model_path = Path(model_config["path"])
+            size = (
+                sum(path.stat().st_size for path in model_path.rglob("*") if path.is_file())
+                if model_path.exists()
+                else 0
+            )
+            models.append(
+                {
+                    "id": model_id,
+                    "name": model_config["name"],
+                    "type": model_config["type"],
+                    "status": "ready" if model_path.exists() else "not_downloaded",
+                    "size": size,
+                    "incomplete_files": 0,
+                    "path": str(model_path),
+                    "downloadable": False,
+                }
+            )
+            continue
+
         model_path = hf_cache_dir / f"models--{model_id.replace('/', '--')}"
 
         status = "not_downloaded"
@@ -364,7 +410,7 @@ async def get_model_status():
                 try:
                     total_size = sum(f.stat().st_size for f in blobs_path.iterdir() if f.is_file())
                     size = total_size
-                except:
+                except OSError:
                     size = 0
 
         models.append(
@@ -376,6 +422,7 @@ async def get_model_status():
                 "size": size,
                 "incomplete_files": incomplete_files,
                 "path": str(model_path) if model_path.exists() else None,
+                "downloadable": True,
             }
         )
 
@@ -391,10 +438,7 @@ async def download_model(model_id: str):
     model_id = unquote(model_id)
 
     try:
-        # Import huggingface_hub for downloading
-        import asyncio
-
-        from huggingface_hub import hf_hub_download, snapshot_download
+        from huggingface_hub import snapshot_download
 
         # Start download in background
         async def download_in_background():
@@ -460,9 +504,6 @@ async def set_hf_token(token_data: dict):
 
     try:
         # Save token to HF cache directory
-        import os
-        from pathlib import Path
-
         # Use configured HF_HOME or fallback
         hf_cache_dir = Path(os.getenv("HF_HOME", os.path.expanduser("~/.cache/huggingface")))
         hf_cache_dir.mkdir(parents=True, exist_ok=True)
@@ -485,9 +526,6 @@ async def set_hf_token(token_data: dict):
 @app.get("/api/config/hf-token-status")
 async def get_hf_token_status():
     """Check if HF token is configured"""
-    import os
-    from pathlib import Path
-
     # Check environment variable first
     if os.getenv("HF_TOKEN"):
         return {"configured": True, "source": "environment"}

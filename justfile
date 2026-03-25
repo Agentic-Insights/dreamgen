@@ -29,22 +29,6 @@ diag:
     uv run dreamgen diagnose
 
 # =============================================================================
-# Plugin Management
-# =============================================================================
-
-# List all plugins
-pl:
-    uv run dreamgen plugins list
-
-# Enable a plugin
-pe name:
-    uv run dreamgen plugins enable {{name}}
-
-# Disable a plugin
-pd name:
-    uv run dreamgen plugins disable {{name}}
-
-# =============================================================================
 # Development
 # =============================================================================
 
@@ -68,9 +52,9 @@ benchmark-model model:
 gen-zimage prompt="":
     #!/usr/bin/env bash
     if [ -z "{{prompt}}" ]; then
-        uv run dreamgen generate --model zimage
+        uv run dreamgen generate --backend zimage
     else
-        uv run dreamgen generate --model zimage -p "{{prompt}}"
+        uv run dreamgen generate --backend zimage -p "{{prompt}}"
     fi
 
 # Run tests with coverage
@@ -133,11 +117,11 @@ hooks-update:
 
 # Start full stack (production - backend + frontend in containers)
 up:
-    docker-compose up
+    docker compose --env-file .env.docker up
 
 # Start in background
 upd:
-    docker-compose up -d
+    docker compose --env-file .env.docker up -d
 
 # Stop services
 down:

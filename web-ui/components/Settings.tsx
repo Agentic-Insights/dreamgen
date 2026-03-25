@@ -337,7 +337,9 @@ export default function Settings({ systemStatus }: SettingsProps) {
                 <div className="space-y-4">
                   {modelStatus?.models.map((model) => {
                     const isDownloading = downloadingModels.has(model.id);
-                    const canDownload = model.status === 'not_downloaded' || model.status === 'partial';
+                    const canDownload =
+                      model.downloadable !== false &&
+                      (model.status === 'not_downloaded' || model.status === 'partial');
 
                     return (
                       <div
