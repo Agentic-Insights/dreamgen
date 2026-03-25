@@ -66,7 +66,6 @@ class TestConfigMissingEnv:
             ("FLUX_MODEL", "FLUX_MODEL environment variable is required"),
             ("IMAGE_HEIGHT", "IMAGE_HEIGHT environment variable is required"),
             ("LORA_DIR", "LORA_DIR environment variable is required"),
-            ("ENABLED_PLUGINS", "ENABLED_PLUGINS environment variable is required"),
             ("OUTPUT_DIR", "OUTPUT_DIR environment variable is required"),
             ("CPU_ONLY", "CPU_ONLY environment variable is required"),
         ]

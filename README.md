@@ -24,7 +24,7 @@ git clone https://github.com/Agentic-Insights/dreamgen
 cd dreamgen/web-ui && npm install
 
 # Set up your environment
-export HUGGINGFACE_TOKEN=your_token_here
+export HF_TOKEN=your_token_here
 
 # Start generating images!
 dreamgen generate
@@ -56,6 +56,9 @@ dreamgen loop --batch-size 10 --interval 300
 # Use mock mode (no GPU required)
 dreamgen generate --mock
 
+# Force the local Z-Image backend
+dreamgen generate --backend zimage
+
 # Get help
 dreamgen --help
 ```
@@ -69,7 +72,7 @@ dreamgen --help
 
 ## 📖 Full Documentation
 
-For detailed setup, plugin development, and advanced usage, see [CONTRIBUTING.md](CONTRIBUTING.md).
+For detailed setup, plugin development, and advanced usage, see [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).
 
 ## ☁️ Optional: Cloudflare Hosting
 
@@ -81,7 +84,7 @@ DreamGen includes two Cloudflare Workers for free, global image hosting:
 **Use Case**: README badges, social media previews, landing pages
 
 **Features**:
-- Serves one hardcoded image (`ComfyUI_00372_.png`)
+- Serves the most recent PNG from R2
 - R2 bucket binding: `DREAM_BUCKET` → `continuous-image-gen`
 - CORS enabled, 1-day cache
 - Simple TypeScript worker

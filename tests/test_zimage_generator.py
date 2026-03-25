@@ -14,6 +14,7 @@ from src.generators.zimage_generator import ZImageGenerator
 def mock_config():
     """Create a mock configuration for testing."""
     config = MagicMock()
+    config.model.image_backend = "zimage"
     config.model.zimage_model_path = Path("/tmp/fake_zimage_model")
     config.model.zimage_attention = "_sdpa"
     config.model.zimage_compile = False
@@ -83,7 +84,7 @@ class TestZImageGenerator:
             info = gen.get_model_info()
 
         assert info["model_name"] == "Z-Image-Turbo"
-        assert info["model_path"] == "/tmp/fake_zimage_model"
+        assert info["model_path"] == str(Path("/tmp/fake_zimage_model"))
         assert info["parameters"] == "6B"
         assert info["architecture"] == "Single-Stream DiT (S3-DiT)"
         assert info["device"] == "cuda"

@@ -1,10 +1,10 @@
 "use client";
+/* eslint-disable @next/next/no-img-element */
 
-import { useState, useEffect } from "react";
-import Image from "next/image";
+import { useCallback, useEffect, useState } from "react";
 import {
-  Trash2, Download, X, Loader2, Clock, FileText, ZoomIn,
-  Calendar, Grid, ChevronDown, ChevronRight, Folder
+  Trash2, Download, X, Loader2, Clock, FileText,
+  Calendar, Grid, ChevronRight, Folder
 } from "lucide-react";
 import { api, API_BASE } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -49,7 +49,45 @@ export default function Gallery() {
 
   const imagesPerPage = viewMode === "all" ? 20 : 200; // Load reasonable amount for week view
 
-  const loadImages = async () => {
+  const organizeByWeek = useCallback((images: GalleryImage[]) => {
+    const groups = new Map<string, WeekGroup>();
+
+    images.forEach(image => {
+      const date = new Date(image.created_at);
+      const year = date.getFullYear();
+      const weekNumber = getWeekNumber(date);
+      const key = `${year}-${weekNumber}`;
+
+      if (!groups.has(key)) {
+        const { start, end } = getWeekBounds(year, weekNumber);
+        groups.set(key, {
+          year,
+          week: weekNumber,
+          startDate: start,
+          endDate: end,
+          images: []
+        });
+      }
+
+      groups.get(key)!.images.push(image);
+    });
+
+    // Sort groups by year and week (newest first)
+    const sorted = Array.from(groups.values()).sort((a, b) => {
+      if (a.year !== b.year) return b.year - a.year;
+      return b.week - a.week;
+    });
+
+    setWeekGroups(sorted);
+
+    // Auto-expand the most recent week
+    if (sorted.length > 0) {
+      const mostRecent = `${sorted[0].year}-${sorted[0].week}`;
+      setExpandedWeeks(new Set([mostRecent]));
+    }
+  }, []);
+
+  const loadImages = useCallback(async () => {
     setLoading(true);
     setError(null);
 
@@ -116,45 +154,7 @@ export default function Gallery() {
     } finally {
       setLoading(false);
     }
-  };
-
-  const organizeByWeek = (images: GalleryImage[]) => {
-    const groups = new Map<string, WeekGroup>();
-
-    images.forEach(image => {
-      const date = new Date(image.created_at);
-      const year = date.getFullYear();
-      const weekNumber = getWeekNumber(date);
-      const key = `${year}-${weekNumber}`;
-
-      if (!groups.has(key)) {
-        const { start, end } = getWeekBounds(year, weekNumber);
-        groups.set(key, {
-          year,
-          week: weekNumber,
-          startDate: start,
-          endDate: end,
-          images: []
-        });
-      }
-
-      groups.get(key)!.images.push(image);
-    });
-
-    // Sort groups by year and week (newest first)
-    const sorted = Array.from(groups.values()).sort((a, b) => {
-      if (a.year !== b.year) return b.year - a.year;
-      return b.week - a.week;
-    });
-
-    setWeekGroups(sorted);
-
-    // Auto-expand the most recent week
-    if (sorted.length > 0) {
-      const mostRecent = `${sorted[0].year}-${sorted[0].week}`;
-      setExpandedWeeks(new Set([mostRecent]));
-    }
-  };
+  }, [imagesPerPage, organizeByWeek, page, viewMode]);
 
   const getWeekNumber = (date: Date): number => {
     const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -189,8 +189,8 @@ export default function Gallery() {
   };
 
   useEffect(() => {
-    loadImages();
-  }, [page, viewMode]);
+    void loadImages();
+  }, [loadImages]);
 
   const handleDelete = async (imagePath: string, event: React.MouseEvent) => {
     event.stopPropagation();

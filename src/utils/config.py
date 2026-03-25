@@ -28,6 +28,9 @@ class ModelConfig:
     smoke_test_model: str
     small_sd_model: str
     turbo_model: str
+    zimage_model_path: Path
+    zimage_attention: str
+    zimage_compile: bool
     ollama_model: str
     ollama_temperature: float
     flux_model: str
@@ -99,7 +102,7 @@ class Config:
         # Lora configuration
         enabled_loras_str = os.getenv("ENABLED_LORAS")
         enabled_loras = (
-            [l.strip() for l in enabled_loras_str.split(",") if l.strip()]
+            [lora_name.strip() for lora_name in enabled_loras_str.split(",") if lora_name.strip()]
             if enabled_loras_str
             else []
         )
@@ -120,10 +123,16 @@ class Config:
 
         # Model configuration
         use_mock_generator = os.getenv("USE_MOCK_GENERATOR", "false").lower()
+        configured_backend = os.getenv("IMAGE_BACKEND")
+        legacy_image_model = os.getenv("IMAGE_MODEL", "").strip().lower()
         if use_mock_generator in ("true", "1", "yes", "on"):
             image_backend = "mock"
+        elif configured_backend:
+            image_backend = configured_backend
+        elif legacy_image_model in {"flux", "zimage"}:
+            image_backend = legacy_image_model
         else:
-            image_backend = os.getenv("IMAGE_BACKEND", "auto")
+            image_backend = "auto"
 
         if image_backend == "tiny":
             image_backend = "smoke"
@@ -133,6 +142,14 @@ class Config:
         )
         small_sd_model = os.getenv("SMALL_SD_MODEL", "segmind/tiny-sd")
         turbo_model = os.getenv("TURBO_MODEL", "stabilityai/sd-turbo")
+        zimage_model_path = Path(os.getenv("ZIMAGE_MODEL_PATH", "ckpts/Z-Image-Turbo"))
+        zimage_attention = os.getenv("ZIMAGE_ATTENTION", "_sdpa")
+        zimage_compile = os.getenv("ZIMAGE_COMPILE", "false").lower() in (
+            "true",
+            "1",
+            "yes",
+            "on",
+        )
 
         legacy_tiny_model = os.getenv("TINY_SD_MODEL")
         if legacy_tiny_model and not os.getenv("SMOKE_TEST_MODEL"):
@@ -159,6 +176,9 @@ class Config:
             smoke_test_model=smoke_test_model,
             small_sd_model=small_sd_model,
             turbo_model=turbo_model,
+            zimage_model_path=zimage_model_path,
+            zimage_attention=zimage_attention,
+            zimage_compile=zimage_compile,
             ollama_model=ollama_model,
             ollama_temperature=float(ollama_temp),
             flux_model=flux_model,
@@ -278,10 +298,18 @@ class Config:
             errors.append(f"Invalid width: {self.image.width} (must be between 128 and 2048)")
 
         # Validate model parameters
-        if self.model.image_backend not in {"auto", "flux", "small", "turbo", "smoke", "mock"}:
+        if self.model.image_backend not in {
+            "auto",
+            "flux",
+            "zimage",
+            "small",
+            "turbo",
+            "smoke",
+            "mock",
+        }:
             errors.append(
                 f"Invalid image backend: {self.model.image_backend} "
-                "(must be one of auto, flux, small, turbo, smoke, mock)"
+                "(must be one of auto, flux, zimage, small, turbo, smoke, mock)"
             )
         if not (1 <= self.image.num_inference_steps <= 150):
             errors.append(

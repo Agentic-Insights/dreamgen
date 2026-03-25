@@ -1,9 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Sliders, RotateCcw } from "lucide-react";
+import { RotateCcw } from "lucide-react";
 import { api, GenerationConfig } from "@/lib/api";
-import { cn } from "@/lib/utils";
 
 interface AdvancedControlsProps {
   onConfigChange?: (config: Partial<GenerationConfig>) => void;

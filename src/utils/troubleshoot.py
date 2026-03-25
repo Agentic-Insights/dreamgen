@@ -284,7 +284,7 @@ class SystemDiagnostics:
         # Print header
         self.console.print(
             Panel.fit(
-                "[bold green]System Diagnostics for Continuous Image Generator[/bold green]",
+                "[bold green]System Diagnostics for DreamGen[/bold green]",
                 border_style="green",
             )
         )
