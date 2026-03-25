@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.1.1 (2026-03-25)
+
+### Bug Fixes
+
+- **ci**: Guard zimage cuda cleanup
+  ([`36ad93e`](https://github.com/Agentic-Insights/dreamgen/commit/36ad93eb08de7c5c95841ccf26b89b0dda2f6ced))
+
+
 ## v1.1.0 (2026-03-25)
 
 ### Bug Fixes
