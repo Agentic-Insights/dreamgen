@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.1.3 (2026-04-22)
+
+### Bug Fixes
+
+- Lazy-load optional image backends ([#14](https://github.com/Agentic-Insights/dreamgen/pull/14),
+  [`230dd18`](https://github.com/Agentic-Insights/dreamgen/commit/230dd18e872daaae36b14ceba85dcca395e1f9e4))
+
+
 ## v1.1.2 (2026-04-22)
 
 ### Bug Fixes
