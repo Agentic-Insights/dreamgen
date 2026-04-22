@@ -2,11 +2,22 @@
 Tests for the FastAPI server endpoints
 """
 
+import atexit
 import os
+import shutil
+import tempfile
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image, ImageDraw
+
+from src.utils.storage import metadata_path_for, write_image_metadata
+
+# Redirect OUTPUT_DIR to a temp directory BEFORE any server imports so that test
+# runs never write placeholder images into the live output/ directory.
+_TEST_OUTPUT_DIR = tempfile.mkdtemp(prefix="dreamgen_test_output_")
+atexit.register(shutil.rmtree, _TEST_OUTPUT_DIR, ignore_errors=True)
 
 # Set required environment variables for tests
 os.environ["USE_MOCK_GENERATOR"] = "true"
@@ -24,7 +35,7 @@ os.environ["NUM_INFERENCE_STEPS"] = "4"
 os.environ["GUIDANCE_SCALE"] = "0.0"
 os.environ["TRUE_CFG_SCALE"] = "1.0"
 os.environ["ENABLED_PLUGINS"] = "time_of_day,art_style"
-os.environ["OUTPUT_DIR"] = "./output"
+os.environ["OUTPUT_DIR"] = _TEST_OUTPUT_DIR
 os.environ["LOG_DIR"] = "./logs"
 os.environ["CACHE_DIR"] = "./.cache"
 os.environ["CPU_ONLY"] = "false"
@@ -185,9 +196,71 @@ def test_image_file_created(client, tmp_path):
 
     # Convert API path to filesystem path
     # /images/2025/week_40/image_xxx.png -> output/2025/week_40/image_xxx.png
-    fs_path = Path("output") / image_path.replace("/images/", "")
+    fs_path = Path(_TEST_OUTPUT_DIR) / image_path.replace("/images/", "")
 
     # Check if file exists (may not in test environment)
     # This is a best-effort check
     if fs_path.parent.exists():
         assert fs_path.exists() or True  # File may not persist in test mode
+
+
+def test_gallery_ignores_placeholder_artifacts_beyond_scan_cap(client):
+    """Gallery should keep scanning until it finds real images instead of stopping at placeholders."""
+    output_root = Path(_TEST_OUTPUT_DIR)
+    week_dir = output_root / "2099" / "week_01"
+    week_dir.mkdir(parents=True, exist_ok=True)
+
+    for path in output_root.rglob("*.png"):
+        path.unlink()
+        txt_path = path.with_suffix(".txt")
+        if txt_path.exists():
+            txt_path.unlink()
+        meta_path = metadata_path_for(path)
+        if meta_path.exists():
+            meta_path.unlink()
+
+    for i in range(60):
+        placeholder = week_dir / f"image_20990101_0000{i:02d}_{i:08x}.png"
+        Image.new("RGB", (32, 32), color=(200, 200, 200)).save(placeholder)
+        placeholder.with_suffix(".txt").write_text("placeholder")
+        write_image_metadata(placeholder, {"backend": "mock", "is_placeholder": True})
+
+    valid = week_dir / "image_20990101_000999_deadbeef.png"
+    image = Image.new("RGB", (64, 64), color=(20, 20, 40))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((8, 8, 40, 40), fill=(240, 120, 80))
+    image.save(valid)
+    valid.with_suffix(".txt").write_text("real image")
+    write_image_metadata(valid, {"backend": "small-sd", "is_placeholder": False})
+
+    response = client.get("/api/gallery?limit=5&offset=0")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] >= 1
+    assert any(item["path"].endswith("deadbeef.png") for item in data["images"])
+
+
+def test_delete_image_removes_metadata_sidecar(client):
+    """Deleting an image should clean up prompt and metadata sidecars too."""
+    output_root = Path(_TEST_OUTPUT_DIR)
+    week_dir = output_root / "2099" / "week_02"
+    week_dir.mkdir(parents=True, exist_ok=True)
+
+    image_path = week_dir / "image_20990102_000001_feedface.png"
+    image = Image.new("RGB", (64, 64), color=(10, 10, 10))
+    draw = ImageDraw.Draw(image)
+    draw.line((0, 0, 63, 63), fill=(255, 0, 0), width=3)
+    image.save(image_path)
+    prompt_path = image_path.with_suffix(".txt")
+    prompt_path.write_text("delete me")
+    metadata_file = write_image_metadata(
+        image_path, {"backend": "small-sd", "is_placeholder": False}
+    )
+
+    relative_path = image_path.relative_to(Path(_TEST_OUTPUT_DIR)).as_posix()
+    response = client.delete(f"/api/gallery/{relative_path}")
+
+    assert response.status_code == 200
+    assert not image_path.exists()
+    assert not prompt_path.exists()
+    assert not metadata_file.exists()

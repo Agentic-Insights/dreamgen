@@ -7,12 +7,14 @@ require any ML models. It simply creates a placeholder image using PIL.
 from __future__ import annotations
 
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Tuple
 
 from PIL import Image
 
 from ..utils.config import Config
+from ..utils.storage import write_image_metadata
 
 
 class MockImageGenerator:
@@ -55,6 +57,15 @@ class MockImageGenerator:
 
         with open(output_path.with_suffix(".txt"), "w", encoding="utf-8") as f:
             f.write(prompt)
+
+        write_image_metadata(
+            output_path,
+            {
+                "backend": self.model_name,
+                "is_placeholder": True,
+                "generated_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            },
+        )
 
         gen_time = time.time() - start
         return output_path, gen_time, self.model_name
