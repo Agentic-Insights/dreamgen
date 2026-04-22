@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.1.5 (2026-04-22)
+
+### Bug Fixes
+
+- Stop homepage gallery polling loop ([#16](https://github.com/Agentic-Insights/dreamgen/pull/16),
+  [`b8c6c46`](https://github.com/Agentic-Insights/dreamgen/commit/b8c6c4666253aebb76d75fb476bc73370bf613b7))
+
+
 ## v1.1.4 (2026-04-22)
 
 ### Bug Fixes
