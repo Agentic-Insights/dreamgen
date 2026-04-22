@@ -118,6 +118,7 @@ export default function Home() {
   const promptSeedRef = useRef(promptSeed);
   const cadenceMinutesRef = useRef(cadenceMinutes);
   const isGeneratingRef = useRef(isGenerating);
+  const statusRef = useRef<SystemStatus | null>(status);
   const runGenerationRef = useRef<(source: "manual" | "loop") => Promise<void>>(
     async () => {}
   );
@@ -146,6 +147,7 @@ export default function Home() {
     try {
       const response = await api.getGallery(6, 0);
       const latestImage = response.images[0];
+      const latestStatus = statusRef.current;
       startTransition(() => {
         setRecentImages(response.images);
         if (latestImage) {
@@ -156,8 +158,8 @@ export default function Home() {
               prompt: latestImage.prompt,
               image_path: latestImage.path,
               metadata: {
-                backend: status?.backend ?? "unknown",
-                plugins_used: status?.active_plugins ?? [],
+                backend: latestStatus?.backend ?? "unknown",
+                plugins_used: latestStatus?.active_plugins ?? [],
               },
               created_at: latestImage.created_at,
             } satisfies GenerateResponse)
@@ -167,7 +169,7 @@ export default function Home() {
     } catch (error) {
       console.error("Failed to load recent images:", error);
     }
-  }, [status?.active_plugins, status?.backend]);
+  }, []);
 
   runGenerationRef.current = async (source: "manual" | "loop") => {
     if (isGeneratingRef.current) return;
@@ -211,7 +213,7 @@ export default function Home() {
     setPromptSeed(readString(STORAGE_KEYS.promptSeed, ""));
     setCadenceMinutes(readNumber(STORAGE_KEYS.cadenceMinutes, 60));
     setLoopEnabled(readBoolean(STORAGE_KEYS.sessionLoop, false));
-  }, [loadRecentImages]);
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -229,6 +231,10 @@ export default function Home() {
     if (typeof window === "undefined") return;
     window.localStorage.setItem(STORAGE_KEYS.sessionLoop, String(loopEnabled));
   }, [loopEnabled]);
+
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
 
   useEffect(() => {
     isGeneratingRef.current = isGenerating;
