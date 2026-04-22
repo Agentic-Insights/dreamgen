@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.1.2 (2026-04-22)
+
+### Bug Fixes
+
+- Harden gallery against placeholder test artifacts
+  ([#13](https://github.com/Agentic-Insights/dreamgen/pull/13),
+  [`ba20176`](https://github.com/Agentic-Insights/dreamgen/commit/ba20176843709ca9b661cd3c91126b9ad866531d))
+
+
 ## v1.1.1 (2026-03-25)
 
 ### Bug Fixes
