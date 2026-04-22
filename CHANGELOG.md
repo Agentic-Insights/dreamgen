@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.1.4 (2026-04-22)
+
+### Bug Fixes
+
+- Invalidate stale empty gallery cache ([#15](https://github.com/Agentic-Insights/dreamgen/pull/15),
+  [`22c77f1`](https://github.com/Agentic-Insights/dreamgen/commit/22c77f11b4002d33c942c791876487e5ea1c36b0))
+
+
 ## v1.1.3 (2026-04-22)
 
 ### Bug Fixes
