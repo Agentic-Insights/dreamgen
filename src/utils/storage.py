@@ -3,10 +3,36 @@ Storage utilities for managing image output directories and files.
 """
 
 import hashlib
+import json
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from PIL import Image
+
+
+def metadata_path_for(image_path: Path) -> Path:
+    """Return the sidecar metadata path for an image."""
+    return image_path.with_suffix(".meta.json")
+
+
+def write_image_metadata(image_path: Path, metadata: dict[str, Any]) -> Path:
+    """Write a JSON sidecar describing how an image was produced."""
+    metadata_path = metadata_path_for(image_path)
+    metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
+    return metadata_path
+
+
+def read_image_metadata(image_path: Path) -> dict[str, Any]:
+    """Read image sidecar metadata if available."""
+    metadata_path = metadata_path_for(image_path)
+    if not metadata_path.exists():
+        return {}
+
+    try:
+        return json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
 
 
 class StorageManager:
@@ -55,19 +81,30 @@ class StorageManager:
             age = (now - datetime.fromtimestamp(image_file.stat().st_mtime)).days
 
             if age > max_age_days:
-                # Remove both image and its associated prompt file
+                # Remove image and its associated sidecars.
                 prompt_file = image_file.with_suffix(".txt")
                 if prompt_file.exists():
                     prompt_file.unlink()
+                metadata_file = metadata_path_for(image_file)
+                if metadata_file.exists():
+                    metadata_file.unlink()
                 image_file.unlink()
 
 
-def save_image_and_prompt(image: Image.Image, prompt: str, base_dir: str = "output") -> Path:
-    """Save an image and its prompt to the output directory."""
+def save_image_and_prompt(
+    image: Image.Image,
+    prompt: str,
+    base_dir: str = "output",
+    metadata: dict[str, Any] | None = None,
+) -> Path:
+    """Save an image, its prompt, and optional metadata to the output directory."""
     storage = StorageManager(base_dir)
     output_path = storage.get_output_path(prompt)
 
     # Save the image
     image.save(output_path, "PNG")
+
+    if metadata:
+        write_image_metadata(output_path, metadata)
 
     return output_path

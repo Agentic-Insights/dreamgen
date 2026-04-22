@@ -16,6 +16,7 @@ import aiofiles
 from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from PIL import Image
 from pydantic import BaseModel, Field
 
 from src.generators.factory import (
@@ -27,7 +28,13 @@ from src.generators.factory import (
 from src.generators.prompt_generator import PromptGenerator
 from src.plugins import plugin_manager, register_lora_plugin
 from src.utils.config import Config
-from src.utils.storage import StorageManager, save_image_and_prompt
+from src.utils.storage import (
+    StorageManager,
+    metadata_path_for,
+    read_image_metadata,
+    save_image_and_prompt,
+    write_image_metadata,
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -98,6 +105,107 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # Mount static files for serving generated images
 app.mount("/images", StaticFiles(directory=str(OUTPUT_DIR)), name="images")
+
+
+def is_placeholder_artifact(image_file: Path, metadata: Optional[dict[str, Any]] = None) -> bool:
+    """Return True for mock/placeholder artifacts that should stay out of the live gallery."""
+    metadata = metadata or read_image_metadata(image_file)
+    backend = str(metadata.get("backend", "")).lower()
+    if backend == "mock" or metadata.get("is_placeholder") is True:
+        return True
+
+    try:
+        file_size = image_file.stat().st_size
+    except OSError:
+        return False
+
+    if file_size > 8 * 1024:
+        return False
+
+    try:
+        with Image.open(image_file) as img:
+            extrema = img.convert("RGB").getextrema()
+    except Exception:
+        return False
+
+    return all(channel_min == channel_max for channel_min, channel_max in extrema)
+
+
+MAX_GALLERY_SCAN = int(os.getenv("MAX_GALLERY_SCAN", "2000"))
+
+
+def build_gallery_index(output_dir: Path) -> List[Dict[str, Any]]:
+    """Build gallery metadata without reading prompt files for every stored image."""
+    images: List[Dict[str, Any]] = []
+    last_image: Optional[Dict[str, Any]] = None
+
+    all_files = list(output_dir.rglob("*.png"))
+    image_files = sorted(all_files, key=lambda path: path.stat().st_mtime, reverse=True)
+
+    for image_file in image_files:
+        metadata = read_image_metadata(image_file)
+        if is_placeholder_artifact(image_file, metadata):
+            continue
+
+        stat_result = image_file.stat()
+        image_entry = {
+            "file": image_file,
+            "path": f"/images/{image_file.relative_to(output_dir).as_posix()}",
+            "created_at": datetime.fromtimestamp(stat_result.st_mtime).isoformat(),
+            "size": stat_result.st_size,
+            "prompt_hash": image_file.stem.rsplit("_", 1)[-1],
+            "metadata": metadata,
+        }
+
+        if last_image is not None:
+            created_delta = abs(
+                (
+                    datetime.fromisoformat(last_image["created_at"])
+                    - datetime.fromisoformat(image_entry["created_at"])
+                ).total_seconds()
+            )
+            if (
+                image_entry["size"] == last_image["size"]
+                and image_entry["prompt_hash"] == last_image["prompt_hash"]
+                and created_delta <= 8
+                and image_entry["metadata"] == last_image["metadata"]
+            ):
+                continue
+
+        images.append(image_entry)
+        last_image = image_entry
+        if len(images) >= MAX_GALLERY_SCAN:
+            break
+
+    return images
+
+
+async def hydrate_gallery_entries(images: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Load prompts only for the images being returned to the client."""
+    hydrated: List[Dict[str, Any]] = []
+
+    for image_entry in images:
+        image_file = image_entry["file"]
+        prompt_file = image_file.with_suffix(".txt")
+        prompt = ""
+        if prompt_file.exists():
+            try:
+                async with aiofiles.open(prompt_file, "r", encoding="utf-8", errors="ignore") as f:
+                    prompt = await f.read()
+            except Exception as e:
+                logger.warning(f"Failed to read prompt file {prompt_file}: {e}")
+                prompt = "Could not read prompt"
+
+        hydrated.append(
+            {
+                "path": image_entry["path"],
+                "prompt": prompt.strip(),
+                "created_at": image_entry["created_at"],
+                "size": image_entry["size"],
+            }
+        )
+
+    return hydrated
 
 
 # Pydantic models
@@ -760,6 +868,17 @@ async def generate_image(request: GenerateRequest):
             force_reinit=False,
             seed=request.seed,
         )
+        existing_metadata = read_image_metadata(image_path)
+        write_image_metadata(
+            image_path,
+            {
+                **existing_metadata,
+                "backend": backend_name,
+                "configured_backend": config.model.image_backend,
+                "generated_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+                "seed": request.seed,
+            },
+        )
 
         # Create relative path for API response
         relative_path = f"/images/{image_path.relative_to(OUTPUT_DIR).as_posix()}"
@@ -803,54 +922,15 @@ async def generate_image(request: GenerateRequest):
 
 @app.get("/api/gallery")
 async def get_gallery(limit: int = 50, offset: int = 0):
-    """Get list of generated images"""
-    images = []
-    last_image: Optional[Dict[str, Any]] = None
-
-    # Get all image files from output directory
-    image_files = sorted(OUTPUT_DIR.glob("**/*.png"), key=lambda x: x.stat().st_mtime, reverse=True)
-
-    for image_file in image_files:
-        # Check if corresponding prompt file exists
-        prompt_file = image_file.with_suffix(".txt")
-        prompt = ""
-        if prompt_file.exists():
-            try:
-                async with aiofiles.open(prompt_file, "r", encoding="utf-8", errors="ignore") as f:
-                    prompt = await f.read()
-            except Exception as e:
-                logger.warning(f"Failed to read prompt file {prompt_file}: {e}")
-                prompt = "Could not read prompt"
-
-        created_at = datetime.fromtimestamp(image_file.stat().st_mtime).isoformat()
-        image_entry = {
-            "path": f"/images/{image_file.relative_to(OUTPUT_DIR).as_posix()}",
-            "prompt": prompt.strip(),
-            "created_at": created_at,
-            "size": image_file.stat().st_size,
-        }
-
-        # Collapse historical double-saves created by older API behavior.
-        if last_image is not None:
-            created_delta = abs(
-                (
-                    datetime.fromisoformat(last_image["created_at"])
-                    - datetime.fromisoformat(image_entry["created_at"])
-                ).total_seconds()
-            )
-            if (
-                image_entry["prompt"] == last_image["prompt"]
-                and image_entry["size"] == last_image["size"]
-                and created_delta <= 8
-            ):
-                continue
-
-        images.append(image_entry)
-        last_image = image_entry
-
-    paginated_images = images[offset : offset + limit]
-
-    return {"images": paginated_images, "total": len(images), "limit": limit, "offset": offset}
+    """Get list of generated images without blocking on every prompt file in storage."""
+    indexed_images = await asyncio.to_thread(build_gallery_index, OUTPUT_DIR)
+    paginated_images = await hydrate_gallery_entries(indexed_images[offset : offset + limit])
+    return {
+        "images": paginated_images,
+        "total": len(indexed_images),
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @app.delete("/api/gallery/{image_path:path}")
@@ -865,11 +945,14 @@ async def delete_image(image_path: str):
     if not full_path.exists():
         raise HTTPException(status_code=404, detail="Image not found")
 
-    # Delete image and prompt files
+    # Delete image and sidecar files
     full_path.unlink()
     prompt_path = full_path.with_suffix(".txt")
     if prompt_path.exists():
         prompt_path.unlink()
+    metadata_path = metadata_path_for(full_path)
+    if metadata_path.exists():
+        metadata_path.unlink()
 
     return {"message": "Image deleted successfully"}
 

@@ -21,8 +21,8 @@ services:
     environment:
       - HOST=0.0.0.0
       - PORT=8000
-      - USE_MOCK_GENERATOR=${USE_MOCK_GENERATOR:-true}
-      - MOCK_MODE=${MOCK_MODE:-true}
+      - USE_MOCK_GENERATOR=${USE_MOCK_GENERATOR:-false}
+      - MOCK_MODE=${MOCK_MODE:-false}
       - IMAGE_BACKEND=${IMAGE_BACKEND:-auto}
       - HF_TOKEN=${HF_TOKEN:-}
       - HF_HOME=/app/models
@@ -79,8 +79,8 @@ services:
       - backend
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:7860"]
+      test: ["CMD", "node", "-e", "const r=require('http').get('http://localhost:7860',(res)=>{process.exit(res.statusCode<500?0:1)});r.on('error',()=>process.exit(1));"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 60s
