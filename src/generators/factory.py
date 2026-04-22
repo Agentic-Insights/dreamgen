@@ -7,11 +7,8 @@ from pathlib import Path
 from typing import Tuple
 
 from ..utils.config import Config
-from .image_generator import ImageGenerator
 from .mock_image_generator import MockImageGenerator
 from .stable_diffusion_image_generator import StableDiffusionImageGenerator
-from .turbo_image_generator import TurboImageGenerator
-from .zimage_generator import ZImageGenerator
 
 
 def _hf_cache_root() -> Path:
@@ -97,9 +94,15 @@ def create_image_generator(config: Config) -> Tuple[object, str]:
             backend_label(config, backend),
         )
     if backend == "turbo":
+        from .turbo_image_generator import TurboImageGenerator
+
         return TurboImageGenerator(config), backend_label(config, backend)
     if backend == "zimage":
+        from .zimage_generator import ZImageGenerator
+
         return ZImageGenerator(config), backend_label(config, backend)
     if backend == "flux":
+        from .image_generator import ImageGenerator
+
         return ImageGenerator(config), backend_label(config, backend)
     raise ValueError(f"Unsupported image backend: {backend}")
