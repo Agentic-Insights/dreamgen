@@ -9,7 +9,7 @@ interface CachedData<T = unknown> {
 class GalleryCache {
   private dbName = 'GalleryCache';
   private storeName = 'galleryData';
-  private version = 1;
+  private version = 2;
   private ttl = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
   private db: IDBDatabase | null = null;
 
@@ -32,11 +32,12 @@ class GalleryCache {
       request.onupgradeneeded = (event) => {
         const db = (event.target as IDBOpenDBRequest).result;
 
-        // Create object store if it doesn't exist
-        if (!db.objectStoreNames.contains(this.storeName)) {
-          const store = db.createObjectStore(this.storeName, { keyPath: 'key' });
-          store.createIndex('timestamp', 'timestamp', { unique: false });
+        if (db.objectStoreNames.contains(this.storeName)) {
+          db.deleteObjectStore(this.storeName);
         }
+
+        const store = db.createObjectStore(this.storeName, { keyPath: 'key' });
+        store.createIndex('timestamp', 'timestamp', { unique: false });
       };
     });
   }
