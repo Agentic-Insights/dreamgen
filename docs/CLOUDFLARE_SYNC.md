@@ -73,6 +73,25 @@ just deploy-gallery     # Deploy gallery Pages app
 just deploy             # Deploy both + sync
 ```
 
+### Automated code deploys
+
+Cloudflare code deployment is automated by `.github/workflows/cloudflare-deploy.yml`.
+On pushes to `main` that change `cloudflare-gallery/**`, `host-image/**`, or the workflow
+itself, GitHub Actions deploys:
+
+- `cloudflare-gallery` to the `dreamgen-gallery` Pages project.
+- `host-image` to the `host-image` Worker.
+
+The workflow can also be run manually from GitHub Actions with `workflow_dispatch`.
+It expects these repository secrets:
+
+- `CLOUDFLARE_ACCOUNT_ID`
+- `CLOUDFLARE_API_TOKEN`
+
+Generated image publishing is still a separate local sync step because `output/` is ignored
+and may contain local mock/test artifacts. Use `just sync-gallery` or `just sync` only after
+confirming the local `output/` contents are intended for the public gallery.
+
 ## Troubleshooting
 
 ### "Access Denied" errors
