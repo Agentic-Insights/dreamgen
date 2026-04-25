@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable @next/next/no-img-element */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Sparkles,
   Loader2,
@@ -17,14 +17,27 @@ import { api, GenerateResponse, PluginInfo, API_BASE } from "@/lib/api";
 import { motion, AnimatePresence } from "framer-motion";
 import MetaPromptModal from "@/components/MetaPromptModal";
 import AdvancedControls from "@/components/AdvancedControls";
+import TaskProgress from "@/components/TaskProgress";
+import {
+  createClientRequestId,
+  getFallbackProgress,
+  getTaskProgressUpdate,
+  INITIAL_IMAGE_PROGRESS,
+  INITIAL_PROMPT_PROGRESS,
+  type ProgressSnapshot,
+} from "@/lib/task-progress";
 
 export default function Playground() {
   // State management
   const [metaPrompt, setMetaPrompt] = useState("");
   const [generatedPrompt, setGeneratedPrompt] = useState("");
   const [finalPrompt, setFinalPrompt] = useState("");
+  const [promptError, setPromptError] = useState<string | null>(null);
+  const [imageError, setImageError] = useState<string | null>(null);
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  const [promptProgress, setPromptProgress] = useState<ProgressSnapshot | null>(null);
+  const [imageProgress, setImageProgress] = useState<ProgressSnapshot | null>(null);
   const [currentImage, setCurrentImage] = useState<GenerateResponse | null>(null);
   const [recentGenerations, setRecentGenerations] = useState<GenerateResponse[]>([]);
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
@@ -36,10 +49,83 @@ export default function Playground() {
     history: true
   });
   const [seed, setSeed] = useState<number | null>(null);
+  const promptRequestIdRef = useRef<string | null>(null);
+  const imageRequestIdRef = useRef<string | null>(null);
+  const promptResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const imageResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     loadPlugins();
   }, []);
+
+  useEffect(() => {
+    const unsubscribe = api.subscribeWebSocket((data) => {
+      const nextPromptProgress = getTaskProgressUpdate(
+        data,
+        "prompt_generation",
+        promptRequestIdRef.current
+      );
+      if (nextPromptProgress) {
+        setPromptProgress((prev) =>
+          prev && prev.progress > nextPromptProgress.progress ? prev : nextPromptProgress
+        );
+      }
+
+      const nextImageProgress = getTaskProgressUpdate(
+        data,
+        "image_generation",
+        imageRequestIdRef.current
+      );
+      if (nextImageProgress) {
+        setImageProgress((prev) =>
+          prev && prev.progress > nextImageProgress.progress ? prev : nextImageProgress
+        );
+      }
+
+      if (typeof data !== "object" || data === null || !("type" in data)) return;
+
+      const msg = data as Record<string, unknown>;
+      if (
+        msg.type === "generation_error" &&
+        msg.client_request_id === imageRequestIdRef.current
+      ) {
+        setImageError(String(msg.error ?? "Failed to generate image"));
+        setIsGeneratingImage(false);
+        setImageProgress(null);
+        imageRequestIdRef.current = null;
+      }
+    });
+
+    return () => {
+      unsubscribe();
+      if (promptResetTimeoutRef.current) clearTimeout(promptResetTimeoutRef.current);
+      if (imageResetTimeoutRef.current) clearTimeout(imageResetTimeoutRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isGeneratingPrompt || !promptProgress || promptProgress.progress >= 96) return;
+
+    const timeoutId = setTimeout(() => {
+      setPromptProgress((prev) =>
+        prev ? getFallbackProgress("prompt_generation", prev) : prev
+      );
+    }, 1800);
+
+    return () => clearTimeout(timeoutId);
+  }, [isGeneratingPrompt, promptProgress]);
+
+  useEffect(() => {
+    if (!isGeneratingImage || !imageProgress || imageProgress.progress >= 96) return;
+
+    const timeoutId = setTimeout(() => {
+      setImageProgress((prev) =>
+        prev ? getFallbackProgress("image_generation", prev) : prev
+      );
+    }, 2500);
+
+    return () => clearTimeout(timeoutId);
+  }, [isGeneratingImage, imageProgress]);
 
   const loadPlugins = async () => {
     try {
@@ -51,15 +137,32 @@ export default function Playground() {
   };
 
   const handleGeneratePrompt = async () => {
+    const clientRequestId = createClientRequestId("prompt");
+    promptRequestIdRef.current = clientRequestId;
+    if (promptResetTimeoutRef.current) clearTimeout(promptResetTimeoutRef.current);
     setIsGeneratingPrompt(true);
+    setPromptError(null);
+    setPromptProgress(INITIAL_PROMPT_PROGRESS);
     try {
-      const response = await api.generatePrompt(metaPrompt || undefined);
+      const response = await api.generatePrompt(metaPrompt || undefined, clientRequestId);
 
       setGeneratedPrompt(response.prompt);
       setFinalPrompt(response.prompt);
+      setPromptProgress({
+        progress: 100,
+        title: "Prompt ready",
+        detail: "The generated prompt is ready to edit or use directly.",
+      });
+      if (promptResetTimeoutRef.current) clearTimeout(promptResetTimeoutRef.current);
+      promptResetTimeoutRef.current = setTimeout(() => {
+        setPromptProgress(null);
+      }, 900);
     } catch (error) {
       console.error('Failed to generate prompt:', error);
+      setPromptError(error instanceof Error ? error.message : 'Failed to generate prompt');
+      setPromptProgress(null);
     } finally {
+      promptRequestIdRef.current = null;
       setIsGeneratingPrompt(false);
     }
   };
@@ -67,21 +170,39 @@ export default function Playground() {
   const handleGenerateImage = async () => {
     if (!finalPrompt.trim()) return;
 
+    const clientRequestId = createClientRequestId("image");
+    imageRequestIdRef.current = clientRequestId;
+    if (imageResetTimeoutRef.current) clearTimeout(imageResetTimeoutRef.current);
     setIsGeneratingImage(true);
+    setImageError(null);
+    setImageProgress(INITIAL_IMAGE_PROGRESS);
     try {
       const response = await api.generate({
         prompt: finalPrompt,
         enable_plugins: true,
-        seed: seed ?? undefined
+        seed: seed ?? undefined,
+        client_request_id: clientRequestId,
       });
 
       setCurrentImage(response);
 
       // Add to recent generations (keep last 10)
       setRecentGenerations(prev => [response, ...prev].slice(0, 10));
+      setImageProgress({
+        progress: 100,
+        title: "Image ready",
+        detail: "The generated image is saved and ready to review.",
+      });
+      if (imageResetTimeoutRef.current) clearTimeout(imageResetTimeoutRef.current);
+      imageResetTimeoutRef.current = setTimeout(() => {
+        setImageProgress(null);
+      }, 1200);
     } catch (error) {
       console.error('Failed to generate image:', error);
+      setImageError(error instanceof Error ? error.message : 'Failed to generate image');
+      setImageProgress(null);
     } finally {
+      imageRequestIdRef.current = null;
       setIsGeneratingImage(false);
     }
   };
@@ -156,6 +277,16 @@ export default function Playground() {
                         )}
                       </button>
 
+                      {isGeneratingPrompt && promptProgress && (
+                        <TaskProgress progress={promptProgress} compact />
+                      )}
+
+                      {promptError && (
+                        <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                          {promptError}
+                        </div>
+                      )}
+
                       {/* Generated Prompt Display */}
                       {generatedPrompt && (
                         <div className="space-y-2">
@@ -196,6 +327,16 @@ export default function Playground() {
                           </div>
                         )}
                       </button>
+
+                      {isGeneratingImage && imageProgress && (
+                        <TaskProgress progress={imageProgress} compact />
+                      )}
+
+                      {imageError && (
+                        <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                          {imageError}
+                        </div>
+                      )}
                     </div>
                   </motion.div>
                 )}
@@ -287,11 +428,9 @@ export default function Playground() {
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.9 }}
-                className="text-center"
+                className="w-full px-6"
               >
-                <Loader2 className="w-16 h-16 text-primary animate-spin mx-auto mb-4" />
-                <p className="text-sm text-foreground">Generating image...</p>
-                <p className="text-xs text-muted-foreground mt-2">This may take a moment</p>
+                <TaskProgress progress={imageProgress ?? INITIAL_IMAGE_PROGRESS} />
               </motion.div>
             ) : currentImage ? (
               <motion.div

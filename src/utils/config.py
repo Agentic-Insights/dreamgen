@@ -32,6 +32,7 @@ class ModelConfig:
     zimage_attention: str
     zimage_compile: bool
     ollama_model: str
+    ollama_image_model: str
     ollama_temperature: float
     flux_model: str
     max_sequence_length: int
@@ -129,7 +130,7 @@ class Config:
             image_backend = "mock"
         elif configured_backend:
             image_backend = configured_backend
-        elif legacy_image_model in {"flux", "zimage"}:
+        elif legacy_image_model in {"flux", "ollama", "zimage"}:
             image_backend = legacy_image_model
         else:
             image_backend = "auto"
@@ -159,6 +160,8 @@ class Config:
         if not ollama_model:
             raise ValueError("OLLAMA_MODEL environment variable is required")
 
+        ollama_image_model = os.getenv("OLLAMA_IMAGE_MODEL", "").strip()
+
         ollama_temp = os.getenv("OLLAMA_TEMPERATURE")
         if not ollama_temp:
             raise ValueError("OLLAMA_TEMPERATURE environment variable is required")
@@ -180,6 +183,7 @@ class Config:
             zimage_attention=zimage_attention,
             zimage_compile=zimage_compile,
             ollama_model=ollama_model,
+            ollama_image_model=ollama_image_model,
             ollama_temperature=float(ollama_temp),
             flux_model=flux_model,
             max_sequence_length=int(max_seq_len),
@@ -301,6 +305,7 @@ class Config:
         if self.model.image_backend not in {
             "auto",
             "flux",
+            "ollama",
             "zimage",
             "small",
             "turbo",
@@ -309,7 +314,7 @@ class Config:
         }:
             errors.append(
                 f"Invalid image backend: {self.model.image_backend} "
-                "(must be one of auto, flux, zimage, small, turbo, smoke, mock)"
+                "(must be one of auto, flux, ollama, zimage, small, turbo, smoke, mock)"
             )
         if not (1 <= self.image.num_inference_steps <= 150):
             errors.append(

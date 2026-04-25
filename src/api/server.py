@@ -27,7 +27,14 @@ from src.generators.factory import (
 )
 from src.generators.prompt_generator import PromptGenerator
 from src.plugins import plugin_manager, register_lora_plugin
+from src.plugins.lora import get_available_loras
 from src.utils.config import Config
+from src.utils.ollama import (
+    get_ollama_version,
+    list_ollama_models,
+    ollama_host,
+    resolve_ollama_model,
+)
 from src.utils.storage import (
     StorageManager,
     metadata_path_for,
@@ -39,6 +46,9 @@ from src.utils.storage import (
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+ALLOWED_IMAGE_BACKENDS = {"auto", "flux", "ollama", "zimage", "small", "turbo", "smoke", "mock"}
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -98,6 +108,52 @@ def configure_plugins() -> None:
 
 
 configure_plugins()
+
+
+def zimage_native_source_path() -> Path:
+    """Return the expected local Z-Image source checkout path."""
+    return PROJECT_ROOT / "ref-repos" / "Z-Image" / "src"
+
+
+def inspect_local_zimage_model(model_path: Path) -> tuple[str, int]:
+    """Return readiness status and size for a repo-local Z-Image checkpoint directory."""
+    if not model_path.exists():
+        return ("not_downloaded", 0)
+
+    size = sum(path.stat().st_size for path in model_path.rglob("*") if path.is_file())
+    transformer_files = list((model_path / "transformer").glob("*.safetensors"))
+    text_encoder_files = list((model_path / "text_encoder").glob("*.safetensors"))
+    required_files = [
+        model_path / "model_index.json",
+        model_path / "tokenizer" / "tokenizer.json",
+        model_path / "vae" / "diffusion_pytorch_model.safetensors",
+    ]
+
+    if transformer_files and text_encoder_files and all(path.exists() for path in required_files):
+        return ("ready", size)
+
+    return ("partial", size)
+
+
+def generation_config_payload() -> Dict[str, Any]:
+    """Serialize mutable generation/runtime settings for the frontend."""
+    return {
+        "width": config.image.width,
+        "height": config.image.height,
+        "num_inference_steps": config.image.num_inference_steps,
+        "guidance_scale": config.image.guidance_scale,
+        "true_cfg_scale": config.image.true_cfg_scale,
+        "ollama_temperature": config.model.ollama_temperature,
+        "image_backend": config.model.image_backend,
+        "ollama_image_model": config.model.ollama_image_model,
+        "enabled_loras": config.model.lora.enabled_loras,
+        "available_loras": get_available_loras(config.model.lora.lora_dir),
+        "lora_application_probability": config.model.lora.application_probability,
+        "lora_dir": str(config.model.lora.lora_dir),
+        "zimage_model_path": str(config.model.zimage_model_path),
+        "zimage_native_available": zimage_native_source_path().exists(),
+    }
+
 
 # Output directory setup
 OUTPUT_DIR = config.system.output_dir
@@ -215,6 +271,9 @@ class GenerateRequest(BaseModel):
     prompt: Optional[str] = Field(None, description="Optional custom prompt")
     enable_plugins: bool = Field(True, description="Enable plugin enhancements")
     seed: Optional[int] = Field(None, description="Random seed for reproducibility")
+    client_request_id: Optional[str] = Field(
+        None, description="Client-provided request ID used to correlate progress events"
+    )
 
 
 class GenerateResponse(BaseModel):
@@ -239,6 +298,9 @@ class PromptRequest(BaseModel):
 
     meta_prompt: Optional[str] = Field(
         None, description="Optional system prompt used to steer prompt generation"
+    )
+    client_request_id: Optional[str] = Field(
+        None, description="Client-provided request ID used to correlate progress events"
     )
 
 
@@ -311,6 +373,31 @@ class ConnectionManager:
 
 
 manager = ConnectionManager()
+
+
+async def broadcast_task_progress(
+    *,
+    task: str,
+    task_id: str,
+    client_request_id: Optional[str],
+    progress: int,
+    label: str,
+    detail: str,
+) -> None:
+    """Broadcast a normalized task progress event for frontend progress UIs."""
+    await manager.broadcast(
+        json.dumps(
+            {
+                "type": "task_progress",
+                "task": task,
+                "id": task_id,
+                "client_request_id": client_request_id,
+                "progress": progress,
+                "label": label,
+                "detail": detail,
+            }
+        )
+    )
 
 
 async def prefetch_default_fallback_model() -> None:
@@ -421,7 +508,7 @@ async def get_model_status():
             "id": "local:zimage",
             "name": "Z-Image-Turbo",
             "type": "text-to-image",
-            "downloadable": False,
+            "downloadable": True,
             "path": str(config.model.zimage_model_path),
         },
         {
@@ -471,6 +558,23 @@ async def get_model_status():
     for model_config in model_configs:
         model_id = model_config["id"]
         downloadable = model_config.get("downloadable", True)
+
+        if model_id == "local:zimage":
+            model_path = Path(model_config["path"])
+            status, size = inspect_local_zimage_model(model_path)
+            models.append(
+                {
+                    "id": model_id,
+                    "name": model_config["name"],
+                    "type": model_config["type"],
+                    "status": status,
+                    "size": size,
+                    "incomplete_files": 0,
+                    "path": str(model_path),
+                    "downloadable": True,
+                }
+            )
+            continue
 
         if not downloadable:
             model_path = Path(model_config["path"])
@@ -544,6 +648,8 @@ async def download_model(model_id: str):
     from urllib.parse import unquote
 
     model_id = unquote(model_id)
+    resolved_model_id = "Tongyi-MAI/Z-Image-Turbo" if model_id == "local:zimage" else model_id
+    local_dir = str(config.model.zimage_model_path) if model_id == "local:zimage" else None
 
     try:
         from huggingface_hub import snapshot_download
@@ -551,7 +657,7 @@ async def download_model(model_id: str):
         # Start download in background
         async def download_in_background():
             try:
-                logger.info(f"Starting download for model: {model_id}")
+                logger.info(f"Starting download for model: {resolved_model_id}")
                 await manager.broadcast(
                     json.dumps(
                         {
@@ -564,11 +670,18 @@ async def download_model(model_id: str):
 
                 # Use snapshot_download to get the entire model
                 loop = asyncio.get_event_loop()
-                await loop.run_in_executor(
-                    None, lambda: snapshot_download(repo_id=model_id, resume_download=True)
-                )
+                if local_dir is not None:
+                    await loop.run_in_executor(
+                        None,
+                        lambda: snapshot_download(repo_id=resolved_model_id, local_dir=local_dir),
+                    )
+                else:
+                    await loop.run_in_executor(
+                        None,
+                        lambda: snapshot_download(repo_id=resolved_model_id),
+                    )
 
-                logger.info(f"Download completed for model: {model_id}")
+                logger.info(f"Download completed for model: {resolved_model_id}")
                 await manager.broadcast(
                     json.dumps(
                         {
@@ -595,7 +708,7 @@ async def download_model(model_id: str):
         # Start the download task
         asyncio.create_task(download_in_background())
 
-        return {"message": f"Download started for {model_id}", "model_id": model_id}
+        return {"message": f"Download started for {resolved_model_id}", "model_id": model_id}
 
     except Exception as e:
         logger.error(f"Failed to start download: {str(e)}")
@@ -691,30 +804,36 @@ async def set_plugin_order(request: PluginOrderRequest):
 async def get_ollama_models():
     """Get list of available Ollama models"""
     try:
-        import ollama
-
-        # Get list of models from Ollama
-        models_response = ollama.list()
-
-        # Extract model information
-        models = []
-        for model in models_response.get("models", []):
-            models.append(
-                {
-                    "name": model.get("name") or model.get("model", ""),
-                    "size": model.get("size", 0),
-                    "modified": model.get("modified_at", ""),
-                    "digest": model.get("digest", ""),
-                }
-            )
-
-        # Get current model from config
-        current_model = config.model.ollama_model
+        models = list_ollama_models()
+        current_prompt = resolve_ollama_model(models, config.model.ollama_model, "completion")
+        current_image = resolve_ollama_model(models, config.model.ollama_image_model, "image")
+        try:
+            version = get_ollama_version()
+        except Exception:
+            version = ""
 
         return {
-            "models": models,
-            "current": current_model,
-            "host": os.getenv("OLLAMA_HOST", "http://localhost:11434"),
+            "models": [
+                {
+                    "name": model.name,
+                    "size": model.size,
+                    "modified": model.modified,
+                    "digest": model.digest,
+                    "format": model.format,
+                    "family": model.family,
+                    "capabilities": model.capabilities,
+                    "can_prompt": model.can_prompt,
+                    "can_vision": model.can_vision,
+                    "can_image": model.can_image,
+                }
+                for model in models
+            ],
+            "current": current_prompt,
+            "configured_prompt": config.model.ollama_model,
+            "current_image": current_image,
+            "configured_image": config.model.ollama_image_model,
+            "host": ollama_host(),
+            "version": version,
         }
     except Exception as e:
         logger.error(f"Failed to get Ollama models: {str(e)}")
@@ -746,14 +865,7 @@ async def set_ollama_model(data: dict):
 @app.get("/api/config/generation")
 async def get_generation_config():
     """Get current generation configuration parameters"""
-    return {
-        "width": config.image.width,
-        "height": config.image.height,
-        "num_inference_steps": config.image.num_inference_steps,
-        "guidance_scale": config.image.guidance_scale,
-        "true_cfg_scale": config.image.true_cfg_scale,
-        "ollama_temperature": config.model.ollama_temperature,
-    }
+    return generation_config_payload()
 
 
 @app.post("/api/config/generation")
@@ -772,9 +884,34 @@ async def set_generation_config(data: dict):
             config.image.true_cfg_scale = float(data["true_cfg_scale"])
         if "ollama_temperature" in data:
             config.model.ollama_temperature = float(data["ollama_temperature"])
+        if "image_backend" in data:
+            backend = str(data["image_backend"]).lower()
+            if backend not in ALLOWED_IMAGE_BACKENDS:
+                raise ValueError(
+                    f"Invalid image backend: {backend} "
+                    f"(must be one of {', '.join(sorted(ALLOWED_IMAGE_BACKENDS))})"
+                )
+            config.model.image_backend = backend
+        if "ollama_image_model" in data:
+            config.model.ollama_image_model = str(data["ollama_image_model"]).strip()
+        if "enabled_loras" in data:
+            enabled_loras = data["enabled_loras"]
+            if not isinstance(enabled_loras, list):
+                raise ValueError("enabled_loras must be a list of names")
+            config.model.lora.enabled_loras = [
+                str(lora_name).strip() for lora_name in enabled_loras if str(lora_name).strip()
+            ]
+        if "lora_application_probability" in data:
+            probability = float(data["lora_application_probability"])
+            if not 0.0 <= probability <= 1.0:
+                raise ValueError("lora_application_probability must be between 0.0 and 1.0")
+            config.model.lora.application_probability = probability
 
         logger.info(f"Generation config updated: {data}")
-        return {"message": "Configuration updated successfully", "config": data}
+        return {
+            "message": "Configuration updated successfully",
+            "config": generation_config_payload(),
+        }
     except Exception as e:
         logger.error(f"Failed to update generation config: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to update configuration: {str(e)}")
@@ -783,9 +920,34 @@ async def set_generation_config(data: dict):
 @app.post("/api/prompt", response_model=PromptResponse)
 async def generate_prompt(request: PromptRequest):
     """Generate a prompt without creating an image."""
+    prompt_id = str(uuid.uuid4())
     try:
+        await broadcast_task_progress(
+            task="prompt_generation",
+            task_id=prompt_id,
+            client_request_id=request.client_request_id,
+            progress=15,
+            label="Preparing prompt generation",
+            detail="Collecting your meta prompt and warming up the prompt model.",
+        )
         prompt_gen = PromptGenerator(config)
+        await broadcast_task_progress(
+            task="prompt_generation",
+            task_id=prompt_id,
+            client_request_id=request.client_request_id,
+            progress=60,
+            label="Generating prompt",
+            detail="Asking Ollama to turn the meta prompt into a final image prompt.",
+        )
         prompt = await prompt_gen.generate_prompt(meta_prompt=request.meta_prompt)
+        await broadcast_task_progress(
+            task="prompt_generation",
+            task_id=prompt_id,
+            client_request_id=request.client_request_id,
+            progress=100,
+            label="Prompt ready",
+            detail="The generated prompt is ready to edit or use directly.",
+        )
         return PromptResponse(prompt=prompt)
     except Exception as e:
         logger.error(f"Prompt generation failed: {str(e)}")
@@ -804,40 +966,100 @@ async def generate_image(request: GenerateRequest):
                 {
                     "type": "generation_started",
                     "id": generation_id,
+                    "client_request_id": request.client_request_id,
                     "timestamp": datetime.now().isoformat(),
                 }
             )
+        )
+        await broadcast_task_progress(
+            task="image_generation",
+            task_id=generation_id,
+            client_request_id=request.client_request_id,
+            progress=8,
+            label="Preparing image request",
+            detail="Collecting the prompt, active plugins, and runtime settings.",
         )
 
         # Generate prompt if not provided
         if request.prompt:
             final_prompt = request.prompt
+            await broadcast_task_progress(
+                task="image_generation",
+                task_id=generation_id,
+                client_request_id=request.client_request_id,
+                progress=24,
+                label="Prompt ready",
+                detail="Using the prompt you provided directly.",
+            )
         else:
             prompt_gen = PromptGenerator(config)
+            await broadcast_task_progress(
+                task="image_generation",
+                task_id=generation_id,
+                client_request_id=request.client_request_id,
+                progress=24,
+                label="Generating prompt",
+                detail="Building a fresh prompt from Ollama and the active plugins.",
+            )
             final_prompt = await prompt_gen.generate_prompt()
 
             # Broadcast prompt generated event
             await manager.broadcast(
                 json.dumps(
-                    {"type": "prompt_generated", "id": generation_id, "prompt": final_prompt}
+                    {
+                        "type": "prompt_generated",
+                        "id": generation_id,
+                        "client_request_id": request.client_request_id,
+                        "prompt": final_prompt,
+                    }
                 )
+            )
+            await broadcast_task_progress(
+                task="image_generation",
+                task_id=generation_id,
+                client_request_id=request.client_request_id,
+                progress=40,
+                label="Prompt ready",
+                detail="The prompt is assembled. Preparing the image backend next.",
             )
 
         try:
             image_gen, backend_name = create_image_generator(config)
             logger.info("Using image backend: %s", backend_name)
+            await broadcast_task_progress(
+                task="image_generation",
+                task_id=generation_id,
+                client_request_id=request.client_request_id,
+                progress=55,
+                label="Backend ready",
+                detail="The selected image backend is loaded and ready to render.",
+            )
         except MemoryError as e:
             error_msg = "Insufficient memory to load the configured image backend."
             logger.error(f"Memory error loading Flux model: {str(e)}")
             await manager.broadcast(
-                json.dumps({"type": "generation_error", "id": generation_id, "error": error_msg})
+                json.dumps(
+                    {
+                        "type": "generation_error",
+                        "id": generation_id,
+                        "client_request_id": request.client_request_id,
+                        "error": error_msg,
+                    }
+                )
             )
             raise HTTPException(status_code=507, detail=error_msg)
         except Exception as e:
             error_msg = f"Failed to load image backend: {str(e)}"
             logger.error(error_msg)
             await manager.broadcast(
-                json.dumps({"type": "generation_error", "id": generation_id, "error": error_msg})
+                json.dumps(
+                    {
+                        "type": "generation_error",
+                        "id": generation_id,
+                        "client_request_id": request.client_request_id,
+                        "error": error_msg,
+                    }
+                )
             )
             raise HTTPException(status_code=500, detail=error_msg)
 
@@ -847,6 +1069,7 @@ async def generate_image(request: GenerateRequest):
             "smoke-test": "Loading smoke-test image model.",
             "small-sd": "Loading small Stable Diffusion fallback model.",
             "sd-turbo": "Loading turbo image model.",
+            "ollama": "Requesting an image from the configured Ollama host.",
         }.get(backend_name, "Loading Flux model (this may take several minutes on first run)...")
 
         await manager.broadcast(
@@ -854,9 +1077,18 @@ async def generate_image(request: GenerateRequest):
                 {
                     "type": "model_loading",
                     "id": generation_id,
+                    "client_request_id": request.client_request_id,
                     "message": loading_message,
                 }
             )
+        )
+        await broadcast_task_progress(
+            task="image_generation",
+            task_id=generation_id,
+            client_request_id=request.client_request_id,
+            progress=68,
+            label="Rendering image",
+            detail=loading_message,
         )
 
         # Generate and save the image through the active backend.
@@ -868,15 +1100,29 @@ async def generate_image(request: GenerateRequest):
             force_reinit=False,
             seed=request.seed,
         )
+        await broadcast_task_progress(
+            task="image_generation",
+            task_id=generation_id,
+            client_request_id=request.client_request_id,
+            progress=92,
+            label="Finalizing output",
+            detail="Saving metadata and writing the finished image to the gallery.",
+        )
+        generation_metadata = getattr(image_gen, "last_generation_metadata", {}) or {}
+        seed_supported = generation_metadata.get("seed_supported", True)
+        resolved_seed = generation_metadata.get("seed")
+        if resolved_seed is None and request.seed is not None and seed_supported:
+            resolved_seed = request.seed
         existing_metadata = read_image_metadata(image_path)
         write_image_metadata(
             image_path,
             {
                 **existing_metadata,
+                **generation_metadata,
                 "backend": backend_name,
                 "configured_backend": config.model.image_backend,
                 "generated_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
-                "seed": request.seed,
+                "seed": resolved_seed,
             },
         )
 
@@ -889,10 +1135,19 @@ async def generate_image(request: GenerateRequest):
                 {
                     "type": "generation_completed",
                     "id": generation_id,
+                    "client_request_id": request.client_request_id,
                     "image_path": relative_path,
                     "prompt": final_prompt,
                 }
             )
+        )
+        await broadcast_task_progress(
+            task="image_generation",
+            task_id=generation_id,
+            client_request_id=request.client_request_id,
+            progress=100,
+            label="Image ready",
+            detail="The generated image is saved and ready to review.",
         )
 
         return GenerateResponse(
@@ -900,11 +1155,12 @@ async def generate_image(request: GenerateRequest):
             prompt=final_prompt,
             image_path=relative_path,
             metadata={
+                **generation_metadata,
                 "backend": backend_name,
                 "plugins_used": [
                     name for name, info in plugin_manager.plugins.items() if info.enabled
                 ],
-                "seed": request.seed,
+                "seed": resolved_seed,
             },
             created_at=datetime.now().isoformat(),
         )
@@ -914,7 +1170,14 @@ async def generate_image(request: GenerateRequest):
 
         # Broadcast error event
         await manager.broadcast(
-            json.dumps({"type": "generation_error", "id": generation_id, "error": str(e)})
+            json.dumps(
+                {
+                    "type": "generation_error",
+                    "id": generation_id,
+                    "client_request_id": request.client_request_id,
+                    "error": str(e),
+                }
+            )
         )
 
         raise HTTPException(status_code=500, detail=str(e))

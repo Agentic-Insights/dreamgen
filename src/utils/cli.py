@@ -191,7 +191,7 @@ def generate(
     backend: Optional[str] = typer.Option(
         None,
         "--backend",
-        help="Override the image backend for this run (flux, zimage, small, turbo, smoke, mock)",
+        help="Override the image backend for this run (flux, ollama, zimage, small, turbo, smoke, mock)",
     ),
     mock: bool = typer.Option(
         False,
@@ -368,7 +368,7 @@ def loop(
     backend: Optional[str] = typer.Option(
         None,
         "--backend",
-        help="Override the image backend for this run (flux, zimage, small, turbo, smoke, mock)",
+        help="Override the image backend for this run (flux, ollama, zimage, small, turbo, smoke, mock)",
     ),
     mock: bool = typer.Option(
         False,

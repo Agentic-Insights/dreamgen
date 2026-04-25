@@ -26,7 +26,11 @@ thoughts/
 settings.local.json
 .claude/settings.local.json
 
-output
+# Generated images, model checkpoints, and local test artifacts
+output/
+output_quarantine/
+ckpts/
+loras/
 
 # Test artifacts
 test_output.png

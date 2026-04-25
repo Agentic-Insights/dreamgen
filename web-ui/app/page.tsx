@@ -3,10 +3,8 @@
 import { startTransition, useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import {
-  Bot,
+  Check,
   Clock3,
-  Cpu,
-  GalleryHorizontalEnd,
   Image as ImageIcon,
   Loader2,
   Play,
@@ -19,7 +17,22 @@ import { AnimatePresence, motion } from "framer-motion";
 
 import Gallery from "@/components/Gallery";
 import Settings from "@/components/Settings";
-import { API_BASE, api, GenerateResponse, SystemStatus } from "@/lib/api";
+import TaskProgress from "@/components/TaskProgress";
+import {
+  API_BASE,
+  api,
+  GenerateResponse,
+  GenerationConfig,
+  PluginInfo,
+  SystemStatus,
+} from "@/lib/api";
+import {
+  createClientRequestId,
+  getFallbackProgress,
+  getTaskProgressUpdate,
+  INITIAL_IMAGE_PROGRESS,
+  type ProgressSnapshot,
+} from "@/lib/task-progress";
 import { cn } from "@/lib/utils";
 import galleryCache from "@/lib/cache";
 
@@ -37,11 +50,6 @@ type RecentImage = {
   created_at: string;
 };
 
-type HeroNote = {
-  label: string;
-  value: string;
-};
-
 const CADENCE_OPTIONS: CadenceOption[] = [
   { label: "5 min", minutes: 5, description: "Fast drip" },
   { label: "15 min", minutes: 15, description: "Steady stream" },
@@ -49,6 +57,15 @@ const CADENCE_OPTIONS: CadenceOption[] = [
   { label: "3 hours", minutes: 180, description: "Slow drift" },
   { label: "Daily", minutes: 1440, description: "One image a day" },
 ];
+
+const DASHBOARD_BACKEND_OPTIONS = [
+  { id: "auto", label: "Auto" },
+  { id: "zimage", label: "Z-Image" },
+  { id: "ollama", label: "Ollama" },
+  { id: "small", label: "Small SD" },
+  { id: "turbo", label: "Turbo" },
+  { id: "mock", label: "Mock" },
+] as const;
 
 const STORAGE_KEYS = {
   promptSeed: "dreamgen.promptSeed",
@@ -94,26 +111,22 @@ const formatCountdown = (target: Date | null) => {
 const truncatePrompt = (prompt: string, max = 88) =>
   prompt.length > max ? `${prompt.slice(0, max).trim()}...` : prompt;
 
-const HERO_NOTES: HeroNote[] = [
-  { label: "Local-first", value: "Tiny fallback is ready immediately." },
-  { label: "Recurring", value: "Loop runs while this tab stays open." },
-  { label: "Entropy", value: "Plugins keep the feed from going flat." },
-];
-
 export default function Home() {
   const [activeTab, setActiveTab] = useState<TabId>("generate");
   const [promptSeed, setPromptSeed] = useState("");
   const [cadenceMinutes, setCadenceMinutes] = useState(60);
   const [loopEnabled, setLoopEnabled] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [generationProgress, setGenerationProgress] = useState<ProgressSnapshot | null>(null);
   const [currentImage, setCurrentImage] = useState<GenerateResponse | null>(null);
   const [recentImages, setRecentImages] = useState<RecentImage[]>([]);
   const [status, setStatus] = useState<SystemStatus | null>(null);
+  const [plugins, setPlugins] = useState<PluginInfo[]>([]);
+  const [generationConfig, setGenerationConfig] = useState<GenerationConfig | null>(null);
   const [nextRunAt, setNextRunAt] = useState<Date | null>(null);
   const [, setClockTick] = useState(Date.now());
   const [sessionCount, setSessionCount] = useState(0);
   const [logs, setLogs] = useState<string[]>(["DreamGen is ready."]);
-  const [showLogs, setShowLogs] = useState(false);
 
   const promptSeedRef = useRef(promptSeed);
   const cadenceMinutesRef = useRef(cadenceMinutes);
@@ -122,9 +135,9 @@ export default function Home() {
   const runGenerationRef = useRef<(source: "manual" | "loop") => Promise<void>>(
     async () => {}
   );
+  const generationRequestIdRef = useRef<string | null>(null);
+  const generationResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const cadence =
-    CADENCE_OPTIONS.find((option) => option.minutes === cadenceMinutes) ?? CADENCE_OPTIONS[2];
   const currentBackend =
     currentImage?.metadata.backend && currentImage.metadata.backend !== "unknown"
       ? currentImage.metadata.backend
@@ -134,6 +147,12 @@ export default function Home() {
       ? currentImage.metadata.plugins_used.length
       : status?.active_plugins?.length ?? 0;
   const isSmokeBackend = currentBackend === "smoke-test";
+  const enabledPlugins = plugins.filter((plugin) => plugin.enabled);
+  const selectedBackend = generationConfig?.image_backend ?? "auto";
+  const enabledLoras = generationConfig?.enabled_loras ?? [];
+  const lastActivity = logs[logs.length - 1];
+  const selectedCadence =
+    CADENCE_OPTIONS.find((option) => option.minutes === cadenceMinutes) ?? CADENCE_OPTIONS[2];
 
   const addLog = (message: string, type: "info" | "error" = "info") => {
     const timestamp = new Date().toLocaleTimeString();
@@ -171,11 +190,32 @@ export default function Home() {
     }
   }, []);
 
+  const loadDashboardControls = useCallback(async () => {
+    try {
+      const [pluginList, runtimeConfig] = await Promise.all([
+        api.getPlugins(),
+        api.getGenerationConfig(),
+      ]);
+      startTransition(() => {
+        setPlugins(pluginList);
+        setGenerationConfig(runtimeConfig);
+      });
+    } catch (error) {
+      console.error("Failed to load dashboard controls:", error);
+    }
+  }, []);
+
   runGenerationRef.current = async (source: "manual" | "loop") => {
     if (isGeneratingRef.current) return;
 
+    const clientRequestId = createClientRequestId(source);
+    generationRequestIdRef.current = clientRequestId;
+    if (generationResetTimeoutRef.current) {
+      clearTimeout(generationResetTimeoutRef.current);
+    }
     isGeneratingRef.current = true;
     setIsGenerating(true);
+    setGenerationProgress(INITIAL_IMAGE_PROGRESS);
     const activeCadence =
       CADENCE_OPTIONS.find((option) => option.minutes === cadenceMinutesRef.current) ??
       CADENCE_OPTIONS[2];
@@ -190,6 +230,7 @@ export default function Home() {
       const response = await api.generate({
         prompt: promptSeedRef.current.trim() || undefined,
         enable_plugins: true,
+        client_request_id: clientRequestId,
       });
 
       startTransition(() => {
@@ -198,12 +239,25 @@ export default function Home() {
       });
 
       addLog(`Image created with ${response.metadata.backend}.`);
+      setGenerationProgress({
+        progress: 100,
+        title: "Image ready",
+        detail: "The generated image is saved and ready to review.",
+      });
+      if (generationResetTimeoutRef.current) {
+        clearTimeout(generationResetTimeoutRef.current);
+      }
+      generationResetTimeoutRef.current = setTimeout(() => {
+        setGenerationProgress(null);
+      }, 1200);
       await galleryCache.clear();
-      await loadRecentImages();
+      await Promise.all([loadRecentImages(), loadDashboardControls(), api.getStatus().then(setStatus)]);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : "Unknown error";
       addLog(`Generation failed: ${errorMsg}`, "error");
+      setGenerationProgress(null);
     } finally {
+      generationRequestIdRef.current = null;
       isGeneratingRef.current = false;
       setIsGenerating(false);
     }
@@ -243,8 +297,20 @@ export default function Home() {
   useEffect(() => {
     api.getStatus().then(setStatus).catch(console.error);
     loadRecentImages();
+    loadDashboardControls();
 
-    api.connectWebSocket((data) => {
+    const unsubscribe = api.subscribeWebSocket((data) => {
+      const nextProgress = getTaskProgressUpdate(
+        data,
+        "image_generation",
+        generationRequestIdRef.current
+      );
+      if (nextProgress) {
+        setGenerationProgress((prev) =>
+          prev && prev.progress > nextProgress.progress ? prev : nextProgress
+        );
+      }
+
       if (typeof data !== "object" || data === null || !("type" in data)) return;
 
       const msg = data as Record<string, unknown>;
@@ -258,9 +324,24 @@ export default function Home() {
     });
 
     return () => {
-      api.disconnectWebSocket();
+      unsubscribe();
+      if (generationResetTimeoutRef.current) {
+        clearTimeout(generationResetTimeoutRef.current);
+      }
     };
-  }, [loadRecentImages]);
+  }, [loadDashboardControls, loadRecentImages]);
+
+  useEffect(() => {
+    if (!isGenerating || !generationProgress || generationProgress.progress >= 96) return;
+
+    const timeoutId = setTimeout(() => {
+      setGenerationProgress((prev) =>
+        prev ? getFallbackProgress("image_generation", prev) : prev
+      );
+    }, 2500);
+
+    return () => clearTimeout(timeoutId);
+  }, [generationProgress, isGenerating]);
 
   useEffect(() => {
     if (!loopEnabled) {
@@ -289,18 +370,47 @@ export default function Home() {
   }, [cadenceMinutes, loopEnabled, nextRunAt]);
 
   const tabs = [
-    { id: "generate" as const, label: "Generator", icon: Sparkles },
+    { id: "generate" as const, label: "Create", icon: Sparkles },
     { id: "gallery" as const, label: "Gallery", icon: ImageIcon },
     { id: "settings" as const, label: "Settings", icon: SettingsIcon },
     { id: "playground" as const, label: "Advanced", icon: Wand2 },
   ];
 
+  const togglePlugin = async (pluginName: string) => {
+    try {
+      const response = await api.togglePlugin(pluginName);
+      addLog(`${pluginName} ${response.enabled ? "enabled" : "disabled"}.`);
+      const [pluginList, refreshedStatus] = await Promise.all([api.getPlugins(), api.getStatus()]);
+      startTransition(() => {
+        setPlugins(pluginList);
+        setStatus(refreshedStatus);
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      addLog(`Failed to update ${pluginName}: ${message}`, "error");
+    }
+  };
+
+  const updateBackend = async (backend: (typeof DASHBOARD_BACKEND_OPTIONS)[number]["id"]) => {
+    try {
+      const response = await api.setGenerationConfig({ image_backend: backend });
+      const refreshedStatus = await api.getStatus();
+      startTransition(() => {
+        setGenerationConfig(response.config);
+        setStatus(refreshedStatus);
+      });
+      addLog(`Image backend set to ${backend}.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      addLog(`Failed to change backend: ${message}`, "error");
+    }
+  };
+
   return (
     <div className="relative flex h-screen overflow-hidden bg-background">
       <div className="pointer-events-none absolute inset-0">
-        <div className="absolute inset-0 bg-[linear-gradient(hsl(var(--border)/0.08)_1px,transparent_1px),linear-gradient(90deg,hsl(var(--border)/0.08)_1px,transparent_1px)] bg-[size:72px_72px] opacity-[0.14]" />
-        <div className="absolute -left-24 top-24 h-80 w-80 rounded-full bg-primary/10 blur-3xl" />
-        <div className="absolute right-0 top-0 h-72 w-72 rounded-full bg-accent/10 blur-3xl" />
+        <div className="absolute inset-x-0 top-0 h-64 bg-[radial-gradient(circle_at_top_left,hsl(var(--primary)/0.16),transparent_36rem)]" />
+        <div className="absolute right-0 top-0 h-72 w-72 rounded-full bg-accent/8 blur-3xl" />
       </div>
 
       <div className="relative z-10 flex h-full w-full flex-col overflow-hidden">
@@ -366,334 +476,348 @@ export default function Home() {
               exit={{ opacity: 0, y: -8 }}
               className="h-full overflow-y-auto"
             >
-              <div className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[390px_minmax(0,1fr)]">
-                <section className="space-y-5">
-                  <div className="ambient-panel rounded-3xl border border-border/80 p-5">
-                    <div className="mb-4 flex items-start justify-between gap-4">
+              <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <div className="ambient-panel rounded-2xl border border-primary/35 bg-primary/10 p-5">
+                    <div className="flex items-start justify-between gap-4">
                       <div>
-                        <div className="mb-3 inline-flex rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-[11px] uppercase tracking-[0.22em] text-primary">
-                          recurring image feed
+                        <div className="text-[11px] uppercase tracking-[0.22em] text-primary">
+                          Ad-hoc
                         </div>
-                        <h1 className="text-3xl font-semibold tracking-tight text-foreground">
-                          Make images on a rhythm
-                        </h1>
-                        <p className="mt-3 max-w-md text-sm leading-6 text-muted-foreground">
-                          Leave the prompt blank for full entropy, or give DreamGen a seed phrase.
-                          Start the session loop and it keeps creating while this page stays open.
-                        </p>
+                        <h2 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
+                          Generate once
+                        </h2>
                       </div>
-                      <div className="rounded-[1.25rem] border border-border/80 bg-background/80 px-3 py-3 text-right shadow-[0_12px_30px_rgba(0,0,0,0.16)]">
-                        <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                          Session
-                        </div>
-                        <div className="text-2xl font-semibold tracking-tight text-foreground">{sessionCount}</div>
-                      </div>
+                      <Sparkles className="h-5 w-5 text-primary" />
                     </div>
+                    <div className="mt-4 flex flex-wrap items-center gap-3">
+                      <button
+                        onClick={() => void runGenerationRef.current("manual")}
+                        disabled={isGenerating}
+                        className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-medium text-primary-foreground transition hover:opacity-95 disabled:opacity-60"
+                      >
+                        {isGenerating ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Sparkles className="h-4 w-4" />
+                        )}
+                        {isGenerating
+                          ? `Generating ${generationProgress?.progress ?? INITIAL_IMAGE_PROGRESS.progress}%`
+                          : "Generate once"}
+                      </button>
+                      <span className="text-xs text-muted-foreground">
+                        {promptSeed.trim() ? "Using prompt seed" : "Using generated prompt"}
+                      </span>
+                    </div>
+                  </div>
 
-                    <div className="mb-5 grid gap-2">
-                      {HERO_NOTES.map((note) => (
-                        <div
-                          key={note.label}
-                          className="flex items-start gap-3 rounded-2xl border border-border/70 bg-background/55 px-4 py-2.5"
-                        >
-                          <span className="mt-1 h-2 w-2 rounded-full bg-primary" />
-                          <div>
-                            <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                              {note.label}
-                            </p>
-                            <p className="mt-1 text-sm leading-5 text-foreground/90">{note.value}</p>
-                          </div>
+                  <div
+                    className={cn(
+                      "ambient-panel rounded-2xl border p-5",
+                      loopEnabled
+                        ? "border-destructive/35 bg-destructive/10"
+                        : "border-border/80 bg-card/70"
+                    )}
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">
+                          Schedule
                         </div>
+                        <h2 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
+                          Scheduled loop
+                        </h2>
+                        <div className="mt-2 inline-flex rounded-full border border-primary/35 bg-primary/10 px-3 py-1 text-xs font-medium text-foreground">
+                          Cadence: {selectedCadence.label}
+                        </div>
+                      </div>
+                      {loopEnabled ? (
+                        <Square className="h-5 w-5 text-foreground" />
+                      ) : (
+                        <Play className="h-5 w-5 text-foreground" />
+                      )}
+                    </div>
+                    <div className="mt-4 flex flex-wrap items-center gap-3">
+                      <button
+                        onClick={() => setLoopEnabled((value) => !value)}
+                        className={cn(
+                          "inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm font-medium transition",
+                          loopEnabled
+                            ? "bg-destructive text-destructive-foreground hover:opacity-95"
+                            : "bg-foreground text-background hover:opacity-95"
+                        )}
+                      >
+                        {loopEnabled ? <Square className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                        {loopEnabled ? "Stop schedule" : "Start schedule"}
+                      </button>
+                      <span className="text-xs text-muted-foreground">
+                        Next run: {loopEnabled ? formatCountdown(nextRunAt) : "Not scheduled"}
+                      </span>
+                    </div>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {CADENCE_OPTIONS.map((option) => (
+                        <button
+                          key={option.minutes}
+                          aria-pressed={cadenceMinutes === option.minutes}
+                          onClick={() => setCadenceMinutes(option.minutes)}
+                          className={cn(
+                            "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition",
+                            cadenceMinutes === option.minutes
+                              ? "border-primary bg-primary text-primary-foreground shadow-[0_0_0_3px_hsl(var(--primary)/0.16)]"
+                              : "border-border/70 bg-background/70 text-muted-foreground hover:border-primary/30 hover:text-foreground"
+                          )}
+                        >
+                          {cadenceMinutes === option.minutes ? (
+                            <Check className="h-3 w-3" />
+                          ) : null}
+                          {option.label}
+                        </button>
                       ))}
                     </div>
+                  </div>
+                </div>
 
-                    <div className="space-y-4">
-                      <div className="rounded-2xl border border-primary/20 bg-primary/10 px-4 py-3">
-                        <div className="text-[11px] uppercase tracking-[0.22em] text-primary">
-                          Start Here
+                <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
+                  <section className="grid content-start gap-5">
+                    <div className="ambient-panel rounded-[2rem] border border-border/80 p-6">
+                      <div className="flex flex-wrap items-start justify-between gap-4">
+                        <div>
+                          <div className="text-[11px] uppercase tracking-[0.22em] text-primary">
+                            One-off prompt
+                          </div>
+                          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-foreground">
+                            Seed the next image.
+                          </h1>
+                          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+                            Leave the field empty for DreamGen to compose a prompt from the active plugins.
+                          </p>
                         </div>
-                        <p className="mt-2 text-sm leading-6 text-foreground/90">
-                          Use <span className="font-medium text-foreground">Generate now</span> for one
-                          image, or <span className="font-medium text-foreground">Start loop</span> to let
-                          DreamGen keep building the feed.
-                        </p>
+
+                        <div className="flex flex-wrap gap-2">
+                          <span className="status-pill capitalize">{currentBackend}</span>
+                          <span className="status-pill">{enabledPlugins.length} plugins</span>
+                        </div>
                       </div>
 
-                      <div>
-                        <label className="mb-2 block text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                          Theme seed
-                        </label>
-                        <textarea
-                          value={promptSeed}
-                          onChange={(event) => setPromptSeed(event.target.value)}
-                          rows={3}
-                          placeholder="Optional: brutalist gardens, retrofuturist machinery, haunted motel, etc."
-                          className="w-full rounded-2xl border border-input/80 bg-background/80 px-3 py-3 text-sm leading-6 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
-                        />
-                        <p className="mt-2 text-xs text-muted-foreground">
-                          Empty means fully AI-generated prompts with your active plugins.
-                        </p>
-                      </div>
-
-                      <div>
-                        <label className="mb-2 block text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                          Cadence
-                        </label>
-                        <div className="grid grid-cols-2 gap-2">
-                          {CADENCE_OPTIONS.map((option) => (
+                      <div className="mt-4">
+                        <div className="mb-2 text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                          Plugins
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {plugins.map((plugin) => (
                             <button
-                              key={option.minutes}
-                              onClick={() => setCadenceMinutes(option.minutes)}
+                              key={plugin.name}
+                              onClick={() => void togglePlugin(plugin.name)}
                               className={cn(
-                                "rounded-2xl border px-3 py-3 text-left transition",
-                                cadenceMinutes === option.minutes
-                                  ? "border-primary/40 bg-primary/12 shadow-[0_8px_24px_rgba(39,229,166,0.1)]"
-                                  : "border-border/70 bg-background/45 hover:border-primary/30 hover:bg-muted/35"
+                                "rounded-full border px-3 py-2 text-sm transition",
+                                plugin.enabled
+                                  ? "border-primary/35 bg-primary/10 text-foreground"
+                                  : "border-border/70 bg-background/75 text-muted-foreground hover:border-primary/25 hover:text-foreground"
                               )}
                             >
-                              <div className="text-sm font-medium text-foreground">{option.label}</div>
-                              <div className="text-xs text-muted-foreground">{option.description}</div>
+                              {plugin.name.replaceAll("_", " ")}
                             </button>
                           ))}
                         </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-3">
-                        <button
-                          onClick={() => void runGenerationRef.current("manual")}
-                          disabled={isGenerating}
-                          className="flex items-center justify-center gap-2 rounded-2xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground shadow-[0_16px_40px_rgba(39,229,166,0.18)] transition hover:translate-y-[-1px] hover:opacity-95 disabled:opacity-50"
-                        >
-                          {isGenerating ? (
-                            <>
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                              Working...
-                            </>
-                          ) : (
-                            <>
-                              <Sparkles className="h-4 w-4" />
-                              Generate now
-                            </>
-                          )}
-                        </button>
-
-                        <button
-                          onClick={() => setLoopEnabled((value) => !value)}
-                          className={cn(
-                            "flex items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium transition",
-                            loopEnabled
-                              ? "border-destructive/40 bg-destructive/10 text-foreground hover:bg-destructive/15"
-                              : "border-border/70 bg-background/75 text-foreground hover:border-primary/30 hover:bg-muted/50"
-                          )}
-                        >
-                          {loopEnabled ? (
-                            <>
-                              <Square className="h-4 w-4" />
-                              Stop loop
-                            </>
-                          ) : (
-                            <>
-                              <Play className="h-4 w-4" />
-                              Start loop
-                            </>
-                          )}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="ambient-panel rounded-3xl border border-border/80 p-5">
-                    <div className="mb-4 flex items-center gap-2">
-                      <Clock3 className="h-4 w-4 text-primary" />
-                      <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                        Loop status
-                      </h2>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="rounded-2xl border border-border/60 bg-background/70 p-4">
-                        <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                          Mode
-                        </div>
-                        <div className="mt-2 text-lg font-semibold text-foreground">
-                          {loopEnabled ? "Running" : "Idle"}
+                        <div className="mt-2 text-xs leading-6 text-muted-foreground">
+                          {selectedBackend === "zimage" && enabledLoras.length > 0
+                            ? `LoRA path armed: ${enabledLoras.slice(0, 3).join(", ")}${enabledLoras.length > 3 ? "..." : ""}.`
+                            : selectedBackend === "ollama"
+                              ? `Ollama image backend${generationConfig?.ollama_image_model ? ` using ${generationConfig.ollama_image_model}` : " using auto model selection"}.`
+                              : "Use Settings for downloads, auth, and deeper model configuration."}
                         </div>
                       </div>
-                      <div className="rounded-2xl border border-border/60 bg-background/70 p-4">
-                        <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                          Next run
-                        </div>
-                        <div className="mt-2 text-lg font-semibold text-foreground">
-                          {loopEnabled ? formatCountdown(nextRunAt) : "Not scheduled"}
-                        </div>
-                      </div>
-                    </div>
 
-                    <div className="mt-3 rounded-2xl border border-border/60 bg-background/65 px-4 py-3 text-sm text-muted-foreground">
-                      Cadence: <span className="font-medium text-foreground">{cadence.label}</span>
-                      <span className="ml-2 text-muted-foreground/80">{cadence.description}</span>
-                    </div>
+                      <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.9fr)]">
+                        <div className="grid content-start gap-4">
+                          <div>
+                            <label className="mb-2 block text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                              Prompt seed
+                            </label>
+                            <textarea
+                              value={promptSeed}
+                              onChange={(event) => setPromptSeed(event.target.value)}
+                              rows={5}
+                              placeholder="Optional: brutalist greenhouse, paper diorama city, weathered arcade shrine..."
+                              className="w-full rounded-[1.75rem] border border-input/85 bg-background/95 px-4 py-4 text-sm leading-6 text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                            />
+                          </div>
 
-                    <div className="mt-4 rounded-2xl border border-dashed border-border/80 px-4 py-3 text-xs leading-6 text-muted-foreground">
-                      Session loop runs while this browser tab stays open. For true background jobs,
-                      use <code className="mx-1 rounded bg-background px-1 py-0.5">uv run dreamgen loop</code>.
-                    </div>
-                  </div>
-
-                  <div className="ambient-panel rounded-3xl border border-border/80 p-5">
-                    <div className="mb-4 flex items-center gap-2">
-                      <Bot className="h-4 w-4 text-primary" />
-                      <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                        Active engine
-                      </h2>
-                    </div>
-
-                    <div className="space-y-3 text-sm">
-                      <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-background/70 px-4 py-3">
-                        <span className="text-muted-foreground">Backend</span>
-                        <span className="font-medium capitalize text-foreground">
-                          {status?.backend ?? "unknown"}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-background/70 px-4 py-3">
-                        <span className="text-muted-foreground">GPU</span>
-                        <span className="font-medium text-foreground">
-                          {status?.gpu_available ? "Available" : "Unavailable"}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-background/70 px-4 py-3">
-                        <span className="text-muted-foreground">Entropy plugins</span>
-                        <span className="font-medium text-foreground">
-                          {status?.active_plugins?.length ?? 0} active
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </section>
-
-                <section className="grid content-start gap-6">
-                  <div className="ambient-panel rounded-[2rem] border border-border/80 p-5">
-                    <div className="mb-4 flex items-center justify-between gap-4">
-                      <div>
-                        <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                          Current output
-                        </div>
-                        <div className="mt-1 text-lg font-semibold text-foreground">
-                          {currentImage ? "Latest generation" : "Waiting for first image"}
-                        </div>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <span className="status-pill capitalize">{currentBackend}</span>
-                          <span className="status-pill">{currentPluginCount} plugins</span>
-                          {isSmokeBackend ? (
-                            <span className="status-pill">smoke-test quality</span>
-                          ) : null}
-                        </div>
-                      </div>
-                      <a
-                        href="/playground"
-                        className="rounded-full border border-border/80 bg-background/75 px-3 py-2 text-xs text-muted-foreground transition hover:border-primary/30 hover:text-foreground"
-                      >
-                        Open advanced playground
-                      </a>
-                    </div>
-
-                    <div className="min-h-[420px] rounded-[1.5rem] border border-border/70 bg-background/70 p-4">
-                      <AnimatePresence mode="wait">
-                        {isGenerating ? (
-                          <motion.div
-                            key="loading"
-                            initial={{ opacity: 0, scale: 0.96 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            exit={{ opacity: 0, scale: 0.96 }}
-                            className="text-center"
-                          >
-                            <Loader2 className="mx-auto mb-4 h-16 w-16 animate-spin text-primary" />
-                            <p className="text-sm text-foreground">DreamGen is creating a new image.</p>
-                            <p className="mt-2 text-xs text-muted-foreground">
-                              Small fallback is ready faster. FLUX can take longer on first load.
-                            </p>
-                          </motion.div>
-                        ) : currentImage ? (
-                          <motion.div
-                            key={currentImage.id}
-                            initial={{ opacity: 0, scale: 0.97 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            exit={{ opacity: 0, scale: 0.97 }}
-                            className="flex w-full flex-col items-center"
-                          >
-                            <div className="flex min-h-[380px] w-full items-center justify-center rounded-[1.75rem] border border-border/60 bg-[radial-gradient(circle_at_top,hsl(var(--accent)/0.08),transparent_22rem)] px-4 py-6">
-                              {/* Backend-served generated files are not routed through Next image optimization. */}
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img
-                                src={`${API_BASE}${currentImage.image_path}`}
-                                alt="Generated image"
-                                className="max-h-[68vh] max-w-full rounded-2xl object-contain shadow-[0_24px_80px_rgba(0,0,0,0.34)]"
-                              />
+                          <div className="rounded-[1.75rem] border border-border/70 bg-background/80 px-4 py-4">
+                            <div className="text-sm text-foreground">
+                              {promptSeed.trim()
+                                ? "The one-off action will use this prompt seed."
+                                : "The one-off action will request a generated prompt."}
                             </div>
-                            <div className="mt-4 w-full max-w-5xl rounded-2xl border border-border/60 bg-background/80 px-4 py-3">
-                              <p className="text-center text-sm leading-7 text-muted-foreground">
-                                {currentImage.prompt}
-                              </p>
-                            </div>
-                          </motion.div>
-                        ) : (
-                          <div className="text-center">
-                            <ImageIcon className="mx-auto mb-4 h-16 w-16 text-muted-foreground/30" />
-                            <p className="text-sm text-muted-foreground">
-                              Use the controls on the left to generate once or start the loop.
-                            </p>
-                            <div className="mt-6 grid gap-3 text-left sm:grid-cols-3">
-                              <div className="rounded-2xl border border-border/60 bg-card/70 p-4">
-                                <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                                  First run
-                                </div>
-                                <p className="mt-2 text-sm text-foreground/90">
-                                  Small fallback gives usable first images before FLUX is ready.
-                                </p>
-                              </div>
-                              <div className="rounded-2xl border border-border/60 bg-card/70 p-4">
-                                <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                                  Prompt seed
-                                </div>
-                                <p className="mt-2 text-sm text-foreground/90">
-                                  Give it a loose theme or leave it empty for maximum entropy.
-                                </p>
-                              </div>
-                              <div className="rounded-2xl border border-border/60 bg-card/70 p-4">
-                                <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                                  Continuous
-                                </div>
-                                <p className="mt-2 text-sm text-foreground/90">
-                                  Use the session loop here, or run the CLI loop for background jobs.
-                                </p>
-                              </div>
+                            <div className="mt-2 text-xs leading-6 text-muted-foreground">
+                              Last activity: {lastActivity}
                             </div>
                           </div>
-                        )}
-                      </AnimatePresence>
-                    </div>
-                  </div>
 
-                  <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
-                    <div className="ambient-panel rounded-3xl border border-border/80 p-5">
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              onClick={() => setPromptSeed("")}
+                              className="rounded-full border border-border/70 px-4 py-3 text-sm text-muted-foreground transition hover:border-primary/30 hover:text-foreground"
+                            >
+                              Clear prompt
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="grid content-start gap-4">
+                          <div className="rounded-[1.75rem] border border-border/70 bg-background/82 p-4">
+                            <div className="mb-3 flex items-center justify-between gap-3">
+                              <div className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                                Image backend
+                              </div>
+                              <div className="text-xs text-muted-foreground capitalize">{selectedBackend}</div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              {DASHBOARD_BACKEND_OPTIONS.map((option) => (
+                                <button
+                                  key={option.id}
+                                  onClick={() => void updateBackend(option.id)}
+                                  className={cn(
+                                    "rounded-2xl border px-3 py-2 text-sm transition",
+                                    selectedBackend === option.id
+                                      ? "border-primary/40 bg-primary/12 text-foreground"
+                                      : "border-border/70 bg-background/75 text-muted-foreground hover:border-primary/30 hover:text-foreground"
+                                  )}
+                                >
+                                  {option.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="ambient-panel rounded-[2rem] border border-border/80 p-5">
+                      <div className="mb-4 flex items-center justify-between gap-4">
+                        <div>
+                          <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+                            Current output
+                          </div>
+                          <div className="mt-1 text-lg font-semibold text-foreground">
+                            {currentImage ? "Latest generation" : "Waiting for first image"}
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <span className="status-pill capitalize">{currentBackend}</span>
+                          <span className="status-pill">{currentPluginCount} plugins</span>
+                          {isSmokeBackend ? <span className="status-pill">smoke-test quality</span> : null}
+                        </div>
+                      </div>
+
+                      <div className="min-h-[380px] rounded-[1.5rem] border border-border/70 bg-background/70 p-4">
+                        <AnimatePresence mode="wait">
+                          {isGenerating ? (
+                            <motion.div
+                              key="loading"
+                              initial={{ opacity: 0, scale: 0.97 }}
+                              animate={{ opacity: 1, scale: 1 }}
+                              exit={{ opacity: 0, scale: 0.97 }}
+                              className="flex min-h-[340px] flex-col items-center justify-center text-center"
+                            >
+                              <TaskProgress progress={generationProgress ?? INITIAL_IMAGE_PROGRESS} />
+                            </motion.div>
+                          ) : currentImage ? (
+                            <motion.div
+                              key={currentImage.id}
+                              initial={{ opacity: 0, scale: 0.97 }}
+                              animate={{ opacity: 1, scale: 1 }}
+                              exit={{ opacity: 0, scale: 0.97 }}
+                              className="flex w-full flex-col items-center"
+                            >
+                              <div className="flex min-h-[320px] w-full items-center justify-center rounded-[1.5rem] border border-border/60 bg-[radial-gradient(circle_at_top,hsl(var(--accent)/0.08),transparent_22rem)] px-4 py-6">
+                                {/* Backend-served generated files are not routed through Next image optimization. */}
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={`${API_BASE}${currentImage.image_path}`}
+                                  alt="Generated image"
+                                  className="max-h-[62vh] max-w-full rounded-2xl object-contain shadow-[0_24px_80px_rgba(0,0,0,0.34)]"
+                                />
+                              </div>
+                              <div className="mt-4 w-full rounded-2xl border border-border/60 bg-background/80 px-4 py-3">
+                                <p className="text-sm leading-7 text-muted-foreground">
+                                  {currentImage.prompt}
+                                </p>
+                              </div>
+                            </motion.div>
+                          ) : (
+                            <div className="flex min-h-[340px] flex-col items-center justify-center text-center">
+                              <ImageIcon className="mb-4 h-14 w-14 text-muted-foreground/30" />
+                              <p className="text-sm text-muted-foreground">
+                                Generate once when the prompt and runtime controls are ready.
+                              </p>
+                            </div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    </div>
+                  </section>
+
+                  <aside className="grid content-start gap-4">
+                    <div className="ambient-panel rounded-[1.75rem] border border-border/80 p-5">
+                      <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+                        Session
+                      </div>
+                      <div className="mt-4 grid gap-3">
+                        <div className="rounded-2xl border border-border/60 bg-background/78 px-4 py-3">
+                          <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                            <Clock3 className="h-4 w-4 text-primary" />
+                            {loopEnabled ? "Loop running" : "Loop stopped"}
+                          </div>
+                          <div className="mt-2 text-xs leading-6 text-muted-foreground">
+                            Next run: {loopEnabled ? formatCountdown(nextRunAt) : "Not scheduled"}
+                          </div>
+                        </div>
+
+                        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                          <div className="rounded-2xl border border-border/60 bg-background/78 px-4 py-3">
+                            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                              Backend
+                            </div>
+                            <div className="mt-2 text-sm font-medium capitalize text-foreground">
+                              {currentBackend}
+                            </div>
+                          </div>
+                          <div className="rounded-2xl border border-border/60 bg-background/78 px-4 py-3">
+                            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                              This session
+                            </div>
+                            <div className="mt-2 text-sm font-medium text-foreground">
+                              {sessionCount} images
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="rounded-2xl border border-border/60 bg-background/78 px-4 py-3">
+                          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                            Last activity
+                          </div>
+                          <div className="mt-2 text-sm leading-6 text-foreground">{lastActivity}</div>
+                        </div>
+                      </div>
+
+                    </div>
+
+                    <div className="ambient-panel rounded-[1.75rem] border border-border/80 p-5">
                       <div className="mb-4 flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-2">
-                          <GalleryHorizontalEnd className="h-4 w-4 text-primary" />
-                          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                        <div>
+                          <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
                             Recent outputs
+                          </div>
+                          <h2 className="mt-1 text-lg font-semibold text-foreground">
+                            Quick picks
                           </h2>
                         </div>
-                        <button
-                          onClick={() => void loadRecentImages()}
-                          className="text-xs text-muted-foreground transition hover:text-foreground"
-                        >
-                          refresh
-                        </button>
                       </div>
 
                       {recentImages.length > 0 ? (
-                        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                          {recentImages.map((image) => (
+                        <div className="space-y-3">
+                          {recentImages.slice(0, 3).map((image) => (
                             <button
                               key={image.path}
                               onClick={() => {
@@ -708,71 +832,34 @@ export default function Home() {
                                   created_at: image.created_at,
                                 });
                               }}
-                              className="overflow-hidden rounded-2xl border border-border bg-background text-left transition hover:border-primary/40 hover:bg-muted/30"
+                              className="flex w-full items-center gap-3 rounded-2xl border border-border/60 bg-background/78 p-3 text-left transition hover:border-primary/35 hover:bg-background/90"
                             >
                               {/* Backend-served generated files are not routed through Next image optimization. */}
                               {/* eslint-disable-next-line @next/next/no-img-element */}
                               <img
                                 src={`${API_BASE}${image.path}`}
                                 alt="Recent generation"
-                                className="h-36 w-full object-cover"
+                                className="h-16 w-16 rounded-xl object-cover"
                               />
-                              <div className="p-3">
+                              <div className="min-w-0">
                                 <p className="text-xs text-muted-foreground">
                                   {new Date(image.created_at).toLocaleString()}
                                 </p>
-                                <p className="mt-1 text-xs text-foreground">
-                                  {truncatePrompt(image.prompt)}
+                                <p className="mt-1 text-sm leading-6 text-foreground">
+                                  {truncatePrompt(image.prompt, 58)}
                                 </p>
                               </div>
                             </button>
                           ))}
                         </div>
                       ) : (
-                        <div className="rounded-2xl bg-background px-4 py-10 text-center text-sm text-muted-foreground">
+                        <div className="rounded-2xl border border-border/60 bg-background/78 px-4 py-8 text-center text-sm text-muted-foreground">
                           No recent images yet.
                         </div>
                       )}
                     </div>
-
-                    <div className="ambient-panel rounded-3xl border border-border/80 p-5">
-                      <button
-                        onClick={() => setShowLogs((value) => !value)}
-                        className="mb-4 flex w-full items-center justify-between gap-3"
-                      >
-                        <div className="flex items-center gap-2">
-                          <Cpu className="h-4 w-4 text-primary" />
-                          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                            Session log
-                          </h2>
-                        </div>
-                        <span className="text-xs text-muted-foreground">
-                          {showLogs ? "hide" : "show"}
-                        </span>
-                      </button>
-
-                      {showLogs ? (
-                        <div className="space-y-2 rounded-2xl border border-border/60 bg-background/80 p-4 font-mono text-xs">
-                          {logs.map((log, index) => (
-                            <div
-                              key={`${log}-${index}`}
-                              className={cn(
-                                "break-words",
-                                log.includes("[ERROR]") ? "text-destructive" : "text-primary"
-                              )}
-                            >
-                              {log}
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="rounded-2xl border border-border/60 bg-background/70 px-4 py-10 text-center text-sm text-muted-foreground">
-                          Logs hidden.
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </section>
+                  </aside>
+                </div>
               </div>
             </motion.div>
           )}

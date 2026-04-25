@@ -12,21 +12,52 @@ class GalleryCache {
   private version = 2;
   private ttl = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
   private db: IDBDatabase | null = null;
+  private initPromise: Promise<void> | null = null;
 
   async init(): Promise<void> {
     if (this.db) return;
+    if (typeof indexedDB === 'undefined') return;
+    if (this.initPromise) return this.initPromise;
 
-    return new Promise((resolve, reject) => {
+    this.initPromise = new Promise((resolve, reject) => {
       const request = indexedDB.open(this.dbName, this.version);
+      let settled = false;
+
+      const timeoutId = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        this.initPromise = null;
+        reject(new Error('Gallery cache open timed out'));
+      }, 1500);
+
+      const resolveOnce = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        resolve();
+      };
+
+      const rejectOnce = (error: unknown) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        this.initPromise = null;
+        reject(error);
+      };
 
       request.onerror = () => {
         console.error('Failed to open IndexedDB');
-        reject(request.error);
+        rejectOnce(request.error);
       };
 
       request.onsuccess = () => {
         this.db = request.result;
-        resolve();
+        resolveOnce();
+      };
+
+      request.onblocked = () => {
+        console.warn('Gallery cache upgrade blocked by another browser tab');
+        resolveOnce();
       };
 
       request.onupgradeneeded = (event) => {
@@ -40,6 +71,8 @@ class GalleryCache {
         store.createIndex('timestamp', 'timestamp', { unique: false });
       };
     });
+
+    return this.initPromise;
   }
 
   async get<T = unknown>(key: string): Promise<T | null> {
