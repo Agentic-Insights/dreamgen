@@ -3,9 +3,12 @@ Command-line interface for the continuous image generation system.
 """
 
 import asyncio
+import os
 import sys
+import threading
+import time
 from pathlib import Path
-from typing import Optional
+from typing import Awaitable, Optional, TypeVar
 
 # Fix Windows Unicode handling
 if sys.platform == "win32":
@@ -29,7 +32,7 @@ from rich.progress import (
 from rich.table import Table
 
 from .. import __version__
-from ..generators.factory import create_image_generator
+from ..generators.factory import create_image_generator, is_model_cached, resolve_image_backend
 from ..generators.prompt_generator import PromptGenerator
 from ..plugins import ensure_initialized, plugin_manager
 from .config import Config
@@ -57,6 +60,9 @@ class AppState:
 app.state = AppState()
 app.add_typer(plugins_app, name="plugins")
 
+HEARTBEAT_SECONDS = 10
+T = TypeVar("T")
+
 
 def get_runtime_config() -> Config:
     """Get the active runtime config, falling back to defaults if needed."""
@@ -79,6 +85,130 @@ def create_generator_with_overrides(
         return create_image_generator(app.state.config)
     finally:
         app.state.config.model.image_backend = original_backend
+
+
+def resolve_backend_with_overrides(
+    backend_override: Optional[str] = None,
+    mock: bool = False,
+) -> str:
+    """Resolve the effective backend while honoring one-shot CLI overrides."""
+    original_backend = app.state.config.model.image_backend
+    effective_backend = "mock" if mock else backend_override
+
+    try:
+        if effective_backend:
+            app.state.config.model.image_backend = effective_backend.lower()
+        return resolve_image_backend(app.state.config)
+    finally:
+        app.state.config.model.image_backend = original_backend
+
+
+def _valid_hf_token() -> bool:
+    token = os.getenv("HF_TOKEN", "").strip()
+    return bool(token and token != "your_hugging_face_token_here")
+
+
+def _requires_hf_token(model_name: str) -> bool:
+    """Return whether the configured model is commonly gated on Hugging Face."""
+    normalized = model_name.lower()
+    return any(marker in normalized for marker in ("flux.1-dev", "flux.1-fill"))
+
+
+def validate_generation_config(config: Config, resolved_backend: str) -> list[str]:
+    """Validate config that can fail before submitting long generation work."""
+    errors = config.validate()
+    valid_backends = {"auto", "flux", "ollama", "zimage", "small", "turbo", "smoke", "mock"}
+
+    if resolved_backend not in valid_backends:
+        errors.append(
+            f"Invalid image backend: {resolved_backend} "
+            "(must be one of auto, flux, ollama, zimage, small, turbo, smoke, mock)"
+        )
+
+    if (
+        resolved_backend == "flux"
+        and _requires_hf_token(config.model.flux_model)
+        and not _valid_hf_token()
+        and not is_model_cached(config.model.flux_model)
+    ):
+        errors.append(
+            "Flux model "
+            f"{config.model.flux_model} appears to require Hugging Face access. "
+            "Set HF_TOKEN, pre-cache the model, or choose --backend small, --backend turbo, "
+            "or --mock."
+        )
+
+    if resolved_backend == "zimage" and not Path(config.model.zimage_model_path).exists():
+        errors.append(
+            f"Z-Image model path does not exist: {config.model.zimage_model_path}. "
+            "Download Tongyi-MAI/Z-Image-Turbo or choose another backend."
+        )
+
+    return errors
+
+
+def _format_model_detail(image_gen: object) -> str:
+    model_name = getattr(image_gen, "model_name", None)
+    if model_name:
+        return str(model_name)
+
+    model_path = getattr(image_gen, "model_path", None)
+    if model_path:
+        return str(model_path)
+
+    return "unknown"
+
+
+def _format_device_detail(image_gen: object) -> str:
+    return str(getattr(image_gen, "device", "external/default"))
+
+
+def _requested_backend_name(config: Config, backend_override: Optional[str], mock: bool) -> str:
+    if mock:
+        return "mock"
+    return backend_override or config.model.image_backend
+
+
+def _format_elapsed(start_time: float) -> str:
+    elapsed = int(time.monotonic() - start_time)
+    minutes, seconds = divmod(elapsed, 60)
+    if minutes:
+        return f"{minutes}m {seconds:02d}s"
+    return f"{seconds}s"
+
+
+async def await_with_generation_status(
+    operation: Awaitable[T],
+    *,
+    backend_name: str,
+    phase: str,
+    output_path: Path,
+    heartbeat_seconds: int = HEARTBEAT_SECONDS,
+) -> T:
+    """Await generation work while a thread emits visible lifecycle status."""
+    started_at = time.monotonic()
+    stop_event = threading.Event()
+
+    console.print(
+        f"[cyan]{phase}:[/cyan] request submitted to {backend_name}; "
+        f"output target: {output_path}"
+    )
+
+    def heartbeat() -> None:
+        while not stop_event.wait(heartbeat_seconds):
+            console.print(
+                f"[dim]{phase}: waiting on {backend_name} "
+                f"({_format_elapsed(started_at)} elapsed)...[/dim]"
+            )
+
+    heartbeat_thread = threading.Thread(target=heartbeat, daemon=True)
+    heartbeat_thread.start()
+
+    try:
+        return await operation
+    finally:
+        stop_event.set()
+        heartbeat_thread.join(timeout=1)
 
 
 @plugins_app.command("list")
@@ -167,14 +297,18 @@ def main(
     Generate AI images using Ollama for prompts and local image backends.
     Run `uv run dreamgen generate` for CLI usage, or use Docker Compose for the web UI.
     """
-    if config_file and config_file.exists():
-        app.state.config = Config.from_file(config_file)
-    else:
-        if config_file and not config_file.exists():
-            console.print(
-                f"[yellow]Warning: Config file {config_file} not found, using defaults[/yellow]"
-            )
-        app.state.config = Config()
+    try:
+        if config_file and config_file.exists():
+            app.state.config = Config.from_file(config_file)
+        else:
+            if config_file and not config_file.exists():
+                console.print(
+                    f"[yellow]Warning: Config file {config_file} not found, using defaults[/yellow]"
+                )
+            app.state.config = Config()
+    except ValueError as exc:
+        console.print(f"[red]Configuration error:[/red] {exc}")
+        raise typer.Exit(1) from exc
 
     # Configure logging after configuration is loaded
     setup_logging(app.state.config.system.log_dir, verbose=debug)
@@ -191,6 +325,7 @@ def generate(
     backend: Optional[str] = typer.Option(
         None,
         "--backend",
+        "--model",
         help="Override the image backend for this run (flux, ollama, zimage, small, turbo, smoke, mock)",
     ),
     mock: bool = typer.Option(
@@ -219,6 +354,17 @@ def generate(
                     # Update config with CLI options
                     app.state.config.system.mps_use_fp16 = mps_use_fp16
 
+                    resolved_backend = resolve_backend_with_overrides(
+                        backend_override=backend, mock=mock
+                    )
+                    validation_errors = validate_generation_config(
+                        app.state.config, resolved_backend
+                    )
+                    if validation_errors:
+                        for error in validation_errors:
+                            console.print(f"[red]Configuration error:[/red] {error}")
+                        raise typer.Exit(1)
+
                     # Initialize components
                     init_task = progress.add_task("[cyan]Initializing components...", total=None)
                     prompt_gen = PromptGenerator(app.state.config)
@@ -235,8 +381,15 @@ def generate(
                     metrics = MetricsCollector(app.state.config.system.log_dir / "metrics")
                     progress.remove_task(init_task)
 
-                    if not mock:
-                        console.print(f"[cyan]Using image backend:[/cyan] {backend_name}")
+                    console.print(
+                        f"[cyan]Using image backend:[/cyan] {backend_name} "
+                        f"(resolved: {resolved_backend}, "
+                        f"requested: {_requested_backend_name(app.state.config, backend, mock)})"
+                    )
+                    console.print(
+                        f"[cyan]Model/provider:[/cyan] {_format_model_detail(image_gen)}; "
+                        f"device: {_format_device_detail(image_gen)}"
+                    )
 
                     # Start metrics collection
                     metrics.start_batch()
@@ -270,13 +423,29 @@ def generate(
 
                     # Get output path
                     output_path = storage.get_output_path(generated_prompt)
+                    console.print(f"[cyan]Saving output to:[/cyan] {output_path}")
 
                     # Generate image
                     image_task = progress.add_task("[cyan]Generating image...", total=None)
-                    output_path, gen_time, model_name = await image_gen.generate_image(
-                        generated_prompt, output_path
-                    )
-                    progress.remove_task(image_task)
+                    try:
+                        output_path, gen_time, model_name = await await_with_generation_status(
+                            image_gen.generate_image(generated_prompt, output_path),
+                            backend_name=backend_name,
+                            phase="Image generation",
+                            output_path=output_path,
+                        )
+                    except Exception as e:
+                        console.print(
+                            f"[red]Generation failed[/red]\n"
+                            f"Backend: {backend_name}\n"
+                            f"Phase: image generation\n"
+                            f"Error: {str(e)}"
+                        )
+                        raise typer.Exit(1) from e
+                    finally:
+                        progress.remove_task(image_task)
+
+                    console.print(f"[green]Image received and saved[/green] ({gen_time:.1f}s)")
 
                     # Show success message with details
                     console.print(
@@ -299,9 +468,13 @@ def generate(
                     prompt_gen.cleanup()
                     image_gen.cleanup()
 
+                except typer.Exit:
+                    raise
                 except Exception as e:
                     console.print(f"[red]Error: {str(e)}[/red]")
                     raise
+        except typer.Exit:
+            raise
         except Exception as e:
             console.print(f"[red]Error: {str(e)}[/red]")
             raise typer.Exit(1)
@@ -368,6 +541,7 @@ def loop(
     backend: Optional[str] = typer.Option(
         None,
         "--backend",
+        "--model",
         help="Override the image backend for this run (flux, ollama, zimage, small, turbo, smoke, mock)",
     ),
     mock: bool = typer.Option(
@@ -399,6 +573,17 @@ def loop(
                     # Update config with CLI options
                     app.state.config.system.mps_use_fp16 = mps_use_fp16
 
+                    resolved_backend = resolve_backend_with_overrides(
+                        backend_override=backend, mock=mock
+                    )
+                    validation_errors = validate_generation_config(
+                        app.state.config, resolved_backend
+                    )
+                    if validation_errors:
+                        for error in validation_errors:
+                            console.print(f"[red]Configuration error:[/red] {error}")
+                        raise typer.Exit(1)
+
                     # Initialize components
                     init_task = progress.add_task("[cyan]Initializing models...", total=None)
                     prompt_gen = PromptGenerator(app.state.config)
@@ -415,8 +600,15 @@ def loop(
                     metrics = MetricsCollector(app.state.config.system.log_dir / "metrics")
                     progress.remove_task(init_task)
 
-                    if not mock:
-                        console.print(f"[cyan]Using image backend:[/cyan] {backend_name}")
+                    console.print(
+                        f"[cyan]Using image backend:[/cyan] {backend_name} "
+                        f"(resolved: {resolved_backend}, "
+                        f"requested: {_requested_backend_name(app.state.config, backend, mock)})"
+                    )
+                    console.print(
+                        f"[cyan]Model/provider:[/cyan] {_format_model_detail(image_gen)}; "
+                        f"device: {_format_device_detail(image_gen)}"
+                    )
 
                     # Start metrics collection
                     metrics.start_batch()
@@ -441,9 +633,17 @@ def loop(
 
                             # Get output path and generate
                             output_path = storage.get_output_path(prompt)
+                            console.print(
+                                f"[cyan]Image {i+1}/{batch_size} output target:[/cyan] {output_path}"
+                            )
                             force_reinit = i > 0 and i % 5 == 0  # Reinit every 5 images
-                            output_path, gen_time, model_name = await image_gen.generate_image(
-                                prompt, output_path, force_reinit=force_reinit
+                            output_path, gen_time, model_name = await await_with_generation_status(
+                                image_gen.generate_image(
+                                    prompt, output_path, force_reinit=force_reinit
+                                ),
+                                backend_name=backend_name,
+                                phase=f"Image {i+1}/{batch_size} generation",
+                                output_path=output_path,
                             )
 
                             console.print(
@@ -459,13 +659,18 @@ def loop(
                                 await asyncio.sleep(wait_time)
 
                         except Exception as e:
-                            console.print(f"[red]Error generating image {i+1}: {str(e)}[/red]")
+                            console.print(
+                                f"[red]Generation failed[/red]\n"
+                                f"Backend: {backend_name}\n"
+                                f"Phase: image {i+1}/{batch_size} generation\n"
+                                f"Error: {str(e)}"
+                            )
                             if i < batch_size - 1:
                                 console.print("[yellow]Attempting recovery...[/yellow]")
                                 await asyncio.sleep(2)  # Wait for cleanup
                                 console.print("[yellow]Continuing with next image...[/yellow]")
                                 continue
-                            raise
+                            raise typer.Exit(1) from e
 
                     # End metrics collection and show summary
                     metrics.end_batch()
@@ -488,9 +693,13 @@ def loop(
                     prompt_gen.cleanup()
                     image_gen.cleanup()
 
+                except typer.Exit:
+                    raise
                 except Exception as e:
                     console.print(f"[red]Error: {str(e)}[/red]")
                     raise
+        except typer.Exit:
+            raise
         except Exception as e:
             console.print(f"[red]Error: {str(e)}[/red]")
             raise typer.Exit(1)
@@ -500,6 +709,8 @@ def loop(
     except KeyboardInterrupt:
         console.print("\n[yellow]Operation cancelled by user[/yellow]")
         raise typer.Exit(0)
+    except typer.Exit:
+        raise
     except Exception as e:
         console.print(f"[red]Error: {str(e)}[/red]", err=True)
         raise typer.Exit(1)
