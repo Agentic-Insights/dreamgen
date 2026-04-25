@@ -19,7 +19,7 @@ on:
         description: "Deploy host-image Worker"
         required: true
         type: boolean
-        default: true
+        default: false
 
 permissions:
   contents: read
@@ -52,7 +52,7 @@ jobs:
   deploy-host:
     name: Deploy host-image Worker
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || inputs.deploy_host == true
+    if: github.event_name == 'workflow_dispatch' && inputs.deploy_host == true
     defaults:
       run:
         working-directory: host-image
