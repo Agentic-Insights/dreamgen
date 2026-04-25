@@ -54,6 +54,8 @@ def backend_label(config: Config, backend: str) -> str:
         return "small-sd"
     if backend == "turbo":
         return "sd-turbo"
+    if backend == "ollama":
+        return "ollama"
     if backend == "zimage":
         return "z-image"
 
@@ -97,6 +99,10 @@ def create_image_generator(config: Config) -> Tuple[object, str]:
         from .turbo_image_generator import TurboImageGenerator
 
         return TurboImageGenerator(config), backend_label(config, backend)
+    if backend == "ollama":
+        from .ollama_image_generator import OllamaImageGenerator
+
+        return OllamaImageGenerator(config), backend_label(config, backend)
     if backend == "zimage":
         from .zimage_generator import ZImageGenerator
 

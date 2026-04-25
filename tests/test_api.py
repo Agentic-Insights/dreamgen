@@ -12,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
 
+from src.utils.ollama import OllamaModelInfo
 from src.utils.storage import metadata_path_for, write_image_metadata
 
 # Redirect OUTPUT_DIR to a temp directory BEFORE any server imports so that test
@@ -42,6 +43,7 @@ os.environ["CPU_ONLY"] = "false"
 os.environ["MPS_USE_FP16"] = "false"
 
 from src.api.server import app
+from src.api.server import config as api_config
 
 
 @pytest.fixture
@@ -86,7 +88,11 @@ def test_plugins_endpoint(client):
 
 def test_generate_endpoint(client):
     """Test the /api/generate endpoint with mock mode"""
-    payload = {"prompt": "A serene mountain landscape at sunset", "enable_plugins": True}
+    payload = {
+        "prompt": "A serene mountain landscape at sunset",
+        "enable_plugins": True,
+        "client_request_id": "req-generate-123",
+    }
 
     response = client.post("/api/generate", json=payload)
     assert response.status_code == 200
@@ -106,6 +112,26 @@ def test_generate_endpoint(client):
     # Verify image path format
     assert data["image_path"].startswith("/images/")
     assert data["image_path"].endswith(".png")
+
+
+def test_prompt_endpoint_accepts_client_request_id(client, monkeypatch):
+    """Prompt generation should accept a client request ID used for progress correlation."""
+
+    async def fake_generate_prompt(self, meta_prompt=None):
+        return f"prompt from {meta_prompt or 'default'}"
+
+    monkeypatch.setattr("src.api.server.PromptGenerator.generate_prompt", fake_generate_prompt)
+
+    response = client.post(
+        "/api/prompt",
+        json={
+            "meta_prompt": "cinematic alleyway",
+            "client_request_id": "req-prompt-123",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"prompt": "prompt from cinematic alleyway"}
 
 
 def test_generate_without_prompt(client):
@@ -132,6 +158,110 @@ def test_generate_with_seed(client):
 
     data = response.json()
     assert data["metadata"].get("seed") == 42
+
+
+def test_generation_config_endpoint(client):
+    """The generation config endpoint should expose backend and LoRA settings."""
+    response = client.get("/api/config/generation")
+    assert response.status_code == 200
+
+    data = response.json()
+    assert data["image_backend"] == "mock"
+    assert isinstance(data["enabled_loras"], list)
+    assert isinstance(data["available_loras"], list)
+    assert "lora_application_probability" in data
+    assert "zimage_model_path" in data
+
+
+def test_set_generation_config_updates_backend_and_loras(client):
+    """Runtime generation settings should accept backend and LoRA updates."""
+    original_backend = api_config.model.image_backend
+    original_ollama_image_model = api_config.model.ollama_image_model
+    original_enabled_loras = list(api_config.model.lora.enabled_loras)
+    original_probability = api_config.model.lora.application_probability
+
+    try:
+        response = client.post(
+            "/api/config/generation",
+            json={
+                "image_backend": "small",
+                "ollama_image_model": "x/z-image-turbo:latest",
+                "enabled_loras": ["pixel-art", "comic"],
+                "lora_application_probability": 0.25,
+            },
+        )
+        assert response.status_code == 200
+
+        data = response.json()["config"]
+        assert data["image_backend"] == "small"
+        assert data["ollama_image_model"] == "x/z-image-turbo:latest"
+        assert data["enabled_loras"] == ["pixel-art", "comic"]
+        assert data["lora_application_probability"] == 0.25
+        assert api_config.model.image_backend == "small"
+        assert api_config.model.ollama_image_model == "x/z-image-turbo:latest"
+        assert api_config.model.lora.enabled_loras == ["pixel-art", "comic"]
+        assert api_config.model.lora.application_probability == 0.25
+    finally:
+        api_config.model.image_backend = original_backend
+        api_config.model.ollama_image_model = original_ollama_image_model
+        api_config.model.lora.enabled_loras = original_enabled_loras
+        api_config.model.lora.application_probability = original_probability
+
+
+def test_ollama_models_endpoint_includes_capabilities_and_resolved_models(client, monkeypatch):
+    """The Ollama models endpoint should expose capabilities plus resolved prompt/image selections."""
+    original_prompt_model = api_config.model.ollama_model
+    original_image_model = api_config.model.ollama_image_model
+
+    mock_models = [
+        OllamaModelInfo(
+            name="x/z-image-turbo:latest",
+            size=12_773_500_825,
+            modified="2026-04-23T20:11:47.7848211-05:00",
+            digest="digest-z",
+            format="safetensors",
+            family="ZImagePipeline",
+            capabilities=["image"],
+            can_prompt=False,
+            can_vision=False,
+            can_image=True,
+        ),
+        OllamaModelInfo(
+            name="qwen3.6:27b",
+            size=17_420_432_739,
+            modified="2026-04-23T11:00:26.2084332-05:00",
+            digest="digest-q",
+            format="gguf",
+            family="qwen35",
+            capabilities=["completion", "vision", "tools", "thinking"],
+            can_prompt=True,
+            can_vision=True,
+            can_image=False,
+        ),
+    ]
+
+    monkeypatch.setattr("src.api.server.list_ollama_models", lambda: mock_models)
+    monkeypatch.setattr("src.api.server.get_ollama_version", lambda: "0.21.2")
+
+    try:
+        api_config.model.ollama_model = "llama3.2:3b"
+        api_config.model.ollama_image_model = "x/z-image-turbo"
+
+        response = client.get("/api/ollama/models")
+        assert response.status_code == 200
+
+        data = response.json()
+        assert data["current"] == "qwen3.6:27b"
+        assert data["configured_prompt"] == "llama3.2:3b"
+        assert data["current_image"] == "x/z-image-turbo:latest"
+        assert data["configured_image"] == "x/z-image-turbo"
+        assert data["version"] == "0.21.2"
+        assert data["models"][0]["can_image"] is True
+        assert data["models"][1]["can_prompt"] is True
+        assert "vision" in data["models"][1]["capabilities"]
+    finally:
+        api_config.model.ollama_model = original_prompt_model
+        api_config.model.ollama_image_model = original_image_model
 
 
 def test_gallery_endpoint(client):

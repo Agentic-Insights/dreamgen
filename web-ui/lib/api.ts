@@ -16,6 +16,7 @@ export interface GenerateRequest {
   use_mock?: boolean;
   enable_plugins?: boolean;
   seed?: number;
+  client_request_id?: string;
 }
 
 export interface GenerateResponse {
@@ -26,6 +27,11 @@ export interface GenerateResponse {
     backend: string;
     plugins_used: string[];
     seed?: number;
+    provider?: string;
+    ollama_model?: string | null;
+    lora_backend?: string | null;
+    using_diffsynth?: boolean;
+    selected_lora?: string | null;
   };
   created_at: string;
 }
@@ -88,17 +94,29 @@ export interface PromptResponse {
   prompt: string;
 }
 
+type WebSocketSubscriber = (data: unknown) => void;
+
 export interface OllamaModel {
   name: string;
   size: number;
   modified: string;
   digest: string;
+  format: string;
+  family: string;
+  capabilities: string[];
+  can_prompt: boolean;
+  can_vision: boolean;
+  can_image: boolean;
 }
 
 export interface OllamaModelsResponse {
   models: OllamaModel[];
-  current: string;
+  current: string | null;
+  configured_prompt: string;
+  current_image: string | null;
+  configured_image: string;
   host: string;
+  version: string;
 }
 
 export interface GenerationConfig {
@@ -108,12 +126,38 @@ export interface GenerationConfig {
   guidance_scale: number;
   true_cfg_scale: number;
   ollama_temperature: number;
+  image_backend?: string;
+  ollama_image_model?: string;
+  enabled_loras?: string[];
+  available_loras?: string[];
+  lora_application_probability?: number;
+  lora_dir?: string;
+  zimage_model_path?: string;
+  zimage_native_available?: boolean;
 }
+
+const extractErrorMessage = async (response: Response, fallback: string) => {
+  try {
+    const data = await response.json();
+    if (typeof data?.detail === 'string' && data.detail.trim()) return data.detail;
+    if (typeof data?.error === 'string' && data.error.trim()) return data.error;
+    if (typeof data?.message === 'string' && data.message.trim()) return data.message;
+    if (typeof data?.detail?.message === 'string' && data.detail.message.trim()) {
+      return data.detail.message;
+    }
+  } catch {
+    // Ignore invalid/non-JSON error payloads and fall back to the generic label.
+  }
+
+  return fallback;
+};
 
 export class ImageGenAPI {
   private baseUrl: string;
   private ws: WebSocket | null = null;
   private intentionalClose: boolean = false;
+  private subscribers: Set<WebSocketSubscriber> = new Set();
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(baseUrl: string = API_BASE) {
     this.baseUrl = baseUrl;
@@ -121,13 +165,13 @@ export class ImageGenAPI {
 
   async getStatus(): Promise<SystemStatus> {
     const response = await fetch(`${this.baseUrl}/api/status`);
-    if (!response.ok) throw new Error('Failed to get status');
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to get status'));
     return response.json();
   }
 
   async getPlugins(): Promise<PluginInfo[]> {
     const response = await fetch(`${this.baseUrl}/api/plugins`);
-    if (!response.ok) throw new Error('Failed to get plugins');
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to get plugins'));
     return response.json();
   }
 
@@ -135,7 +179,7 @@ export class ImageGenAPI {
     const response = await fetch(`${this.baseUrl}/api/plugins/${pluginName}/toggle`, {
       method: 'POST',
     });
-    if (!response.ok) throw new Error('Failed to toggle plugin');
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to toggle plugin'));
     return response.json();
   }
 
@@ -147,7 +191,7 @@ export class ImageGenAPI {
       },
       body: JSON.stringify({ ordered_names: orderedNames }),
     });
-    if (!response.ok) throw new Error('Failed to update plugin order');
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to update plugin order'));
     return response.json();
   }
 
@@ -159,13 +203,13 @@ export class ImageGenAPI {
       },
       body: JSON.stringify(request),
     });
-    if (!response.ok) throw new Error('Failed to generate image');
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to generate image'));
     return response.json();
   }
 
-  async getGallery(limit: number = 50, offset: number = 0) {
+  async getGallery(limit: number = 50, offset: number = 0, timeoutMs: number = 20000) {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
       const response = await fetch(
@@ -174,12 +218,12 @@ export class ImageGenAPI {
       );
       clearTimeout(timeoutId);
 
-      if (!response.ok) throw new Error('Failed to get gallery');
+      if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to get gallery'));
       return response.json();
     } catch (error) {
       clearTimeout(timeoutId);
       if (error instanceof Error && error.name === 'AbortError') {
-        throw new Error('Gallery request timed out');
+        throw new Error(`Gallery request timed out after ${Math.round(timeoutMs / 1000)}s`);
       }
       throw error;
     }
@@ -189,23 +233,28 @@ export class ImageGenAPI {
     const response = await fetch(`${this.baseUrl}/api/gallery/${encodeURIComponent(imagePath)}`, {
       method: 'DELETE',
     });
-    if (!response.ok) throw new Error('Failed to delete image');
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to delete image'));
     return response.json();
   }
 
-  async generatePrompt(metaPrompt?: string): Promise<PromptResponse> {
+  async generatePrompt(metaPrompt?: string, clientRequestId?: string): Promise<PromptResponse> {
     const response = await fetch(`${this.baseUrl}/api/prompt`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ meta_prompt: metaPrompt }),
+      body: JSON.stringify({
+        meta_prompt: metaPrompt,
+        client_request_id: clientRequestId,
+      }),
     });
-    if (!response.ok) throw new Error('Failed to generate prompt');
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to generate prompt'));
     return response.json();
   }
 
-  connectWebSocket(onMessage: (data: unknown) => void): void {
+  private connectSocket(): void {
+    if (this.ws || this.subscribers.size === 0) return;
+
     const wsBase = process.env.NEXT_PUBLIC_WS_URL
       ? normalizeBase(process.env.NEXT_PUBLIC_WS_URL, WS_BASE)
       : this.baseUrl.replace(/^http/, 'ws');
@@ -215,12 +264,18 @@ export class ImageGenAPI {
 
       this.ws.onopen = () => {
         console.log('WebSocket connected');
+        if (this.reconnectTimer) {
+          clearTimeout(this.reconnectTimer);
+          this.reconnectTimer = null;
+        }
       };
 
       this.ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          onMessage(data);
+          for (const subscriber of this.subscribers) {
+            subscriber(data);
+          }
         } catch (error) {
           console.warn('Failed to parse WebSocket message:', error instanceof Error ? error.message : 'Unknown error');
         }
@@ -234,21 +289,44 @@ export class ImageGenAPI {
 
       this.ws.onclose = (event) => {
         console.log('WebSocket disconnected');
+        this.ws = null;
         // Only reconnect if it wasn't an intentional closure
-        if (!this.intentionalClose && event.code !== 1000) {
+        if (!this.intentionalClose && event.code !== 1000 && this.subscribers.size > 0) {
           // Attempt reconnection after 3 seconds
-          setTimeout(() => this.connectWebSocket(onMessage), 3000);
+          this.reconnectTimer = setTimeout(() => this.connectSocket(), 3000);
         }
         this.intentionalClose = false;
       };
     } catch (error) {
       console.error('Failed to create WebSocket connection:', error instanceof Error ? error.message : 'Unknown error');
       // Retry connection after 3 seconds
-      setTimeout(() => this.connectWebSocket(onMessage), 3000);
+      if (this.subscribers.size > 0) {
+        this.reconnectTimer = setTimeout(() => this.connectSocket(), 3000);
+      }
     }
   }
 
+  subscribeWebSocket(onMessage: WebSocketSubscriber): () => void {
+    this.subscribers.add(onMessage);
+    this.connectSocket();
+
+    return () => {
+      this.subscribers.delete(onMessage);
+      if (this.subscribers.size === 0) {
+        this.disconnectWebSocket();
+      }
+    };
+  }
+
+  connectWebSocket(onMessage: WebSocketSubscriber): void {
+    this.subscribeWebSocket(onMessage);
+  }
+
   disconnectWebSocket(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     if (this.ws) {
       this.intentionalClose = true;
       this.ws.close(1000, 'Client disconnect');
@@ -264,7 +342,7 @@ export class ImageGenAPI {
 
   async getModelStatus(): Promise<ModelStatus> {
     const response = await fetch(`${this.baseUrl}/api/models/status`);
-    if (!response.ok) throw new Error('Failed to get model status');
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to get model status'));
     return response.json();
   }
 
@@ -272,7 +350,7 @@ export class ImageGenAPI {
     const response = await fetch(`${this.baseUrl}/api/models/${encodeURIComponent(modelId)}/download`, {
       method: 'POST',
     });
-    if (!response.ok) throw new Error('Failed to start model download');
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to start model download'));
     return response.json();
   }
 
@@ -284,13 +362,13 @@ export class ImageGenAPI {
       },
       body: JSON.stringify({ token }),
     });
-    if (!response.ok) throw new Error('Failed to set HF token');
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to set HF token'));
     return response.json();
   }
 
   async getHFTokenStatus(): Promise<HFTokenStatus> {
     const response = await fetch(`${this.baseUrl}/api/config/hf-token-status`);
-    if (!response.ok) throw new Error('Failed to get HF token status');
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to get HF token status'));
     return response.json();
   }
 
@@ -306,13 +384,13 @@ export class ImageGenAPI {
       method: 'POST',
       body: formData,
     });
-    if (!response.ok) throw new Error('Failed to edit image');
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to edit image'));
     return response.json();
   }
 
   async getOllamaModels(): Promise<OllamaModelsResponse> {
     const response = await fetch(`${this.baseUrl}/api/ollama/models`);
-    if (!response.ok) throw new Error('Failed to get Ollama models');
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to get Ollama models'));
     return response.json();
   }
 
@@ -324,17 +402,17 @@ export class ImageGenAPI {
       },
       body: JSON.stringify({ model }),
     });
-    if (!response.ok) throw new Error('Failed to set Ollama model');
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to set Ollama model'));
     return response.json();
   }
 
   async getGenerationConfig(): Promise<GenerationConfig> {
     const response = await fetch(`${this.baseUrl}/api/config/generation`);
-    if (!response.ok) throw new Error('Failed to get generation config');
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to get generation config'));
     return response.json();
   }
 
-  async setGenerationConfig(config: Partial<GenerationConfig>): Promise<{ message: string; config: Partial<GenerationConfig> }> {
+  async setGenerationConfig(config: Partial<GenerationConfig>): Promise<{ message: string; config: GenerationConfig }> {
     const response = await fetch(`${this.baseUrl}/api/config/generation`, {
       method: 'POST',
       headers: {
@@ -342,7 +420,7 @@ export class ImageGenAPI {
       },
       body: JSON.stringify(config),
     });
-    if (!response.ok) throw new Error('Failed to set generation config');
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to set generation config'));
     return response.json();
   }
 }

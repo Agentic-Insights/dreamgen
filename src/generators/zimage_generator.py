@@ -11,6 +11,8 @@ from typing import Optional
 import torch
 from loguru import logger
 
+from ..plugins import plugin_manager, register_lora_plugin
+from ..plugins.lora import get_lora_path
 from .base_generator import GenerationResult, ImageGenerator
 
 
@@ -38,6 +40,12 @@ class ZImageGenerator(ImageGenerator):
         self.attention_backend = config.model.zimage_attention
         self.compile_model = config.model.zimage_compile
         self.components = None  # Will hold transformer, vae, text_encoder, tokenizer, scheduler
+        self.using_diffsynth = False
+        self.selected_lora_name: Optional[str] = None
+        self.last_generation_metadata: dict = {}
+
+        # Register LoRA plugin so Z-Image can consume the same selection flow as Flux.
+        register_lora_plugin(config)
 
     def _get_zimage_src_path(self) -> Path:
         """Get the path to Z-Image source code."""
@@ -51,8 +59,89 @@ class ZImageGenerator(ImageGenerator):
             "Clone Z-Image repo: git clone https://github.com/Tongyi-MAI/Z-Image ref-repos/Z-Image"
         )
 
-    def load_model(self):
-        """Load Z-Image model components into memory."""
+    def _get_selected_lora_path(self) -> Optional[Path]:
+        """Return the currently selected LoRA path, if any."""
+        try:
+            plugin_results = plugin_manager.execute_plugins()
+        except Exception as exc:
+            logger.warning(f"Failed to execute plugins for Z-Image LoRA selection: {exc}")
+            return None
+
+        for result in plugin_results:
+            if result.name == "lora" and result.value:
+                lora_path = get_lora_path(result.value, self.config)
+                if lora_path:
+                    self.selected_lora_name = result.value
+                    logger.info(f"Selected Z-Image LoRA '{result.value}' from {lora_path}")
+                return lora_path
+        self.selected_lora_name = None
+        return None
+
+    def _build_diffsynth_model_configs(self):
+        """Build local-path model configs for DiffSynth Z-Image loading."""
+        from diffsynth.pipelines.z_image import ModelConfig
+
+        transformer_paths = sorted(
+            str(path) for path in (self.model_path / "transformer").glob("*.safetensors")
+        )
+        text_encoder_paths = sorted(
+            str(path) for path in (self.model_path / "text_encoder").glob("*.safetensors")
+        )
+        vae_paths = [
+            str(self.model_path / "vae" / "diffusion_pytorch_model.safetensors"),
+        ]
+
+        required_paths = {
+            "transformer": transformer_paths,
+            "text_encoder": text_encoder_paths,
+            "vae": vae_paths,
+        }
+        missing = [
+            name
+            for name, paths in required_paths.items()
+            if not all(Path(p).exists() for p in paths)
+        ]
+        if missing:
+            missing_str = ", ".join(missing)
+            raise FileNotFoundError(
+                f"Missing required Z-Image checkpoint files for DiffSynth: {missing_str} under {self.model_path}"
+            )
+
+        return [
+            ModelConfig(path=transformer_paths),
+            ModelConfig(path=text_encoder_paths),
+            ModelConfig(path=vae_paths),
+        ]
+
+    def _load_diffsynth_pipe(self, lora_path: Path):
+        """Load Z-Image through DiffSynth-Studio so LoRAs can be applied."""
+        try:
+            from diffsynth.pipelines.z_image import ModelConfig, ZImagePipeline
+        except ImportError as exc:
+            raise ImportError(
+                "Z-Image LoRA support requires DiffSynth-Studio (`diffsynth`). "
+                "Install it first, then retry generation with Z-Image LoRAs enabled."
+            ) from exc
+
+        if not self.model_path.exists():
+            raise FileNotFoundError(
+                f"Z-Image model not found at {self.model_path}. "
+                "Download from HuggingFace: huggingface-cli download Tongyi-MAI/Z-Image-Turbo --local-dir <path>"
+            )
+
+        logger.info(f"Loading Z-Image via DiffSynth for LoRA support from: {self.model_path}")
+        self.pipe = ZImagePipeline.from_pretrained(
+            torch_dtype=torch.bfloat16,
+            device=self.device,
+            model_configs=self._build_diffsynth_model_configs(),
+            tokenizer_config=ModelConfig(path=str(self.model_path / "tokenizer")),
+        )
+        self.pipe.load_lora(self.pipe.dit, str(lora_path))
+        self.using_diffsynth = True
+        logger.info("Z-Image DiffSynth pipeline with LoRA loaded successfully")
+
+    def _load_native_components(self):
+        """Load native Z-Image components without LoRA support."""
         # Add Z-Image source to path
         zimage_src = self._get_zimage_src_path()
         if str(zimage_src) not in sys.path:
@@ -93,6 +182,17 @@ class ZImageGenerator(ImageGenerator):
 
         logger.info("Z-Image model loaded successfully")
 
+    def load_model(self):
+        """Load Z-Image model components into memory."""
+        lora_path = self._get_selected_lora_path()
+        self.cleanup()
+        if lora_path is not None:
+            self._load_diffsynth_pipe(lora_path)
+        else:
+            self._load_native_components()
+            self.using_diffsynth = False
+            self.selected_lora_name = None
+
     async def generate(
         self,
         prompt: str,
@@ -119,14 +219,18 @@ class ZImageGenerator(ImageGenerator):
         Returns:
             GenerationResult with generated image
         """
-        if self.components is None:
+        if (self.using_diffsynth and self.pipe is None) or (
+            not self.using_diffsynth and self.components is None
+        ):
             self.load_model()
 
-        # Import generate function
-        zimage_src = self._get_zimage_src_path()
-        if str(zimage_src) not in sys.path:
-            sys.path.insert(0, str(zimage_src))
-        from zimage import generate as zimage_generate
+        zimage_generate = None
+        if not self.using_diffsynth:
+            # Import generate function
+            zimage_src = self._get_zimage_src_path()
+            if str(zimage_src) not in sys.path:
+                sys.path.insert(0, str(zimage_src))
+            from zimage import generate as zimage_generate
 
         # Apply defaults from config
         height = height or self.config.image.height
@@ -134,37 +238,61 @@ class ZImageGenerator(ImageGenerator):
         num_inference_steps = num_inference_steps or 8  # Z-Image Turbo default
         seed = seed if seed is not None else torch.randint(0, 2**32, (1,)).item()
 
-        # Z-Image Turbo uses guidance_scale=0.0 (fixed)
-        guidance_scale = 0.0
-
-        # Negative prompts not used in Turbo variant
-        if negative_prompt:
-            logger.warning(
-                "Z-Image Turbo doesn't use negative prompts, ignoring negative_prompt parameter"
+        if self.using_diffsynth:
+            cfg_scale = (
+                guidance_scale if guidance_scale is not None else self.config.image.guidance_scale
+            )
+            logger.info(f"Generating image with Z-Image + LoRA via DiffSynth: {prompt[:100]}...")
+            logger.info(
+                f"Parameters: {width}x{height}, steps={num_inference_steps}, seed={seed}, cfg_scale={cfg_scale}"
             )
 
-        logger.info(f"Generating image with Z-Image: {prompt[:100]}...")
-        logger.info(f"Parameters: {width}x{height}, steps={num_inference_steps}, seed={seed}")
+            loop = asyncio.get_event_loop()
+            image = await loop.run_in_executor(
+                None,
+                lambda: self.pipe(
+                    prompt=prompt,
+                    negative_prompt=negative_prompt or "",
+                    height=height,
+                    width=width,
+                    num_inference_steps=num_inference_steps,
+                    cfg_scale=cfg_scale,
+                    seed=seed,
+                    rand_device=self.device,
+                ),
+            )
+        else:
+            # Z-Image Turbo uses guidance_scale=0.0 (fixed)
+            guidance_scale = 0.0
 
-        # Create generator for reproducibility
-        generator = torch.Generator(device=self.device).manual_seed(seed)
+            # Negative prompts not used in Turbo variant
+            if negative_prompt:
+                logger.warning(
+                    "Z-Image Turbo doesn't use negative prompts, ignoring negative_prompt parameter"
+                )
 
-        # Generate in separate thread to avoid blocking
-        loop = asyncio.get_event_loop()
-        images = await loop.run_in_executor(
-            None,
-            lambda: zimage_generate(
-                prompt=prompt,
-                **self.components,
-                height=height,
-                width=width,
-                num_inference_steps=num_inference_steps,
-                guidance_scale=guidance_scale,
-                generator=generator,
-            ),
-        )
+            logger.info(f"Generating image with Z-Image: {prompt[:100]}...")
+            logger.info(f"Parameters: {width}x{height}, steps={num_inference_steps}, seed={seed}")
 
-        image = images[0]
+            # Create generator for reproducibility
+            generator = torch.Generator(device=self.device).manual_seed(seed)
+
+            # Generate in separate thread to avoid blocking
+            loop = asyncio.get_event_loop()
+            images = await loop.run_in_executor(
+                None,
+                lambda: zimage_generate(
+                    prompt=prompt,
+                    **self.components,
+                    height=height,
+                    width=width,
+                    num_inference_steps=num_inference_steps,
+                    guidance_scale=guidance_scale,
+                    generator=generator,
+                ),
+            )
+
+            image = images[0]
 
         # Save image
         output_path = self._save_image(image, prompt, seed)
@@ -176,11 +304,15 @@ class ZImageGenerator(ImageGenerator):
             "height": height,
             "width": width,
             "steps": num_inference_steps,
-            "guidance_scale": guidance_scale,
+            "guidance_scale": guidance_scale if not self.using_diffsynth else cfg_scale,
             "attention_backend": self.attention_backend,
             "compiled": self.compile_model,
             "device": self.device,
+            "lora_backend": "diffsynth" if self.using_diffsynth else None,
+            "using_diffsynth": self.using_diffsynth,
+            "selected_lora": self.selected_lora_name if self.using_diffsynth else None,
         }
+        self.last_generation_metadata = metadata
 
         logger.info(f"Image saved to: {output_path}")
 
@@ -269,6 +401,9 @@ class ZImageGenerator(ImageGenerator):
                 del self.components[key]
             self.components = None
 
+        self.using_diffsynth = False
+        self.selected_lora_name = None
+        self.last_generation_metadata = {}
         super().cleanup()
 
         # Additional cleanup

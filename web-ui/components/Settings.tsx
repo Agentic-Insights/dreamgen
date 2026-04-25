@@ -17,18 +17,42 @@ import {
   HardDrive,
   RefreshCw,
   ArrowUp,
-  ArrowDown
+  ArrowDown,
+  SlidersHorizontal,
+  Sparkles,
 } from "lucide-react";
-import { api, ModelStatus, ModelInfo, HFTokenStatus, SystemStatus, OllamaModelsResponse, PluginInfo } from "@/lib/api";
+import {
+  api,
+  ModelStatus,
+  ModelInfo,
+  HFTokenStatus,
+  SystemStatus,
+  OllamaModelsResponse,
+  PluginInfo,
+  GenerationConfig,
+} from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 interface SettingsProps {
   systemStatus: SystemStatus | null;
 }
 
+const IMAGE_BACKEND_OPTIONS = [
+  { id: "auto", label: "Auto", description: "Use the best ready local backend." },
+  { id: "zimage", label: "Z-Image", description: "Use the Z-Image stack and local LoRAs." },
+  { id: "ollama", label: "Ollama Image", description: "Use an image-capable Ollama model over the local Ollama host API." },
+  { id: "flux", label: "FLUX", description: "Prefer the FLUX transformer path." },
+  { id: "small", label: "Small SD", description: "Use the lightweight public fallback." },
+  { id: "turbo", label: "Turbo", description: "Run the fast SD Turbo backend." },
+  { id: "smoke", label: "Smoke", description: "Use the tiny smoke-test model." },
+  { id: "mock", label: "Mock", description: "Generate placeholders without loading a model." },
+] as const;
+
 export default function Settings({ systemStatus }: SettingsProps) {
   const [activeSection, setActiveSection] = useState("models");
   const [modelStatus, setModelStatus] = useState<ModelStatus | null>(null);
+  const [generationConfig, setGenerationConfig] = useState<GenerationConfig | null>(null);
+  const [loadingGenerationConfig, setLoadingGenerationConfig] = useState(false);
   const [hfTokenStatus, setHFTokenStatus] = useState<HFTokenStatus | null>(null);
   const [hfToken, setHFToken] = useState("");
   const [showToken, setShowToken] = useState(false);
@@ -42,6 +66,7 @@ export default function Settings({ systemStatus }: SettingsProps) {
 
   useEffect(() => {
     loadModelStatus();
+    loadGenerationConfig();
     loadHFTokenStatus();
     loadOllamaModels();
     loadPlugins();
@@ -49,27 +74,28 @@ export default function Settings({ systemStatus }: SettingsProps) {
 
   useEffect(() => {
     // Handle WebSocket messages for model download progress
-    if (api) {
-      const handleWebSocketMessage = (data: unknown) => {
-        if (typeof data === 'object' && data !== null && 'type' in data) {
-          const msg = data as Record<string, unknown>;
+    const handleWebSocketMessage = (data: unknown) => {
+      if (typeof data === 'object' && data !== null && 'type' in data) {
+        const msg = data as Record<string, unknown>;
 
-          if (msg.type === 'model_download_started') {
-            setDownloadingModels(prev => new Set(prev).add(msg.model_id as string));
-          } else if (msg.type === 'model_download_completed' || msg.type === 'model_download_error') {
-            setDownloadingModels(prev => {
-              const newSet = new Set(prev);
-              newSet.delete(msg.model_id as string);
-              return newSet;
-            });
-            loadModelStatus(); // Refresh model status
-          }
+        if (msg.type === 'model_download_started') {
+          setDownloadingModels(prev => new Set(prev).add(msg.model_id as string));
+        } else if (msg.type === 'model_download_completed' || msg.type === 'model_download_error') {
+          setDownloadingModels(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(msg.model_id as string);
+            return newSet;
+          });
+          loadModelStatus(); // Refresh model status
         }
-      };
+      }
+    };
 
-      // Connect with our message handler
-      api.connectWebSocket(handleWebSocketMessage);
-    }
+    const unsubscribe = api.subscribeWebSocket(handleWebSocketMessage);
+
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
   const loadModelStatus = async () => {
@@ -78,6 +104,19 @@ export default function Settings({ systemStatus }: SettingsProps) {
       setModelStatus(status);
     } catch (error) {
       console.error('Failed to load model status:', error);
+    }
+  };
+
+  const loadGenerationConfig = async () => {
+    setLoadingGenerationConfig(true);
+    try {
+      const currentConfig = await api.getGenerationConfig();
+      setGenerationConfig(currentConfig);
+    } catch (error) {
+      console.error('Failed to load generation config:', error);
+      setMessage({ type: 'error', text: 'Failed to load generation settings' });
+    } finally {
+      setLoadingGenerationConfig(false);
     }
   };
 
@@ -116,6 +155,26 @@ export default function Settings({ systemStatus }: SettingsProps) {
     }
   };
 
+  const updateGenerationConfig = async (
+    updates: Partial<GenerationConfig>,
+    successText?: string
+  ) => {
+    try {
+      const response = await api.setGenerationConfig(updates);
+      setGenerationConfig(response.config);
+      if (successText) {
+        setMessage({ type: 'success', text: successText });
+        setTimeout(() => setMessage(null), 4000);
+      }
+    } catch (error) {
+      setMessage({
+        type: 'error',
+        text: `Failed to update generation settings: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      });
+      setTimeout(() => setMessage(null), 5000);
+    }
+  };
+
   const handleOllamaModelSelect = async (modelName: string) => {
     try {
       await api.setOllamaModel(modelName);
@@ -129,6 +188,14 @@ export default function Settings({ systemStatus }: SettingsProps) {
     }
 
     setTimeout(() => setMessage(null), 5000);
+  };
+
+  const handleOllamaImageModelSelect = async (modelName: string) => {
+    await updateGenerationConfig(
+      { ollama_image_model: modelName },
+      `Switched Ollama image model to ${modelName}`
+    );
+    await loadOllamaModels();
   };
 
   const handlePluginToggle = async (pluginName: string) => {
@@ -218,6 +285,20 @@ export default function Settings({ systemStatus }: SettingsProps) {
     setTimeout(() => setMessage(null), 5000);
   };
 
+  const toggleEnabledLora = async (loraName: string) => {
+    const enabledLoras = generationConfig?.enabled_loras ?? [];
+    const nextEnabledLoras = enabledLoras.includes(loraName)
+      ? enabledLoras.filter((name) => name !== loraName)
+      : [...enabledLoras, loraName];
+
+    await updateGenerationConfig(
+      { enabled_loras: nextEnabledLoras },
+      nextEnabledLoras.includes(loraName)
+        ? `Enabled LoRA ${loraName}`
+        : `Disabled LoRA ${loraName}`
+    );
+  };
+
   const formatFileSize = (bytes: number) => {
     if (bytes === 0) return '0 B';
     const k = 1024;
@@ -251,6 +332,18 @@ export default function Settings({ systemStatus }: SettingsProps) {
       default: return <AlertCircle className="w-4 h-4 text-gray-400" />;
     }
   };
+
+  const loraPluginEnabled = plugins.some((plugin) => plugin.name === "lora" && plugin.enabled);
+  const selectedBackend = generationConfig?.image_backend ?? "auto";
+  const availableLoras = generationConfig?.available_loras ?? [];
+  const enabledLoras = generationConfig?.enabled_loras ?? [];
+  const loraProbability = generationConfig?.lora_application_probability ?? 0;
+  const promptCapableModels = ollamaModels?.models.filter((model) => model.can_prompt) ?? [];
+  const imageCapableModels = ollamaModels?.models.filter((model) => model.can_image) ?? [];
+  const configuredPromptModel = ollamaModels?.configured_prompt ?? "";
+  const activePromptModel = ollamaModels?.current ?? null;
+  const configuredImageModel = generationConfig?.ollama_image_model ?? ollamaModels?.configured_image ?? "";
+  const activeImageModel = ollamaModels?.current_image ?? null;
 
   const sections = [
     { id: "models", label: "Models", icon: Database },
@@ -314,7 +407,10 @@ export default function Settings({ systemStatus }: SettingsProps) {
                     </p>
                   </div>
                   <button
-                    onClick={loadModelStatus}
+                    onClick={() => {
+                      loadModelStatus();
+                      loadGenerationConfig();
+                    }}
                     className="p-2 hover:bg-background rounded-md transition-colors"
                     title="Refresh model status"
                   >
@@ -333,6 +429,168 @@ export default function Settings({ systemStatus }: SettingsProps) {
                     </code>
                   </div>
                 )}
+
+                <div className="mb-6 space-y-6">
+                  <div className="border border-border rounded-lg p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <SlidersHorizontal className="w-4 h-4 text-primary" />
+                      <div>
+                        <h4 className="font-medium">Active Image Backend</h4>
+                        <p className="text-sm text-muted-foreground">
+                          Choose which backend DreamGen uses for new generations.
+                        </p>
+                      </div>
+                    </div>
+
+                    {loadingGenerationConfig ? (
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Loading generation settings...
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                        {IMAGE_BACKEND_OPTIONS.map((backend) => {
+                          const isActive = selectedBackend === backend.id;
+                          return (
+                            <button
+                              key={backend.id}
+                              type="button"
+                              onClick={() =>
+                                updateGenerationConfig(
+                                  { image_backend: backend.id },
+                                  `Switched image backend to ${backend.label}`
+                                )
+                              }
+                              className={cn(
+                                "rounded-lg border p-3 text-left transition-colors",
+                                isActive
+                                  ? "border-primary bg-primary/5"
+                                  : "border-border hover:bg-muted/40"
+                              )}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-medium">{backend.label}</span>
+                                {isActive && (
+                                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-primary/15 text-primary">
+                                    Active
+                                  </span>
+                                )}
+                              </div>
+                              <p className="mt-2 text-xs text-muted-foreground">
+                                {backend.description}
+                              </p>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {selectedBackend === "ollama" && (
+                      <div className="mt-4 rounded-md bg-muted/50 p-3 text-sm text-muted-foreground">
+                        DreamGen will call Ollama&apos;s experimental image API with the selected Ollama image model.
+                        {activeImageModel ? (
+                          <span className="block mt-1 text-foreground">
+                            Active image model: {activeImageModel}
+                          </span>
+                        ) : (
+                          <span className="block mt-1 text-amber-600 dark:text-amber-300">
+                            No image-capable Ollama model is currently available.
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="border border-border rounded-lg p-4">
+                    <div className="flex items-start justify-between gap-3 mb-4">
+                      <div className="flex items-start gap-2">
+                        <Sparkles className="w-4 h-4 text-primary mt-0.5" />
+                        <div>
+                          <h4 className="font-medium">Local LoRA Library</h4>
+                          <p className="text-sm text-muted-foreground">
+                            Select which local LoRAs are eligible when the <code className="text-xs">lora</code> plugin runs.
+                          </p>
+                        </div>
+                      </div>
+                      <span className="text-xs px-2 py-1 rounded-full bg-muted text-muted-foreground">
+                        {availableLoras.length} detected
+                      </span>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div className="rounded-md bg-muted/50 p-3">
+                        <div className="text-xs font-medium text-foreground mb-1">LoRA Directory</div>
+                        <code className="text-xs text-muted-foreground break-all">
+                          {generationConfig?.lora_dir ?? "./loras"}
+                        </code>
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-sm font-medium">Application probability</label>
+                          <span className="text-xs text-muted-foreground">
+                            {Math.round(loraProbability * 100)}%
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0"
+                          max="1"
+                          step="0.05"
+                          value={loraProbability}
+                          onChange={(e) =>
+                            updateGenerationConfig({
+                              lora_application_probability: parseFloat(e.target.value),
+                            })
+                          }
+                          className="w-full"
+                        />
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Higher values make LoRA selection more likely when the plugin is enabled.
+                        </p>
+                      </div>
+
+                      {!loraPluginEnabled && (
+                        <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+                          The <code>lora</code> plugin is currently disabled. Enable it in the Plugins tab if you want these adapters to be applied.
+                        </div>
+                      )}
+
+                      {selectedBackend === "zimage" && !generationConfig?.zimage_native_available && enabledLoras.length === 0 && (
+                        <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+                          Z-Image without an active LoRA still expects a local <code>ref-repos/Z-Image</code> checkout. If you want the simplified DiffSynth path, keep at least one LoRA enabled.
+                        </div>
+                      )}
+
+                      {availableLoras.length > 0 ? (
+                        <div className="flex flex-wrap gap-2">
+                          {availableLoras.map((loraName) => {
+                            const isEnabled = enabledLoras.includes(loraName);
+                            return (
+                              <button
+                                key={loraName}
+                                type="button"
+                                onClick={() => toggleEnabledLora(loraName)}
+                                className={cn(
+                                  "rounded-full border px-3 py-1.5 text-sm transition-colors",
+                                  isEnabled
+                                    ? "border-primary bg-primary text-primary-foreground"
+                                    : "border-border hover:bg-muted/40"
+                                )}
+                              >
+                                {loraName}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
+                          No LoRAs found yet. Add adapters under <code>{generationConfig?.lora_dir ?? "./loras"}</code> and refresh this page.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
 
                 <div className="space-y-4">
                   {modelStatus?.models.map((model) => {
@@ -369,6 +627,11 @@ export default function Settings({ systemStatus }: SettingsProps) {
                                   {model.incomplete_files} files downloading...
                                 </div>
                               )}
+                              {model.path && model.id === "local:zimage" && (
+                                <div className="text-xs text-muted-foreground mt-1 break-all">
+                                  {model.path}
+                                </div>
+                              )}
                             </div>
                           </div>
 
@@ -378,7 +641,7 @@ export default function Settings({ systemStatus }: SettingsProps) {
                                 onClick={() => handleModelDownload(model.id)}
                                 className="px-3 py-1.5 bg-primary text-primary-foreground text-xs rounded-md hover:opacity-90 transition-opacity"
                               >
-                                Download
+                                {model.id === "local:zimage" ? "Download Local Copy" : "Download"}
                               </button>
                             )}
                             {isDownloading && (
@@ -417,7 +680,7 @@ export default function Settings({ systemStatus }: SettingsProps) {
                   <div>
                     <h3 className="text-xl font-semibold">Ollama Model Selection</h3>
                     <p className="text-sm text-muted-foreground mt-1">
-                      Select which Ollama model to use for prompt generation
+                      Select which Ollama models DreamGen uses for prompt generation and the Ollama image backend
                     </p>
                   </div>
                   <button
@@ -432,13 +695,22 @@ export default function Settings({ systemStatus }: SettingsProps) {
 
                 {ollamaModels && (
                   <div className="mb-6 p-4 bg-muted/50 rounded-lg">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Server className="w-4 h-4 text-muted-foreground" />
-                      <span className="text-sm font-medium">Ollama Host</span>
+                    <div className="flex flex-wrap items-center gap-4 text-sm">
+                      <div className="flex items-center gap-2">
+                        <Server className="w-4 h-4 text-muted-foreground" />
+                        <span className="font-medium">Ollama Host</span>
+                        <code className="text-xs text-muted-foreground">
+                          {ollamaModels.host}
+                        </code>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Cpu className="w-4 h-4 text-muted-foreground" />
+                        <span className="font-medium">Version</span>
+                        <code className="text-xs text-muted-foreground">
+                          {ollamaModels.version || "unknown"}
+                        </code>
+                      </div>
                     </div>
-                    <code className="text-xs text-muted-foreground">
-                      {ollamaModels.host}
-                    </code>
                   </div>
                 )}
 
@@ -447,49 +719,142 @@ export default function Settings({ systemStatus }: SettingsProps) {
                     <Loader2 className="w-8 h-8 animate-spin text-primary" />
                   </div>
                 ) : ollamaModels && ollamaModels.models.length > 0 ? (
-                  <div className="space-y-2">
-                    {ollamaModels.models.map((model) => {
-                      const isCurrent = model.name === ollamaModels.current;
-                      const sizeInGB = (model.size / (1024 * 1024 * 1024)).toFixed(2);
+                  <div className="space-y-6">
+                    {configuredPromptModel && activePromptModel && configuredPromptModel !== activePromptModel && (
+                      <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+                        Configured prompt model <code>{configuredPromptModel}</code> is not usable on this host. DreamGen is falling back to <code>{activePromptModel}</code>.
+                      </div>
+                    )}
 
-                      return (
-                        <button
-                          key={model.name}
-                          onClick={() => handleOllamaModelSelect(model.name)}
-                          className={cn(
-                            "w-full border rounded-lg p-4 transition-all text-left",
-                            "hover:bg-muted/50 hover:border-primary/50",
-                            isCurrent
-                              ? "border-primary bg-primary/5"
-                              : "border-border"
-                          )}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3 flex-1">
-                              <div className={cn(
-                                "w-2 h-2 rounded-full",
-                                isCurrent ? "bg-primary" : "bg-muted-foreground"
-                              )} />
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2">
-                                  <h4 className="font-medium">{model.name}</h4>
-                                  {isCurrent && (
-                                    <span className="text-xs px-2 py-0.5 bg-primary/20 text-primary rounded-full">
-                                      Active
-                                    </span>
-                                  )}
+                    <div>
+                      <div className="mb-3">
+                        <h4 className="font-medium">Prompt Models</h4>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Completion-capable models used for the Generate Prompt action.
+                        </p>
+                      </div>
+
+                      {promptCapableModels.length > 0 ? (
+                        <div className="space-y-2">
+                          {promptCapableModels.map((model) => {
+                            const isCurrent = model.name === activePromptModel;
+                            const sizeInGB = (model.size / (1024 * 1024 * 1024)).toFixed(2);
+
+                            return (
+                              <button
+                                key={`prompt-${model.name}`}
+                                onClick={() => handleOllamaModelSelect(model.name)}
+                                className={cn(
+                                  "w-full border rounded-lg p-4 transition-all text-left",
+                                  "hover:bg-muted/50 hover:border-primary/50",
+                                  isCurrent ? "border-primary bg-primary/5" : "border-border"
+                                )}
+                              >
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="flex-1">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <h5 className="font-medium">{model.name}</h5>
+                                      {isCurrent && (
+                                        <span className="text-xs px-2 py-0.5 bg-primary/20 text-primary rounded-full">
+                                          Active Prompt
+                                        </span>
+                                      )}
+                                      {model.can_vision && (
+                                        <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                                          Vision
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
+                                      <span>{sizeInGB} GB</span>
+                                      {model.format && (
+                                        <>
+                                          <span>•</span>
+                                          <span>{model.format}</span>
+                                        </>
+                                      )}
+                                      <span>•</span>
+                                      <span>{new Date(model.modified).toLocaleDateString()}</span>
+                                    </div>
+                                  </div>
                                 </div>
-                                <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
-                                  <span>{sizeInGB} GB</span>
-                                  <span>•</span>
-                                  <span>{new Date(model.modified).toLocaleDateString()}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
+                          No completion-capable Ollama models found. Install a chat/completion model to use prompt generation.
+                        </div>
+                      )}
+                    </div>
+
+                    <div>
+                      <div className="mb-3">
+                        <h4 className="font-medium">Image Models</h4>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Image-capable Ollama models used when the backend is set to <code>Ollama Image</code>.
+                        </p>
+                      </div>
+
+                      {configuredImageModel && activeImageModel && configuredImageModel !== activeImageModel && (
+                        <div className="mb-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+                          Configured Ollama image model <code>{configuredImageModel}</code> is not usable on this host. DreamGen is falling back to <code>{activeImageModel}</code>.
+                        </div>
+                      )}
+
+                      {imageCapableModels.length > 0 ? (
+                        <div className="space-y-2">
+                          {imageCapableModels.map((model) => {
+                            const isCurrent = model.name === activeImageModel;
+                            const sizeInGB = (model.size / (1024 * 1024 * 1024)).toFixed(2);
+
+                            return (
+                              <button
+                                key={`image-${model.name}`}
+                                onClick={() => handleOllamaImageModelSelect(model.name)}
+                                className={cn(
+                                  "w-full border rounded-lg p-4 transition-all text-left",
+                                  "hover:bg-muted/50 hover:border-primary/50",
+                                  isCurrent ? "border-primary bg-primary/5" : "border-border"
+                                )}
+                              >
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="flex-1">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <h5 className="font-medium">{model.name}</h5>
+                                      {isCurrent && (
+                                        <span className="text-xs px-2 py-0.5 bg-primary/20 text-primary rounded-full">
+                                          Active Image
+                                        </span>
+                                      )}
+                                      <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                                        {model.family || model.format || "image"}
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
+                                      <span>{sizeInGB} GB</span>
+                                      {model.format && (
+                                        <>
+                                          <span>•</span>
+                                          <span>{model.format}</span>
+                                        </>
+                                      )}
+                                      <span>•</span>
+                                      <span>{new Date(model.modified).toLocaleDateString()}</span>
+                                    </div>
+                                  </div>
                                 </div>
-                              </div>
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    })}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
+                          No image-capable Ollama models found. Install one like <code>x/z-image-turbo</code> or <code>x/flux2-klein</code> to use the Ollama image backend.
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ) : (
                   <div className="text-center py-12">

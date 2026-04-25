@@ -55,12 +55,29 @@ def register_lora_plugin(config: Config):
     def lora_plugin():
         return apply_lora(config)
 
+    existing_plugin = plugin_manager.plugins.get("lora")
+
     # Store the plugin function
     plugin_functions["lora"] = lora_plugin
 
-    # Register or re-register the plugin
+    # Preserve any runtime toggles/order changes when generators refresh the plugin.
+    enabled = (
+        existing_plugin.enabled
+        if existing_plugin is not None
+        else "lora" in set(config.plugins.enabled_plugins)
+    )
+    order = (
+        existing_plugin.order
+        if existing_plugin is not None
+        else config.plugins.plugin_order.get("lora", 5)
+    )
+
     plugin_manager.register(
-        "lora", "Randomly selects and applies a Lora model", lora_plugin, order=5
+        "lora",
+        "Randomly selects and applies a Lora model",
+        lora_plugin,
+        enabled=enabled,
+        order=order,
     )
 
 

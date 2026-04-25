@@ -12,6 +12,7 @@ from ..plugins import get_context_with_descriptions, get_temporal_descriptor
 from ..utils.config import Config
 from ..utils.error_handler import PromptError, handle_errors
 from ..utils.metrics import GenerationMetrics
+from ..utils.ollama import list_ollama_models, resolve_ollama_model
 
 
 class PromptGenerator:
@@ -39,6 +40,27 @@ class PromptGenerator:
 
             metrics = GenerationMetrics(model_name=self.model_name)
             start_time = time.time()
+
+            available_models = list_ollama_models()
+            resolved_model = resolve_ollama_model(
+                available_models,
+                self.config.model.ollama_model,
+                "completion",
+            )
+            if not resolved_model:
+                raise PromptError(
+                    "No Ollama prompt model is available. Install a completion-capable model "
+                    "such as 'qwen3.6', 'qwen3.5', or 'gemma4'."
+                )
+
+            if resolved_model != self.model_name:
+                self.logger.warning(
+                    "Configured Ollama prompt model %s is unavailable or not completion-capable; using %s instead",
+                    self.model_name,
+                    resolved_model,
+                )
+                self.model_name = resolved_model
+                metrics.model_name = resolved_model
 
             # Get context with plugin descriptions
             context_data = get_context_with_descriptions()

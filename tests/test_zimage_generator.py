@@ -107,6 +107,66 @@ class TestZImageGeneratorWithMockZImage:
             "scheduler": MagicMock(),
         }
 
+    def test_load_model_uses_diffsynth_when_lora_selected(self, mock_config):
+        with patch("torch.cuda.is_available", return_value=False):
+            gen = ZImageGenerator(mock_config)
+
+        lora_path = Path("/tmp/loras/test/style.safetensors")
+        with patch.object(gen, "_get_selected_lora_path", return_value=lora_path):
+            with patch.object(gen, "_load_diffsynth_pipe") as mock_diffsynth:
+                with patch.object(gen, "_load_native_components") as mock_native:
+                    gen.load_model()
+
+        mock_diffsynth.assert_called_once_with(lora_path)
+        mock_native.assert_not_called()
+
+    def test_load_model_uses_native_path_without_lora(self, mock_config):
+        with patch("torch.cuda.is_available", return_value=False):
+            gen = ZImageGenerator(mock_config)
+
+        with patch.object(gen, "_get_selected_lora_path", return_value=None):
+            with patch.object(gen, "_load_diffsynth_pipe") as mock_diffsynth:
+                with patch.object(gen, "_load_native_components") as mock_native:
+                    gen.load_model()
+
+        mock_native.assert_called_once()
+        mock_diffsynth.assert_not_called()
+        assert gen.using_diffsynth is False
+
+    def test_build_diffsynth_model_configs_expands_local_shards(self, mock_config, tmp_path):
+        model_path = tmp_path / "Z-Image-Turbo"
+        transformer_dir = model_path / "transformer"
+        text_encoder_dir = model_path / "text_encoder"
+        vae_dir = model_path / "vae"
+
+        transformer_dir.mkdir(parents=True)
+        text_encoder_dir.mkdir(parents=True)
+        vae_dir.mkdir(parents=True)
+
+        transformer_shards = [
+            transformer_dir / "diffusion_pytorch_model-00002-of-00003.safetensors",
+            transformer_dir / "diffusion_pytorch_model-00001-of-00003.safetensors",
+        ]
+        text_encoder_shards = [
+            text_encoder_dir / "model-00002-of-00003.safetensors",
+            text_encoder_dir / "model-00001-of-00003.safetensors",
+        ]
+        vae_file = vae_dir / "diffusion_pytorch_model.safetensors"
+
+        for path in [*transformer_shards, *text_encoder_shards, vae_file]:
+            path.touch()
+
+        mock_config.model.zimage_model_path = model_path
+
+        with patch("torch.cuda.is_available", return_value=False):
+            gen = ZImageGenerator(mock_config)
+
+        configs = gen._build_diffsynth_model_configs()
+
+        assert configs[0].path == sorted(str(path) for path in transformer_shards)
+        assert configs[1].path == sorted(str(path) for path in text_encoder_shards)
+        assert configs[2].path == [str(vae_file)]
+
     @pytest.mark.asyncio
     async def test_generate_with_mocked_api(self, mock_config, mock_zimage_components, tmp_path):
         """Test generation with mocked Z-Image API."""
@@ -146,6 +206,36 @@ class TestZImageGeneratorWithMockZImage:
         assert result.model == "zimage"
         assert result.seed == 42
         assert result.steps == 8
+
+    @pytest.mark.asyncio
+    async def test_generate_with_diffsynth_pipe_and_lora(self, mock_config, tmp_path):
+        """Test generation through the DiffSynth LoRA path."""
+        mock_config.system.output_dir = tmp_path
+        mock_config.image.guidance_scale = 1.0
+
+        mock_image = MagicMock()
+
+        def mock_save(path):
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            Path(path).touch()
+
+        mock_image.save = mock_save
+
+        with patch("torch.cuda.is_available", return_value=False):
+            gen = ZImageGenerator(mock_config)
+            gen.using_diffsynth = True
+            gen.pipe = MagicMock(return_value=mock_image)
+
+            result = await gen.generate(
+                prompt="A lora-enhanced dog portrait",
+                height=1024,
+                width=1024,
+                seed=7,
+            )
+
+        assert result.metadata["using_diffsynth"] is True
+        assert result.metadata["lora_backend"] == "diffsynth"
+        gen.pipe.assert_called_once()
 
 
 class TestZImageGeneratorIntegration:

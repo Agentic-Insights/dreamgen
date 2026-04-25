@@ -27,6 +27,7 @@ uv sync
 cp .env.example .env
 # Edit .env for your machine:
 # - OLLAMA_MODEL must point at a local Ollama model
+# - OLLAMA_IMAGE_MODEL is optional and only used for IMAGE_BACKEND=ollama
 # - HF_TOKEN is optional for small/turbo/smoke public models
 # - IMAGE_BACKEND=auto uses FLUX if cached, otherwise the small public fallback
 
@@ -56,6 +57,19 @@ That exposes:
 - UI: `http://localhost:7860`
 - API: `http://localhost:25800`
 - API docs: `http://localhost:25800/api/docs`
+
+For Z-Image review in Docker:
+
+- put LoRAs under `./loras/<name>/*.safetensors`
+- use **Settings → Models** to download `Z-Image-Turbo`
+- use **Settings → Models** to switch the active backend to `Z-Image`
+- use **Settings → Plugins** to enable `lora` and then select active LoRAs in the Models panel
+
+For Ollama-backed image generation:
+
+- install at least one Ollama image model such as `x/z-image-turbo` or `x/flux2-klein`
+- use **Settings → Ollama** to pick the Ollama prompt model and Ollama image model separately
+- use **Settings → Models** to switch the active backend to `Ollama Image`
 
 ## 🔑 Why Choose This?
 

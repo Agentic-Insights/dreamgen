@@ -2,7 +2,7 @@
 
 from typer.testing import CliRunner
 
-from src.plugins import initialize_plugins, plugin_manager
+from src.plugins import initialize_plugins, plugin_manager, register_lora_plugin
 from src.utils.cli import app
 from src.utils.config import Config
 
@@ -28,3 +28,15 @@ def test_enable_disable_plugin_changes_state():
 
     runner.invoke(app, ["plugins", "enable", "time_of_day"])
     assert plugin_manager.plugins["time_of_day"].enabled
+
+
+def test_register_lora_plugin_preserves_runtime_state():
+    """Re-registering the LoRA plugin should not clobber runtime toggles or order."""
+    config = Config()
+    plugin_manager.disable_plugin("lora")
+    plugin_manager.set_plugin_order("lora", 9)
+
+    register_lora_plugin(config)
+
+    assert not plugin_manager.plugins["lora"].enabled
+    assert plugin_manager.plugins["lora"].order == 9

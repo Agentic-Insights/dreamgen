@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable @next/next/no-img-element */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Trash2, Download, X, Loader2, Clock, FileText,
   Calendar, Grid, ChevronRight, Folder
@@ -35,6 +35,40 @@ interface WeekGroup {
 
 type ViewMode = "week" | "all";
 
+const ALL_PAGE_SIZE = 20;
+const WEEK_PAGE_SIZE = 200;
+const CACHE_TIMEOUT_MS = 800;
+const GALLERY_TIMEOUT_MS = 30000;
+
+const withTimeout = async <T,>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  fallback: T
+): Promise<T> => (
+  new Promise((resolve) => {
+    let settled = false;
+    const timeoutId = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve(fallback);
+    }, timeoutMs);
+
+    promise
+      .then((value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        resolve(value);
+      })
+      .catch(() => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        resolve(fallback);
+      });
+  })
+);
+
 export default function Gallery() {
   const [images, setImages] = useState<GalleryImage[]>([]);
   const [weekGroups, setWeekGroups] = useState<WeekGroup[]>([]);
@@ -46,8 +80,9 @@ export default function Gallery() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("week");
+  const loadRequestRef = useRef(0);
 
-  const imagesPerPage = viewMode === "all" ? 20 : 200; // Load reasonable amount for week view
+  const imagesPerPage = viewMode === "all" ? ALL_PAGE_SIZE : WEEK_PAGE_SIZE;
 
   const organizeByWeek = useCallback((images: GalleryImage[]) => {
     const groups = new Map<string, WeekGroup>();
@@ -88,40 +123,27 @@ export default function Gallery() {
   }, []);
 
   const loadImages = useCallback(async () => {
+    const requestId = loadRequestRef.current + 1;
+    loadRequestRef.current = requestId;
+    const limit = viewMode === "all" ? ALL_PAGE_SIZE : WEEK_PAGE_SIZE;
+    const offset = viewMode === "all" ? page * ALL_PAGE_SIZE : 0;
+    const cacheKey = `gallery_${viewMode}_${page}_${limit}`;
+
     setLoading(true);
     setError(null);
 
     try {
-      // Create cache key based on view mode and page
-      const cacheKey = `gallery_${viewMode}_${page}_${viewMode === "all" ? imagesPerPage : 200}`;
-
-      // Try to get from cache first
-      const cachedData = await galleryCache.get<GalleryResponse>(cacheKey);
-
-      if (cachedData && cachedData.total > 0) {
-        console.log('Loading gallery from cache');
-        setImages(cachedData.images);
-        setTotal(cachedData.total);
-
-        if (viewMode === "week") {
-          organizeByWeek(cachedData.images);
-        }
-        setLoading(false);
-        return;
-      }
-
-      // If not in cache or expired, fetch from API
       console.log('Fetching gallery from API');
-      const response: GalleryResponse = await api.getGallery(
-        viewMode === "all" ? imagesPerPage : 200, // Load reasonable amount for week view
-        viewMode === "all" ? page * imagesPerPage : 0
-      );
+      const response: GalleryResponse = await api.getGallery(limit, offset, GALLERY_TIMEOUT_MS);
 
-      // Save to cache
-      await galleryCache.set(cacheKey, {
+      if (loadRequestRef.current !== requestId) return;
+
+      void withTimeout(galleryCache.set(cacheKey, {
         images: response.images,
-        total: response.total
-      });
+        total: response.total,
+        limit: response.limit,
+        offset: response.offset,
+      }), CACHE_TIMEOUT_MS, undefined);
 
       setImages(response.images);
       setTotal(response.total);
@@ -130,31 +152,35 @@ export default function Gallery() {
         organizeByWeek(response.images);
       }
     } catch (err) {
-      setError("Failed to load gallery");
       console.error('Gallery load error:', err);
 
-      // Try to load from cache even if API fails
-      try {
-        const cacheKey = `gallery_${viewMode}_${page}_${viewMode === "all" ? imagesPerPage : 200}`;
-        const cachedData = await galleryCache.get<GalleryResponse>(cacheKey);
+      const cachedData = await withTimeout(
+        galleryCache.get<GalleryResponse>(cacheKey),
+        CACHE_TIMEOUT_MS,
+        null
+      );
 
-        if (cachedData && cachedData.total > 0) {
-          console.log('API failed, using cached data');
-          setImages(cachedData.images);
-          setTotal(cachedData.total);
+      if (loadRequestRef.current !== requestId) return;
 
-          if (viewMode === "week") {
-            organizeByWeek(cachedData.images);
-          }
-          setError(null); // Clear error if cache loads successfully
+      if (cachedData && cachedData.total > 0) {
+        console.log('API failed, using cached data');
+        setImages(cachedData.images);
+        setTotal(cachedData.total);
+
+        if (viewMode === "week") {
+          organizeByWeek(cachedData.images);
         }
-      } catch (cacheErr) {
-        console.error('Cache fallback failed:', cacheErr);
+        setError(null);
+      } else {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        setError(`Failed to load gallery. ${message}`);
       }
     } finally {
-      setLoading(false);
+      if (loadRequestRef.current === requestId) {
+        setLoading(false);
+      }
     }
-  }, [imagesPerPage, organizeByWeek, page, viewMode]);
+  }, [organizeByWeek, page, viewMode]);
 
   const getWeekNumber = (date: Date): number => {
     const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -203,7 +229,7 @@ export default function Gallery() {
       await api.deleteImage(relativePath);
 
       // Clear cache after deletion
-      await galleryCache.clear();
+      await withTimeout(galleryCache.clear(), CACHE_TIMEOUT_MS, undefined);
 
       await loadImages();
       if (selectedImage?.path === imagePath) {
@@ -382,8 +408,8 @@ export default function Gallery() {
 
               <button
                 onClick={async () => {
-                  await galleryCache.clear(); // Clear cache on manual refresh
-                  loadImages();
+                  await withTimeout(galleryCache.clear(), CACHE_TIMEOUT_MS, undefined);
+                  void loadImages();
                 }}
                 className="text-sm text-muted-foreground hover:text-foreground"
                 disabled={loading}
