@@ -1,0 +1,24 @@
+# Development override for running the frontend container against a local backend.
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --no-deps frontend
+
+services:
+  frontend:
+    build:
+      context: ./web-ui
+      dockerfile: ../Dockerfile.frontend.dev
+    environment:
+      - NODE_ENV=development
+      - NEXT_PUBLIC_API_URL=http://localhost:${DEV_BACKEND_PORT:-8000}
+      - PORT=7860
+      - HOSTNAME=0.0.0.0
+    command: npm run dev -- --hostname 0.0.0.0 --port 7860
+    volumes:
+      - ./web-ui:/app
+      - /app/node_modules
+    healthcheck:
+      test: ["CMD", "node", "-e", "const r=require('http').get('http://localhost:7860',(res)=>{process.exit(res.statusCode<500?0:1)});r.on('error',()=>process.exit(1));"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s

@@ -160,7 +160,7 @@ dev-frontend-d:
 dev:
     @echo "Starting development environment..."
     @echo "  Backend: http://localhost:8000 (local, GPU enabled)"
-    @echo "  Frontend: http://localhost:22023 (containerized)"
+    @echo "  Frontend: http://localhost:7860 (containerized)"
     @echo ""
     @echo "Run in separate terminals:"
     @echo "  just dev-backend   # Terminal 1"

@@ -1,4 +1,4 @@
-interface Env {
+export interface Env {
 	DREAM_BUCKET: R2Bucket;
 }
 
@@ -19,7 +19,7 @@ export default {
 
 			// Filter for PNG images and sort by uploaded date (most recent first)
 			const images = list.objects
-				.filter(obj => obj.key.endsWith('.png'))
+				.filter((obj) => obj.key.endsWith('.png'))
 				.sort((a, b) => new Date(b.uploaded).getTime() - new Date(a.uploaded).getTime());
 
 			if (images.length === 0) {
@@ -43,10 +43,11 @@ export default {
 
 			return new Response(object.body, {
 				headers,
-				status: 200
+				status: 200,
 			});
 		} catch (error) {
-			return new Response(`Error: ${error.message}`, { status: 500 });
+			const message = error instanceof Error ? error.message : String(error);
+			return new Response(`Error: ${message}`, { status: 500 });
 		}
-	}
-}
+	},
+};

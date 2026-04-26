@@ -13,7 +13,9 @@ thoughts/
 .venv
 .claude/
 .pytest_cache/
+.mypy_cache/
 .cache/
+.venv-test/
 
 # Environment variables
 .env
