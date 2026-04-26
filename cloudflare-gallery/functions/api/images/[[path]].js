@@ -3,8 +3,8 @@ export async function onRequestGet(ctx) {
 
   // List all images with metadata
   if (!path) {
-    const list = await ctx.env.GALLERY.list();
-    const images = list.objects
+    const objects = await listAllObjects(ctx.env.GALLERY);
+    const images = objects
       .filter(o => /\.(png|jpg|jpeg|webp|gif)$/i.test(o.key))
       .sort((a, b) => new Date(b.uploaded) - new Date(a.uploaded))
       .map(o => ({
@@ -13,7 +13,11 @@ export async function onRequestGet(ctx) {
         dateStr: extractDateFromFilename(o.key),
         captionKey: o.key.replace(/\.(png|jpg|jpeg|webp|gif)$/i, '.txt')
       }));
-    return Response.json(images);
+    return Response.json(images, {
+      headers: {
+        'Cache-Control': 'no-store'
+      }
+    });
   }
 
   // Serve individual file (image or txt)
@@ -39,6 +43,19 @@ export async function onRequestGet(ctx) {
       'Access-Control-Allow-Origin': '*'
     }
   });
+}
+
+async function listAllObjects(bucket) {
+  const objects = [];
+  let cursor;
+
+  do {
+    const page = await bucket.list({ limit: 1000, cursor });
+    objects.push(...page.objects);
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+
+  return objects;
 }
 
 function extractDateFromFilename(filename) {
