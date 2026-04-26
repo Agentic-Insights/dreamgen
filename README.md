@@ -13,7 +13,33 @@ Beautiful, VS Code-inspired dark theme with real-time generation and organized g
 - **⚙️ Plugin Management** - Configure time-aware and artistic enhancement plugins
 - **📊 Real-time Status** - Monitor API, GPU, and generation progress
 
-## 🚀 Quick Install
+## 🚀 Install
+
+### Option 1: Install the CLI from PyPI
+
+Use this path if you want to run DreamGen as an installed command and do not need to edit the source code.
+
+```bash
+uv venv --python 3.11
+source .venv/bin/activate  # Windows PowerShell: .venv\Scripts\Activate.ps1
+uv pip install dreamgen
+```
+
+Verify the install without downloading image models or requiring a GPU:
+
+```bash
+dreamgen generate --mock
+```
+
+The plain `uv pip install dreamgen` command resolves from PyPI. For NVIDIA systems where you specifically want CUDA 12.4 PyTorch wheels from the PyTorch index, include the extra index during install:
+
+```bash
+uv pip install dreamgen --extra-index-url https://download.pytorch.org/whl/cu124
+```
+
+### Option 2: Run from source
+
+Use this path for development, local web UI work, or Docker review.
 
 ```bash
 # Clone the repository
@@ -44,6 +70,10 @@ npm run dev
 ```
 
 The local dev UI runs at `http://localhost:3000` and talks to the API at `http://localhost:25800`.
+
+Source checkouts use `uv run dreamgen ...`. PyPI installs use `dreamgen ...`.
+
+### Option 3: Run with Docker Compose
 
 For a production-style local run with the shipped ports and wiring:
 
@@ -80,6 +110,8 @@ For Ollama-backed image generation:
 - **🔌 Extensible**: Plugin system for custom prompt enhancements
 
 ## 🎮 Quick Commands
+
+These examples assume a source checkout. If you installed from PyPI, drop `uv run` and run `dreamgen ...` directly.
 
 ```bash
 # Generate a single image
