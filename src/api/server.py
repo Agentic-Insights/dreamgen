@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import aiofiles
-from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
@@ -34,6 +34,15 @@ from src.utils.ollama import (
     list_ollama_models,
     ollama_host,
     resolve_ollama_model,
+)
+from src.utils.publication_catalog import (
+    backfill_catalog,
+    catalog_path_for,
+    load_catalog,
+    public_catalog_entries,
+    register_image,
+    remove_image,
+    set_publication_state,
 )
 from src.utils.storage import (
     StorageManager,
@@ -163,54 +172,48 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/images", StaticFiles(directory=str(OUTPUT_DIR)), name="images")
 
 
-def is_placeholder_artifact(image_file: Path, metadata: Optional[dict[str, Any]] = None) -> bool:
-    """Return True for mock/placeholder artifacts that should stay out of the live gallery."""
-    metadata = metadata or read_image_metadata(image_file)
-    backend = str(metadata.get("backend", "")).lower()
-    if backend == "mock" or metadata.get("is_placeholder") is True:
-        return True
-
-    try:
-        file_size = image_file.stat().st_size
-    except OSError:
-        return False
-
-    if file_size > 8 * 1024:
-        return False
-
-    try:
-        with Image.open(image_file) as img:
-            extrema = img.convert("RGB").getextrema()
-    except Exception:
-        return False
-
-    return all(channel_min == channel_max for channel_min, channel_max in extrema)
-
-
 MAX_GALLERY_SCAN = int(os.getenv("MAX_GALLERY_SCAN", "2000"))
 
 
+def normalize_gallery_key(image_path: str) -> str:
+    """Normalize API image paths into catalog keys."""
+    normalized = image_path.strip().replace("\\", "/").lstrip("/")
+    if normalized.startswith("images/"):
+        normalized = normalized[len("images/") :]
+    return normalized
+
+
 def build_gallery_index(output_dir: Path) -> List[Dict[str, Any]]:
-    """Build gallery metadata without reading prompt files for every stored image."""
+    """Build public gallery metadata from the backend publication catalog."""
+    if not catalog_path_for(output_dir).exists():
+        backfill_catalog(output_dir, default_state="published", include_placeholders=True)
+
     images: List[Dict[str, Any]] = []
     last_image: Optional[Dict[str, Any]] = None
 
-    all_files = list(output_dir.rglob("*.png"))
-    image_files = sorted(all_files, key=lambda path: path.stat().st_mtime, reverse=True)
+    catalog_entries = public_catalog_entries(output_dir)
 
-    for image_file in image_files:
-        metadata = read_image_metadata(image_file)
-        if is_placeholder_artifact(image_file, metadata):
+    for catalog_entry in catalog_entries:
+        image_file = output_dir / catalog_entry["path"]
+        if not image_file.exists():
             continue
 
         stat_result = image_file.stat()
         image_entry = {
             "file": image_file,
             "path": f"/images/{image_file.relative_to(output_dir).as_posix()}",
-            "created_at": datetime.fromtimestamp(stat_result.st_mtime).isoformat(),
+            "created_at": catalog_entry.get(
+                "created_at", datetime.fromtimestamp(stat_result.st_mtime).isoformat()
+            ),
             "size": stat_result.st_size,
             "prompt_hash": image_file.stem.rsplit("_", 1)[-1],
-            "metadata": metadata,
+            "metadata": catalog_entry.get("metadata", {}),
+            "publication": {
+                "id": catalog_entry.get("id"),
+                "state": catalog_entry.get("publication_state"),
+                "publishable": catalog_entry.get("publishable", True),
+                "quality_flags": catalog_entry.get("quality_flags", []),
+            },
         }
 
         if last_image is not None:
@@ -258,6 +261,8 @@ async def hydrate_gallery_entries(images: List[Dict[str, Any]]) -> List[Dict[str
                 "prompt": prompt.strip(),
                 "created_at": image_entry["created_at"],
                 "size": image_entry["size"],
+                "metadata": image_entry.get("metadata", {}),
+                "publication": image_entry.get("publication", {}),
             }
         )
 
@@ -284,6 +289,16 @@ class GenerateResponse(BaseModel):
     image_path: str = Field(..., description="Path to generated image")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Generation metadata")
     created_at: str = Field(..., description="ISO timestamp")
+
+
+class PublicationUpdateRequest(BaseModel):
+    """Request model for changing gallery publication state."""
+
+    state: str = Field(..., description="Publication state for this image")
+    allow_placeholder_publish: bool = Field(
+        False,
+        description="Allow publishing mock/test placeholder images when explicitly requested",
+    )
 
 
 class EditRequest(BaseModel):
@@ -1114,16 +1129,21 @@ async def generate_image(request: GenerateRequest):
         if resolved_seed is None and request.seed is not None and seed_supported:
             resolved_seed = request.seed
         existing_metadata = read_image_metadata(image_path)
-        write_image_metadata(
+        saved_metadata = {
+            **existing_metadata,
+            **generation_metadata,
+            "backend": backend_name,
+            "configured_backend": config.model.image_backend,
+            "generated_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            "seed": resolved_seed,
+        }
+        write_image_metadata(image_path, saved_metadata)
+        publication_entry = register_image(
             image_path,
-            {
-                **existing_metadata,
-                **generation_metadata,
-                "backend": backend_name,
-                "configured_backend": config.model.image_backend,
-                "generated_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
-                "seed": resolved_seed,
-            },
+            OUTPUT_DIR,
+            prompt=final_prompt,
+            metadata=saved_metadata,
+            publication_state="draft",
         )
 
         # Create relative path for API response
@@ -1157,6 +1177,12 @@ async def generate_image(request: GenerateRequest):
             metadata={
                 **generation_metadata,
                 "backend": backend_name,
+                "publication": {
+                    "id": publication_entry["id"],
+                    "state": publication_entry["publication_state"],
+                    "publishable": publication_entry["publishable"],
+                    "quality_flags": publication_entry["quality_flags"],
+                },
                 "plugins_used": [
                     name for name, info in plugin_manager.plugins.items() if info.enabled
                 ],
@@ -1196,10 +1222,84 @@ async def get_gallery(limit: int = 50, offset: int = 0):
     }
 
 
+@app.get("/api/gallery/catalog")
+async def get_gallery_catalog(
+    publication_state: Optional[str] = Query(None, alias="state"),
+    limit: int = 100,
+    offset: int = 0,
+):
+    """List backend catalog entries for operator publication review."""
+    if not catalog_path_for(OUTPUT_DIR).exists():
+        await asyncio.to_thread(
+            backfill_catalog, OUTPUT_DIR, default_state="published", include_placeholders=True
+        )
+
+    catalog = await asyncio.to_thread(load_catalog, OUTPUT_DIR)
+    entries = sorted(
+        catalog["assets"].values(),
+        key=lambda entry: str(entry.get("created_at", "")),
+        reverse=True,
+    )
+    if publication_state:
+        normalized_state = publication_state.strip().lower()
+        entries = [entry for entry in entries if entry.get("publication_state") == normalized_state]
+
+    return {
+        "assets": entries[offset : offset + limit],
+        "total": len(entries),
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@app.post("/api/gallery/catalog/backfill")
+async def backfill_gallery_catalog(default_state: str = "published"):
+    """Backfill existing local output images into the backend publication catalog."""
+    try:
+        result = await asyncio.to_thread(
+            backfill_catalog,
+            OUTPUT_DIR,
+            default_state=default_state,
+            include_placeholders=True,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return result
+
+
+@app.patch("/api/gallery/publication/{image_path:path}")
+async def update_image_publication(image_path: str, request: PublicationUpdateRequest):
+    """Update publication state for a generated image."""
+    key = normalize_gallery_key(image_path)
+    full_path = (OUTPUT_DIR / key).resolve()
+    output_root = OUTPUT_DIR.resolve()
+
+    if not full_path.is_relative_to(output_root):
+        raise HTTPException(status_code=400, detail="Invalid image path")
+
+    try:
+        entry = await asyncio.to_thread(
+            set_publication_state,
+            OUTPUT_DIR,
+            key,
+            request.state,
+            allow_placeholder_publish=request.allow_placeholder_publish,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (FileNotFoundError, KeyError) as exc:
+        raise HTTPException(status_code=404, detail="Catalog entry not found") from exc
+
+    return entry
+
+
 @app.delete("/api/gallery/{image_path:path}")
 async def delete_image(image_path: str):
     """Delete an image from the gallery"""
-    full_path = (OUTPUT_DIR / image_path).resolve()
+    key = normalize_gallery_key(image_path)
+    full_path = (OUTPUT_DIR / key).resolve()
     output_root = OUTPUT_DIR.resolve()
 
     if not full_path.is_relative_to(output_root):
@@ -1216,6 +1316,7 @@ async def delete_image(image_path: str):
     metadata_path = metadata_path_for(full_path)
     if metadata_path.exists():
         metadata_path.unlink()
+    remove_image(OUTPUT_DIR, key)
 
     return {"message": "Image deleted successfully"}
 
@@ -1292,19 +1393,28 @@ async def edit_image(request: EditRequest, file: UploadFile = File(...)):
         # Save both original and edited images
         import io
 
-        # Save original
-        from PIL import Image
-
-        from src.utils.storage import save_image_and_prompt
-
         original_img = Image.open(io.BytesIO(image_bytes))
         original_path = save_image_and_prompt(
             original_img, f"ORIGINAL: {request.prompt}", str(OUTPUT_DIR)
+        )
+        register_image(
+            original_path,
+            OUTPUT_DIR,
+            prompt=f"ORIGINAL: {request.prompt}",
+            metadata={"operation": "edit_original"},
+            publication_state="draft",
         )
 
         # Save edited
         edited_path = save_image_and_prompt(
             edited_image, f"EDITED: {request.prompt}", str(OUTPUT_DIR)
+        )
+        register_image(
+            edited_path,
+            OUTPUT_DIR,
+            prompt=f"EDITED: {request.prompt}",
+            metadata={"operation": "edit_result"},
+            publication_state="draft",
         )
 
         # Create relative paths for API response

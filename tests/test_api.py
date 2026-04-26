@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
 
 from src.utils.ollama import OllamaModelInfo
+from src.utils.publication_catalog import load_catalog
 from src.utils.storage import metadata_path_for, write_image_metadata
 
 # Redirect OUTPUT_DIR to a temp directory BEFORE any server imports so that test
@@ -333,6 +334,12 @@ def test_image_file_created(client, tmp_path):
     if fs_path.parent.exists():
         assert fs_path.exists() or True  # File may not persist in test mode
 
+    catalog = load_catalog(Path(_TEST_OUTPUT_DIR))
+    relative_key = image_path.replace("/images/", "")
+    assert relative_key in catalog["assets"]
+    assert catalog["assets"][relative_key]["publication_state"] == "rejected"
+    assert catalog["assets"][relative_key]["publishable"] is False
+
 
 def test_gallery_ignores_placeholder_artifacts_beyond_scan_cap(client):
     """Gallery should keep scanning until it finds real images instead of stopping at placeholders."""
@@ -363,11 +370,84 @@ def test_gallery_ignores_placeholder_artifacts_beyond_scan_cap(client):
     valid.with_suffix(".txt").write_text("real image")
     write_image_metadata(valid, {"backend": "small-sd", "is_placeholder": False})
 
+    response = client.post("/api/gallery/catalog/backfill")
+    assert response.status_code == 200
+
     response = client.get("/api/gallery?limit=5&offset=0")
     assert response.status_code == 200
     data = response.json()
     assert data["total"] >= 1
     assert any(item["path"].endswith("deadbeef.png") for item in data["images"])
+
+
+def test_publication_state_controls_gallery_visibility(client):
+    """Operators should be able to publish and unpublish cataloged images."""
+    output_root = Path(_TEST_OUTPUT_DIR)
+    week_dir = output_root / "2099" / "week_03"
+    week_dir.mkdir(parents=True, exist_ok=True)
+
+    image_path = week_dir / "image_20990103_000001_cafefeed.png"
+    image = Image.new("RGB", (64, 64), color=(30, 40, 50))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((5, 5, 32, 32), fill=(200, 80, 40))
+    image.save(image_path)
+    image_path.with_suffix(".txt").write_text("publish me")
+    write_image_metadata(image_path, {"backend": "small-sd", "is_placeholder": False})
+
+    response = client.post("/api/gallery/catalog/backfill?default_state=published")
+    assert response.status_code == 200
+
+    relative_path = image_path.relative_to(output_root).as_posix()
+    response = client.get("/api/gallery?limit=100&offset=0")
+    assert response.status_code == 200
+    assert any(item["path"].endswith("cafefeed.png") for item in response.json()["images"])
+
+    response = client.patch(
+        f"/api/gallery/publication/{relative_path}",
+        json={"state": "hidden"},
+    )
+    assert response.status_code == 200
+    assert response.json()["publication_state"] == "hidden"
+
+    response = client.get("/api/gallery?limit=100&offset=0")
+    assert response.status_code == 200
+    assert not any(item["path"].endswith("cafefeed.png") for item in response.json()["images"])
+
+    response = client.patch(
+        f"/api/gallery/publication/{relative_path}",
+        json={"state": "published"},
+    )
+    assert response.status_code == 200
+    assert response.json()["publication_state"] == "published"
+
+
+def test_placeholder_cannot_be_published_without_override(client):
+    """Mock placeholders should stay unpublished unless the operator explicitly overrides."""
+    output_root = Path(_TEST_OUTPUT_DIR)
+    week_dir = output_root / "2099" / "week_04"
+    week_dir.mkdir(parents=True, exist_ok=True)
+
+    image_path = week_dir / "image_20990104_000001_baddecaf.png"
+    Image.new("RGB", (32, 32), color=(200, 200, 200)).save(image_path)
+    image_path.with_suffix(".txt").write_text("placeholder")
+    write_image_metadata(image_path, {"backend": "mock", "is_placeholder": True})
+
+    response = client.post("/api/gallery/catalog/backfill")
+    assert response.status_code == 200
+
+    relative_path = image_path.relative_to(output_root).as_posix()
+    response = client.patch(
+        f"/api/gallery/publication/{relative_path}",
+        json={"state": "published"},
+    )
+    assert response.status_code == 409
+
+    response = client.patch(
+        f"/api/gallery/publication/{relative_path}",
+        json={"state": "published", "allow_placeholder_publish": True},
+    )
+    assert response.status_code == 200
+    assert response.json()["publication_state"] == "published"
 
 
 def test_delete_image_removes_metadata_sidecar(client):
@@ -387,6 +467,9 @@ def test_delete_image_removes_metadata_sidecar(client):
         image_path, {"backend": "small-sd", "is_placeholder": False}
     )
 
+    response = client.post("/api/gallery/catalog/backfill")
+    assert response.status_code == 200
+
     relative_path = image_path.relative_to(Path(_TEST_OUTPUT_DIR)).as_posix()
     response = client.delete(f"/api/gallery/{relative_path}")
 
@@ -394,3 +477,4 @@ def test_delete_image_removes_metadata_sidecar(client):
     assert not image_path.exists()
     assert not prompt_path.exists()
     assert not metadata_file.exists()
+    assert relative_path not in load_catalog(Path(_TEST_OUTPUT_DIR))["assets"]
