@@ -18,7 +18,10 @@ DreamGen uses **two R2 buckets** for different purposes:
 
 ```bash
 just sync              # Sync to BOTH buckets (recommended)
-just sync-gallery      # Sync only full collection
+just publish-gallery   # Dry-run approved gallery publishing
+just -- publish-gallery --execute  # Publish approved gallery assets
+just publish-gallery-smoke # Validate remote R2 write/delete access
+just sync-gallery      # Legacy raw rclone mirror of output/
 just sync-latest       # Sync only latest image
 just r2-list           # List contents of both buckets
 ```
@@ -92,9 +95,25 @@ The API token used for `host-image` Worker deployment must include Workers edit/
 permissions in addition to Pages permissions. Tokens scoped only for Pages should leave
 `deploy_host` disabled.
 
-Generated image publishing is still a separate local sync step because `output/` is ignored
-and may contain local mock/test artifacts. Use `just sync-gallery` or `just sync` only after
-confirming the local `output/` contents are intended for the public gallery.
+Generated image publishing is still a separate local step because `output/` is ignored
+and may contain local mock/test artifacts. Use `just publish-gallery` first to preview
+the non-placeholder assets that would be uploaded, then run:
+
+```bash
+just publish-gallery-smoke
+just -- publish-gallery --execute
+```
+
+`scripts/publish_gallery.py` skips image files whose `.meta.json` sidecar marks them
+as `is_placeholder` or `backend: mock`, and includes matching `.txt` prompt sidecars.
+It uses remote R2 by default through Wrangler; pass `--local` only when intentionally
+testing Wrangler's local R2 simulation.
+
+Cloudflare's R2 token documentation lists the relevant write permissions as
+`Workers R2 Storage Write` at the account level, or `Workers R2 Storage Bucket Item Write`
+for scoped bucket object access. The token used by this repository must be able to write
+objects in the `dreamgen-gallery` bucket for `just publish-gallery-smoke` and publishing
+to succeed.
 
 ## Troubleshooting
 
