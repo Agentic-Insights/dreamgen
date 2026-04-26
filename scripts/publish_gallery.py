@@ -49,6 +49,11 @@ def parse_args() -> argparse.Namespace:
         help="Upload and delete a tiny smoke-test object before publishing.",
     )
     parser.add_argument(
+        "--smoke-test-only",
+        action="store_true",
+        help="Only run the smoke test; do not publish gallery assets afterward.",
+    )
+    parser.add_argument(
         "--local",
         action="store_true",
         help="Use Wrangler's local R2 simulation instead of remote Cloudflare R2.",
@@ -129,10 +134,15 @@ def wrangler_base_args(package: str) -> list[str]:
 
 
 def run_wrangler(args: list[str]) -> None:
-    result = subprocess.run(args, check=False, text=True)
+    env = os.environ.copy()
+    r2_token = env.get("CLOUDFLARE_R2_API_TOKEN")
+    if r2_token:
+        env["CLOUDFLARE_API_TOKEN"] = r2_token
+
+    result = subprocess.run(args, check=False, text=True, env=env)
     if result.returncode != 0:
         raise SystemExit(
-            "Wrangler R2 command failed. Confirm CLOUDFLARE_API_TOKEN has "
+            "Wrangler R2 command failed. Confirm CLOUDFLARE_R2_API_TOKEN has "
             "Workers R2 Storage Write or Workers R2 Storage Bucket Item Write "
             "for dreamgen-gallery, then rerun the command."
         )
@@ -194,13 +204,18 @@ def main() -> None:
         print("Add --execute to upload.")
         return
 
-    if remote and not os.getenv("CLOUDFLARE_API_TOKEN"):
-        raise SystemExit("CLOUDFLARE_API_TOKEN is required for remote R2 publishing.")
+    if remote and not (os.getenv("CLOUDFLARE_R2_API_TOKEN") or os.getenv("CLOUDFLARE_API_TOKEN")):
+        raise SystemExit(
+            "CLOUDFLARE_R2_API_TOKEN or CLOUDFLARE_API_TOKEN is required "
+            "for remote R2 publishing."
+        )
     if remote and not os.getenv("CLOUDFLARE_ACCOUNT_ID"):
         raise SystemExit("CLOUDFLARE_ACCOUNT_ID is required for remote R2 publishing.")
 
     if args.smoke_test:
         smoke_test(args.wrangler_package, args.bucket, remote)
+        if args.smoke_test_only:
+            return
 
     for asset in assets:
         print(f"UPLOAD {asset.key}")

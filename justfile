@@ -189,7 +189,7 @@ publish-gallery *args:
 
 # Validate remote R2 object write/delete access before publishing
 publish-gallery-smoke:
-    uv run python scripts/publish_gallery.py --smoke-test --execute --limit 1
+    uv run python scripts/publish_gallery.py --smoke-test --smoke-test-only --execute --limit 1
 
 # Legacy full mirror to gallery bucket. Prefer `just -- publish-gallery --execute`.
 sync-gallery:

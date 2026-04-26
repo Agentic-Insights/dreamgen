@@ -109,11 +109,15 @@ as `is_placeholder` or `backend: mock`, and includes matching `.txt` prompt side
 It uses remote R2 by default through Wrangler; pass `--local` only when intentionally
 testing Wrangler's local R2 simulation.
 
+Keep the Pages deploy token and R2 publishing token separate when possible:
+
+- `CLOUDFLARE_API_TOKEN`: Pages deploy token used by GitHub Actions.
+- `CLOUDFLARE_R2_API_TOKEN`: R2 object write token used by local/gallery publishing.
+
 Cloudflare's R2 token documentation lists the relevant write permissions as
 `Workers R2 Storage Write` at the account level, or `Workers R2 Storage Bucket Item Write`
-for scoped bucket object access. The token used by this repository must be able to write
-objects in the `dreamgen-gallery` bucket for `just publish-gallery-smoke` and publishing
-to succeed.
+for scoped bucket object access. The R2 token must be able to write objects in the
+`dreamgen-gallery` bucket for `just publish-gallery-smoke` and publishing to succeed.
 
 ## Troubleshooting
 
