@@ -530,6 +530,83 @@ def diagnose(
         raise typer.Exit(1)
 
 
+@app.command(help="Publish approved gallery assets to Cloudflare R2")
+def publish(
+    output_dir: Optional[Path] = typer.Option(
+        None,
+        "--output-dir",
+        help="Generated output directory containing the publication catalog",
+    ),
+    bucket: str = typer.Option("dreamgen-gallery", "--bucket", help="Target R2 bucket"),
+    limit: Optional[int] = typer.Option(None, "--limit", help="Maximum approved images to upload"),
+    since: Optional[str] = typer.Option(
+        None,
+        "--since",
+        help="Only include images modified on or after YYYY-MM-DD",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Preview the publish plan without uploading. This is the default.",
+    ),
+    execute: bool = typer.Option(False, "--execute", help="Upload the planned files"),
+    include_featured: bool = typer.Option(
+        True,
+        "--include-featured/--exclude-featured",
+        help="Include featured assets along with published assets",
+    ),
+    prune: bool = typer.Option(
+        False,
+        "--prune",
+        help="Reserve remote deletion intent. Current publisher still reports delete_objects=0.",
+    ),
+    smoke_test: bool = typer.Option(
+        False,
+        "--smoke-test",
+        help="Validate R2 write/delete access before publishing",
+    ),
+    smoke_test_only: bool = typer.Option(
+        False,
+        "--smoke-test-only",
+        help="Only run the R2 smoke test; do not publish gallery assets afterward",
+    ),
+    local: bool = typer.Option(
+        False,
+        "--local",
+        help="Use Wrangler's local R2 simulation instead of remote Cloudflare R2",
+    ),
+    wrangler_package: str = typer.Option(
+        "wrangler@4",
+        "--wrangler-package",
+        help="Package passed to npx, for example wrangler@4",
+    ),
+) -> None:
+    """Publish only catalog-approved gallery assets."""
+    if dry_run and execute:
+        console.print("[red]Choose either --dry-run or --execute, not both.[/red]")
+        raise typer.Exit(1)
+
+    from .gallery_publisher import publish_gallery
+
+    try:
+        publish_gallery(
+            output_dir=output_dir or app.state.config.system.output_dir,
+            bucket=bucket,
+            since=since,
+            limit=limit,
+            execute=execute,
+            include_featured=include_featured,
+            prune=prune,
+            smoke=smoke_test,
+            smoke_only=smoke_test_only,
+            local=local,
+            wrangler_package=wrangler_package,
+        )
+    except SystemExit as exc:
+        console.print(f"[red]{exc.code}[/red]")
+        raise typer.Exit(1) from exc
+
+
 @app.command(help="Generate multiple images in a batch with configurable settings")
 def loop(
     batch_size: int = typer.Option(

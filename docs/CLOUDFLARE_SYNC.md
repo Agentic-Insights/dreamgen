@@ -96,18 +96,31 @@ permissions in addition to Pages permissions. Tokens scoped only for Pages shoul
 `deploy_host` disabled.
 
 Generated image publishing is still a separate local step because `output/` is ignored
-and may contain local mock/test artifacts. Use `just publish-gallery` first to preview
-the non-placeholder assets that would be uploaded, then run:
+and may contain local mock/test artifacts. Use the backend publication catalog to approve
+assets, then preview the exact R2 upload plan:
+
+```bash
+uv run dreamgen publish --dry-run
+uv run dreamgen publish --smoke-test --execute --limit 1
+uv run dreamgen publish --execute
+```
+
+`dreamgen publish` and `scripts/publish_gallery.py` read `output/.gallery_catalog.json`
+and upload only assets whose publication state is `published` or `featured`.
+Mock/test placeholders are marked unpublishable by the catalog unless explicitly
+overridden through the backend API. The workflow uploads image files with matching
+`.txt` prompt sidecars and `.meta.json` metadata sidecars, reports skipped catalog
+entries with reasons, and never deletes remote objects unless a future `--prune`
+implementation is enabled.
+
+The publisher uses remote R2 by default through Wrangler; pass `--local` only when
+intentionally testing Wrangler's local R2 simulation. The legacy Just targets still
+work as wrappers:
 
 ```bash
 just publish-gallery-smoke
 just -- publish-gallery --execute
 ```
-
-`scripts/publish_gallery.py` skips image files whose `.meta.json` sidecar marks them
-as `is_placeholder` or `backend: mock`, and includes matching `.txt` prompt sidecars.
-It uses remote R2 by default through Wrangler; pass `--local` only when intentionally
-testing Wrangler's local R2 simulation.
 
 Keep the Pages deploy token and R2 publishing token separate when possible:
 
