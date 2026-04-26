@@ -155,8 +155,17 @@ class PromptGenerator:
                 options={"temperature": self.config.model.ollama_temperature},
             )
 
-            # Process and log the generated prompt
-            new_prompt = response.message.content.strip()
+            # Process and log the generated prompt. Ollama can return either a
+            # typed response object or a dict-like payload depending on client version.
+            message = (
+                response.get("message")
+                if isinstance(response, dict)
+                else getattr(response, "message")
+            )
+            content = (
+                message.get("content") if isinstance(message, dict) else getattr(message, "content")
+            )
+            new_prompt = content.strip()
             # Clean up Unicode characters that cause Windows console issues
             new_prompt = (
                 new_prompt.replace("\u2011", "-").replace("\u2013", "-").replace("\u2014", "--")

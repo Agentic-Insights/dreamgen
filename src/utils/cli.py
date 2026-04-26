@@ -712,5 +712,5 @@ def loop(
     except typer.Exit:
         raise
     except Exception as e:
-        console.print(f"[red]Error: {str(e)}[/red]", err=True)
+        Console(stderr=True).print(f"[red]Error: {str(e)}[/red]")
         raise typer.Exit(1)

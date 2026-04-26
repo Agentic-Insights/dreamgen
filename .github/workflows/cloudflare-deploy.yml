@@ -67,7 +67,7 @@ jobs:
           node-version: "20"
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Deploy Worker
         run: npx wrangler@4 deploy
