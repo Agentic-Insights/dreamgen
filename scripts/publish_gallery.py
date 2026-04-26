@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from src.utils.publication_catalog import catalog_path_for, public_catalog_entries
+
 DEFAULT_BUCKET = "dreamgen-gallery"
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 
@@ -97,15 +99,22 @@ def discover_assets(output_dir: Path, since: float | None, limit: int | None) ->
         raise SystemExit(f"Output directory does not exist: {output_dir}")
 
     assets: list[PublishAsset] = []
-    images = sorted(
-        (
-            path
-            for path in output_dir.rglob("*")
-            if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
-        ),
-        key=lambda path: path.stat().st_mtime,
-        reverse=True,
-    )
+    if catalog_path_for(output_dir).exists():
+        images = [
+            output_dir / entry["path"]
+            for entry in public_catalog_entries(output_dir)
+            if (output_dir / entry["path"]).exists()
+        ]
+    else:
+        images = sorted(
+            (
+                path
+                for path in output_dir.rglob("*")
+                if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
+            ),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
 
     included_images = 0
     for image_path in images:

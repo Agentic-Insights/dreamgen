@@ -1,6 +1,7 @@
 import json
 
 from scripts.publish_gallery import discover_assets
+from src.utils.publication_catalog import backfill_catalog, set_publication_state
 
 
 def test_discover_assets_skips_mock_placeholders_and_includes_prompt(tmp_path):
@@ -41,3 +42,27 @@ def test_discover_assets_limit_counts_images_not_prompts(tmp_path):
 
     assert len([asset for asset in assets if asset.path.suffix == ".png"]) == 1
     assert len(assets) == 2
+
+
+def test_discover_assets_uses_publication_catalog_when_present(tmp_path):
+    output_dir = tmp_path / "output"
+    week_dir = output_dir / "2026" / "week_17"
+    week_dir.mkdir(parents=True)
+
+    published_image = week_dir / "published.png"
+    published_image.write_bytes(b"png")
+    published_image.with_suffix(".txt").write_text("published", encoding="utf-8")
+
+    hidden_image = week_dir / "hidden.png"
+    hidden_image.write_bytes(b"png")
+    hidden_image.with_suffix(".txt").write_text("hidden", encoding="utf-8")
+
+    backfill_catalog(output_dir, default_state="published")
+    set_publication_state(output_dir, hidden_image.relative_to(output_dir).as_posix(), "hidden")
+
+    assets = discover_assets(output_dir, since=None, limit=None)
+
+    assert [asset.key for asset in assets] == [
+        "2026/week_17/published.png",
+        "2026/week_17/published.txt",
+    ]
