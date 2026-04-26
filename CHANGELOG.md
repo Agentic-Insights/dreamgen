@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.1.6 (2026-04-26)
+
+### Bug Fixes
+
+- Make PyPI install resolve
+  ([`bee31e0`](https://github.com/Agentic-Insights/dreamgen/commit/bee31e01493925494da6f3df7c4b23a448a8667c))
+
+
 ## v1.1.5 (2026-04-22)
 
 ### Bug Fixes
