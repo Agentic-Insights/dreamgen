@@ -232,6 +232,88 @@
       fill: none;
     }
 
+    .view-switch {
+      position: fixed;
+      top: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      border: 1px solid var(--whisper);
+      z-index: 50;
+      opacity: 0.72;
+      background: rgba(0,0,0,0.28);
+      backdrop-filter: blur(18px);
+    }
+    .view-btn,
+    .filter-select,
+    .share-btn {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: 1px;
+      color: var(--ghost);
+      background: transparent;
+      border: 0;
+      min-height: 36px;
+    }
+    .view-btn {
+      padding: 0 18px;
+      cursor: pointer;
+      border-right: 1px solid var(--whisper);
+    }
+    .view-btn:last-child {
+      border-right: 0;
+    }
+    .view-btn.active,
+    .view-btn:hover,
+    .filter-select:hover,
+    .share-btn:hover {
+      color: var(--light);
+      background: var(--whisper);
+    }
+
+    .filter-panel {
+      position: fixed;
+      top: 72px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 8px;
+      z-index: 50;
+      opacity: 0;
+      transition: opacity 0.4s;
+      max-width: min(92vw, 760px);
+    }
+    body:hover .filter-panel,
+    .filter-panel:focus-within {
+      opacity: 1;
+    }
+    .filter-select,
+    .share-btn {
+      border: 1px solid var(--whisper);
+      padding: 0 12px;
+      cursor: pointer;
+      backdrop-filter: blur(18px);
+      background-color: rgba(0,0,0,0.36);
+      max-width: 180px;
+    }
+    .filter-select option {
+      background: #050505;
+      color: var(--light);
+    }
+    .share-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .share-btn svg {
+      width: 14px;
+      height: 14px;
+      stroke: currentColor;
+      stroke-width: 1.5;
+      fill: none;
+    }
+
     .info-stats {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -358,6 +440,32 @@
       margin: 0 auto;
       text-align: center;
     }
+    .caption-meta {
+      max-width: 900px;
+      margin: 24px auto 0;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      font-family: var(--font-mono);
+    }
+    .caption-meta-item {
+      border: 1px solid var(--whisper);
+      padding: 12px;
+      min-width: 0;
+    }
+    .caption-meta-label {
+      font-size: 8px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--ghost);
+      margin-bottom: 6px;
+    }
+    .caption-meta-value {
+      font-size: 10px;
+      line-height: 1.5;
+      color: var(--mist);
+      overflow-wrap: anywhere;
+    }
     .caption-hint {
       position: fixed;
       top: 60px;
@@ -389,6 +497,28 @@
     .loading.hidden {
       opacity: 0;
       pointer-events: none;
+    }
+
+    .share-toast {
+      position: fixed;
+      top: 120px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-8px);
+      padding: 10px 14px;
+      border: 1px solid var(--whisper);
+      background: rgba(0,0,0,0.82);
+      color: var(--mist);
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: 1px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s, transform 0.3s;
+      z-index: 90;
+    }
+    .share-toast.visible {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
     }
 
     /* Keyboard hints */
@@ -428,6 +558,22 @@
       .caption-hint { opacity: 0.5; }
       .info-panel { width: 100%; }
       .title { opacity: 0.6; }
+      .view-switch { top: 18px; }
+      .filter-panel {
+        top: auto;
+        bottom: 76px;
+        width: calc(100vw - 28px);
+        overflow-x: auto;
+        opacity: 1;
+        justify-content: flex-start;
+      }
+      .filter-select,
+      .share-btn {
+        flex: 0 0 auto;
+      }
+      .caption-meta {
+        grid-template-columns: 1fr 1fr;
+      }
     }
 
     /* Fade in animation */
@@ -451,6 +597,11 @@
   <button class="info-toggle" id="infoToggle" aria-label="Toggle info panel">
     <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
   </button>
+
+  <div class="view-switch" role="tablist" aria-label="Gallery view">
+    <button class="view-btn active" type="button" data-view="latest">Latest</button>
+    <button class="view-btn" type="button" data-view="featured">Featured</button>
+  </div>
 
   <div class="info-panel" id="infoPanel">
     <div class="info-section">
@@ -499,6 +650,16 @@
     <div class="loading" id="loading">Loading</div>
   </div>
 
+  <div class="filter-panel" id="filterPanel">
+    <select class="filter-select" id="modelFilter" aria-label="Filter by model"></select>
+    <select class="filter-select" id="weekFilter" aria-label="Filter by week"></select>
+    <select class="filter-select" id="attributeFilter" aria-label="Filter by plugin or LoRA"></select>
+    <button class="share-btn" id="shareBtn" type="button" aria-label="Copy share link">
+      <svg viewBox="0 0 24 24"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+      Share
+    </button>
+  </div>
+
   <div class="counter" id="counter"></div>
 
   <div class="controls">
@@ -528,19 +689,31 @@
 
   <div class="caption-overlay" id="captionOverlay">
     <div class="caption-text" id="captionText"></div>
+    <div class="caption-meta" id="captionMeta"></div>
   </div>
 
+  <div class="share-toast" id="shareToast">Link copied</div>
+
   <script>
-    // State
-    let images = [];
-    let imageData = [];
-    let captions = {};
-    let current = 0;
-    let paused = false;
-    let captionVisible = false;
+    const state = {
+      allImages: [],
+      filteredImages: [],
+      imageElements: [],
+      captions: {},
+      current: 0,
+      paused: false,
+      captionVisible: false,
+      view: 'latest',
+      filters: {
+        model: 'all',
+        week: 'all',
+        attribute: 'all'
+      }
+    };
     let rotateInterval = null;
     let progressInterval = null;
     const ROTATE_TIME = 8000;
+    const requestedImage = new URLSearchParams(window.location.search).get('image');
 
     // Custom cursor
     const cursor = document.getElementById('cursor');
@@ -565,66 +738,196 @@
     async function init() {
       try {
         const res = await fetch('/api/images');
+        if (!res.ok) {
+          if (res.status === 401 || res.status === 403) {
+            setLoading('Gallery API authorization failed');
+            return;
+          }
+          setLoading(`Gallery API error ${res.status}`);
+          return;
+        }
         const imagesList = await res.json();
 
-        if (imagesList.length === 0) {
-          document.getElementById('loading').textContent = 'No images yet';
+        if (!Array.isArray(imagesList)) {
+          setLoading('Gallery API returned an invalid response');
           return;
         }
 
-        // Stats
-        document.getElementById('totalImages').textContent = imagesList.length;
-        const dates = imagesList.map(i => parseDate(i.key)).filter(Boolean);
+        state.allImages = imagesList.map(normalizeImage).sort((a, b) => b.sortTime - a.sortTime);
+
+        if (state.allImages.length === 0) {
+          setLoading('No published images yet');
+          return;
+        }
+
+        document.getElementById('totalImages').textContent = state.allImages.length;
+        const dates = state.allImages.map(i => i.createdDate).filter(Boolean);
         const uniqueDays = new Set(dates.map(d => d.toDateString())).size;
         document.getElementById('totalDays').textContent = uniqueDays;
 
-        // Shuffle and load images
-        const shuffled = [...imagesList].sort(() => Math.random() - 0.5);
-        imageData = shuffled;
-        const gallery = document.getElementById('gallery');
-        document.getElementById('loading').classList.add('hidden');
-
-        shuffled.forEach((item, i) => {
-          const img = document.createElement('img');
-          img.src = `/api/images/${item.key}`;
-          img.dataset.date = item.dateStr || formatDate(parseDate(item.key));
-          img.dataset.captionKey = item.captionKey;
-          img.dataset.index = i;
-          img.loading = i < 3 ? 'eager' : 'lazy';
-          if (i === 0) img.classList.add('active');
-          gallery.appendChild(img);
-          images.push(img);
-        });
-
-        // Preload first few captions
-        for (let i = 0; i < Math.min(3, imageData.length); i++) {
-          loadCaption(imageData[i].captionKey);
-        }
-
-        updateUI();
+        setupFilters();
+        applyFilters(requestedImage);
         startRotation();
         startProgress();
 
       } catch (error) {
-        document.getElementById('loading').textContent = 'Error loading gallery';
+        setLoading('Network error loading gallery');
         console.error(error);
       }
     }
 
+    function normalizeImage(item) {
+      const createdDate = item.createdAt ? new Date(item.createdAt) : parseDate(item.key);
+      const metadata = item.metadata || {};
+      const plugins = Array.isArray(item.plugins) ? item.plugins : metadata.plugins_used || [];
+      const loras = Array.isArray(item.loras) ? item.loras : metadata.loras || [];
+      const style = metadata.style || metadata.art_style || metadata.artStyle || null;
+      const attributes = [...plugins, ...loras, style].filter(Boolean).map(String);
+      const backend = item.backend || metadata.backend || 'unknown';
+      const model = item.model || metadata.model || metadata.model_name || metadata.ollama_model || backend;
+
+      return {
+        ...item,
+        key: item.key,
+        imageUrl: `/api/images/${encodeKey(item.key)}`,
+        captionUrl: item.captionKey ? `/api/images/${encodeKey(item.captionKey)}` : null,
+        createdDate,
+        sortTime: createdDate && !Number.isNaN(createdDate.getTime())
+          ? createdDate.getTime()
+          : new Date(item.uploaded || 0).getTime(),
+        dateLabel: item.dateStr || formatDate(createdDate),
+        week: item.week || extractWeek(item.key) || 'Unknown week',
+        backend,
+        model,
+        plugins,
+        loras,
+        attributes,
+        featured: Boolean(item.featured),
+        hasCaption: item.hasCaption !== false,
+        metadata
+      };
+    }
+
+    function encodeKey(key) {
+      return String(key).split('/').map(encodeURIComponent).join('/');
+    }
+
+    function setupFilters() {
+      fillSelect('modelFilter', 'All models', uniqueValues(state.allImages.map(i => i.model)));
+      fillSelect('weekFilter', 'All weeks', uniqueValues(state.allImages.map(i => i.week)));
+      fillSelect(
+        'attributeFilter',
+        'All plugins / LoRAs',
+        uniqueValues(state.allImages.flatMap(i => i.attributes))
+      );
+
+      document.querySelectorAll('.view-btn').forEach(button => {
+        button.addEventListener('click', () => {
+          state.view = button.dataset.view;
+          document.querySelectorAll('.view-btn').forEach(item => {
+            item.classList.toggle('active', item === button);
+          });
+          applyFilters();
+        });
+      });
+
+      ['modelFilter', 'weekFilter', 'attributeFilter'].forEach(id => {
+        document.getElementById(id).addEventListener('change', event => {
+          const key = id.replace('Filter', '');
+          state.filters[key] = event.target.value;
+          applyFilters();
+        });
+      });
+
+      document.getElementById('shareBtn').addEventListener('click', copyShareLink);
+    }
+
+    function fillSelect(id, label, values) {
+      const select = document.getElementById(id);
+      select.innerHTML = '';
+      select.appendChild(new Option(label, 'all'));
+      values.forEach(value => select.appendChild(new Option(value, value)));
+    }
+
+    function uniqueValues(values) {
+      return [...new Set(values.filter(Boolean).map(String))].sort((a, b) => a.localeCompare(b));
+    }
+
+    function applyFilters(preferredKey = null) {
+      state.filteredImages = state.allImages.filter(item => {
+        if (state.view === 'featured' && !item.featured) return false;
+        if (state.filters.model !== 'all' && item.model !== state.filters.model) return false;
+        if (state.filters.week !== 'all' && item.week !== state.filters.week) return false;
+        if (state.filters.attribute !== 'all' && !item.attributes.includes(state.filters.attribute)) return false;
+        return true;
+      });
+
+      if (state.filteredImages.length === 0) {
+        clearGallery();
+        setLoading(state.view === 'featured' ? 'No featured images published yet' : 'No images match these filters');
+        return;
+      }
+
+      document.getElementById('loading').classList.add('hidden');
+      renderGallery(preferredKey);
+    }
+
+    function clearGallery() {
+      const gallery = document.getElementById('gallery');
+      state.imageElements.forEach(img => img.remove());
+      state.imageElements = [];
+      state.current = 0;
+      const loading = document.getElementById('loading');
+      loading.classList.remove('hidden');
+      gallery.appendChild(loading);
+      document.getElementById('counter').textContent = '';
+    }
+
+    function renderGallery(preferredKey = null) {
+      clearGallery();
+      const gallery = document.getElementById('gallery');
+      const requestedIndex = preferredKey
+        ? state.filteredImages.findIndex(item => item.key === preferredKey)
+        : -1;
+      state.current = requestedIndex >= 0 ? requestedIndex : 0;
+
+      state.filteredImages.forEach((item, index) => {
+        const img = document.createElement('img');
+        img.src = item.imageUrl;
+        img.alt = captionPreview(item) || `DreamGen image ${index + 1}`;
+        img.dataset.key = item.key;
+        img.dataset.index = index;
+        img.loading = index < 3 ? 'eager' : 'lazy';
+        if (index === state.current) img.classList.add('active');
+        gallery.appendChild(img);
+        state.imageElements.push(img);
+      });
+
+      for (let i = 0; i < Math.min(3, state.filteredImages.length); i++) {
+        loadCaption(state.filteredImages[i]);
+      }
+
+      updateUI();
+      resetProgress();
+    }
+
     async function loadCaption(captionKey) {
-      if (captions[captionKey] !== undefined) return captions[captionKey];
+      const item = typeof captionKey === 'string'
+        ? { captionKey, captionUrl: `/api/images/${encodeKey(captionKey)}`, hasCaption: true }
+        : captionKey;
+      if (!item?.captionKey || item.hasCaption === false) return null;
+      if (state.captions[item.captionKey] !== undefined) return state.captions[item.captionKey];
       try {
-        const res = await fetch(`/api/images/${captionKey}`);
+        const res = await fetch(item.captionUrl);
         if (res.ok) {
           const text = await res.text();
-          // Clean up the caption - take first line or first 200 chars
           let caption = text.trim().split('\n')[0];
-          if (caption.length > 200) caption = caption.substring(0, 200) + '...';
-          captions[captionKey] = caption;
+          if (caption.length > 260) caption = caption.substring(0, 260) + '...';
+          state.captions[item.captionKey] = caption;
           return caption;
         }
       } catch (e) {}
-      captions[captionKey] = null;
+      state.captions[item.captionKey] = null;
       return null;
     }
 
@@ -643,47 +946,53 @@
       });
     }
 
+    function extractWeek(filename) {
+      const match = filename.match(/(\d{4})\/(week_\d{2})\//);
+      return match ? `${match[1]} ${match[2].replace('_', ' ')}` : null;
+    }
+
     async function updateUI() {
-      document.getElementById('counter').textContent = `${current + 1} / ${images.length}`;
-      document.getElementById('metaDate').textContent = images[current]?.dataset?.date || '';
+      const item = currentItem();
+      document.getElementById('counter').textContent = `${state.current + 1} / ${state.filteredImages.length}`;
+      document.getElementById('metaDate').textContent = item?.dateLabel || '';
+      document.getElementById('metaModel').textContent = [item?.backend, item?.week].filter(Boolean).join(' / ');
 
-      // Preload next caption
-      const nextIdx = (current + 1) % imageData.length;
-      if (imageData[nextIdx]) loadCaption(imageData[nextIdx].captionKey);
+      const nextIdx = (state.current + 1) % state.filteredImages.length;
+      if (state.filteredImages[nextIdx]) loadCaption(state.filteredImages[nextIdx]);
+      updateShareUrl();
 
-      // Update caption if visible
-      if (captionVisible) {
+      if (state.captionVisible) {
         await showCaption();
       }
     }
 
     async function showCaption() {
-      const captionKey = images[current]?.dataset?.captionKey;
-      if (captionKey) {
-        const caption = await loadCaption(captionKey);
-        document.getElementById('captionText').textContent = caption || 'No caption available';
-      }
+      const item = currentItem();
+      const caption = await loadCaption(item);
+      document.getElementById('captionText').textContent =
+        caption || captionPreview(item) || 'Caption unavailable for this image.';
+      renderCaptionMeta(item);
     }
 
     function toggleCaption() {
-      captionVisible = !captionVisible;
+      state.captionVisible = !state.captionVisible;
       const overlay = document.getElementById('captionOverlay');
-      overlay.classList.toggle('visible', captionVisible);
-      if (captionVisible) showCaption();
+      overlay.classList.toggle('visible', state.captionVisible);
+      if (state.captionVisible) showCaption();
     }
 
     function rotate(direction = 1) {
-      if (images.length === 0) return;
-      images[current].classList.remove('active');
-      current = (current + direction + images.length) % images.length;
-      images[current].classList.add('active');
+      if (state.imageElements.length === 0) return;
+      state.imageElements[state.current].classList.remove('active');
+      state.current = (state.current + direction + state.imageElements.length) % state.imageElements.length;
+      state.imageElements[state.current].classList.add('active');
       updateUI();
       resetProgress();
     }
 
     function startRotation() {
       rotateInterval = setInterval(() => {
-        if (!paused) rotate(1);
+        if (!state.paused) rotate(1);
       }, ROTATE_TIME);
     }
 
@@ -691,7 +1000,7 @@
       let elapsed = 0;
       const bar = document.getElementById('progress');
       progressInterval = setInterval(() => {
-        if (!paused) {
+        if (!state.paused) {
           elapsed += 50;
           bar.style.width = `${(elapsed / ROTATE_TIME) * 100}%`;
           if (elapsed >= ROTATE_TIME) elapsed = 0;
@@ -704,13 +1013,84 @@
     }
 
     function togglePause() {
-      paused = !paused;
+      state.paused = !state.paused;
       const icon = document.getElementById('pauseIcon');
-      if (paused) {
+      if (state.paused) {
         icon.innerHTML = '<polygon points="5 3 19 12 5 21 5 3"/>';
       } else {
         icon.innerHTML = '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>';
       }
+    }
+
+    function currentItem() {
+      return state.filteredImages[state.current] || null;
+    }
+
+    function captionPreview(item) {
+      return item?.metadata?.prompt || item?.metadata?.caption || '';
+    }
+
+    function renderCaptionMeta(item) {
+      const meta = document.getElementById('captionMeta');
+      const rows = [
+        ['Backend', item?.backend],
+        ['Model', item?.model],
+        ['Plugins', item?.plugins?.join(', ') || 'None recorded'],
+        ['LoRA', item?.loras?.join(', ') || 'None recorded'],
+        ['Seed', item?.metadata?.seed],
+        ['Week', item?.week],
+        ['State', item?.publicationState || (item?.featured ? 'featured' : 'published')],
+        ['Metadata', item?.metadataKey ? 'Available' : 'Missing']
+      ];
+      meta.innerHTML = rows.map(([label, value]) => `
+        <div class="caption-meta-item">
+          <div class="caption-meta-label">${escapeHtml(label)}</div>
+          <div class="caption-meta-value">${escapeHtml(value ?? 'Unknown')}</div>
+        </div>
+      `).join('');
+    }
+
+    function updateShareUrl() {
+      const item = currentItem();
+      if (!item) return;
+      const url = new URL(window.location.href);
+      url.searchParams.set('image', item.key);
+      history.replaceState(null, '', url);
+    }
+
+    async function copyShareLink() {
+      const item = currentItem();
+      if (!item) return;
+      const url = new URL(window.location.href);
+      url.searchParams.set('image', item.key);
+      try {
+        await navigator.clipboard.writeText(url.toString());
+        showShareToast('Link copied');
+      } catch {
+        showShareToast('Share URL ready');
+      }
+    }
+
+    function showShareToast(message) {
+      const toast = document.getElementById('shareToast');
+      toast.textContent = message;
+      toast.classList.add('visible');
+      setTimeout(() => toast.classList.remove('visible'), 1600);
+    }
+
+    function setLoading(message) {
+      const loading = document.getElementById('loading');
+      loading.textContent = message;
+      loading.classList.remove('hidden');
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
     }
 
     // Controls
@@ -725,7 +1105,7 @@
       if (e.key === ' ') { e.preventDefault(); togglePause(); }
       if (e.key === 'c' || e.key === 'C') toggleCaption();
       if (e.key === 'Escape') {
-        if (captionVisible) toggleCaption();
+        if (state.captionVisible) toggleCaption();
         else if (infoPanel.classList.contains('open')) {
           infoPanel.classList.remove('open');
           infoToggle.classList.remove('active');
