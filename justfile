@@ -183,7 +183,15 @@ sync:
     @just sync-latest
     @echo "✓ Both buckets synced!"
 
-# Sync only to gallery bucket (full collection)
+# Publish approved, non-placeholder local output to the gallery bucket
+publish-gallery *args:
+    uv run python scripts/publish_gallery.py {{args}}
+
+# Validate remote R2 object write/delete access before publishing
+publish-gallery-smoke:
+    uv run python scripts/publish_gallery.py --smoke-test --execute --limit 1
+
+# Legacy full mirror to gallery bucket. Prefer `just -- publish-gallery --execute`.
 sync-gallery:
     rclone sync output/ r2:dreamgen-gallery --progress --transfers 8 --fast-list
 
