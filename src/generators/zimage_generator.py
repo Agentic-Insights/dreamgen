@@ -4,6 +4,7 @@ import asyncio
 import gc
 import hashlib
 import sys
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -14,6 +15,13 @@ from loguru import logger
 from ..plugins import plugin_manager, register_lora_plugin
 from ..plugins.lora import get_lora_path
 from .base_generator import GenerationResult, ImageGenerator
+
+
+@dataclass(frozen=True)
+class DiffSynthModelConfigSpec:
+    """Import-free description of local checkpoint files for DiffSynth."""
+
+    path: list[str]
 
 
 class ZImageGenerator(ImageGenerator):
@@ -77,10 +85,8 @@ class ZImageGenerator(ImageGenerator):
         self.selected_lora_name = None
         return None
 
-    def _build_diffsynth_model_configs(self):
-        """Build local-path model configs for DiffSynth Z-Image loading."""
-        from diffsynth.pipelines.z_image import ModelConfig
-
+    def _build_diffsynth_model_configs(self) -> list[DiffSynthModelConfigSpec]:
+        """Build local-path model configs without importing DiffSynth."""
         transformer_paths = sorted(
             str(path) for path in (self.model_path / "transformer").glob("*.safetensors")
         )
@@ -108,9 +114,9 @@ class ZImageGenerator(ImageGenerator):
             )
 
         return [
-            ModelConfig(path=transformer_paths),
-            ModelConfig(path=text_encoder_paths),
-            ModelConfig(path=vae_paths),
+            DiffSynthModelConfigSpec(path=transformer_paths),
+            DiffSynthModelConfigSpec(path=text_encoder_paths),
+            DiffSynthModelConfigSpec(path=vae_paths),
         ]
 
     def _load_diffsynth_pipe(self, lora_path: Path):
@@ -130,10 +136,13 @@ class ZImageGenerator(ImageGenerator):
             )
 
         logger.info(f"Loading Z-Image via DiffSynth for LoRA support from: {self.model_path}")
+        model_configs = [
+            ModelConfig(path=config.path) for config in self._build_diffsynth_model_configs()
+        ]
         self.pipe = ZImagePipeline.from_pretrained(
             torch_dtype=torch.bfloat16,
             device=self.device,
-            model_configs=self._build_diffsynth_model_configs(),
+            model_configs=model_configs,
             tokenizer_config=ModelConfig(path=str(self.model_path / "tokenizer")),
         )
         self.pipe.load_lora(self.pipe.dit, str(lora_path))
