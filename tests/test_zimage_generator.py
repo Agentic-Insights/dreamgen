@@ -1,5 +1,6 @@
 """Tests for Z-Image generator."""
 
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -161,7 +162,8 @@ class TestZImageGeneratorWithMockZImage:
         with patch("torch.cuda.is_available", return_value=False):
             gen = ZImageGenerator(mock_config)
 
-        configs = gen._build_diffsynth_model_configs()
+        with patch.dict("sys.modules", {"diffsynth": None}):
+            configs = gen._build_diffsynth_model_configs()
 
         assert configs[0].path == sorted(str(path) for path in transformer_shards)
         assert configs[1].path == sorted(str(path) for path in text_encoder_shards)
