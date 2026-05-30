@@ -46,6 +46,49 @@ describe('host-image worker', () => {
 		expect(await response.text()).toBe('No images found');
 	});
 
+	it('returns health metadata without reading the bucket', async () => {
+		const response = await worker.fetch(new Request('https://example.com/health'), createEnv([]));
+
+		expect(response.status).toBe(200);
+		expect(response.headers.get('Content-Type')).toBe('application/json');
+		await expect(response.json()).resolves.toMatchObject({
+			status: 'ok',
+			service: 'host-image',
+			cache_seconds: 300,
+		});
+	});
+
+	it('returns latest image metadata without streaming the image', async () => {
+		const response = await worker.fetch(
+			new Request('https://example.com/metadata'),
+			createEnv([
+				{ key: 'older.png', uploaded: new Date('2026-04-01T00:00:00Z'), body: 'older' },
+				{ key: 'newer.png', uploaded: new Date('2026-04-02T00:00:00Z'), body: 'newer' },
+				{ key: 'newer.txt', uploaded: new Date('2026-04-03T00:00:00Z'), body: 'prompt' },
+			]),
+		);
+
+		expect(response.status).toBe(200);
+		await expect(response.json()).resolves.toMatchObject({
+			latest_key: 'newer.png',
+			image_count: 2,
+			cache_seconds: 300,
+		});
+	});
+
+	it('returns JSON 404 metadata when no PNGs are available', async () => {
+		const response = await worker.fetch(
+			new Request('https://example.com/metadata'),
+			createEnv([{ key: 'prompt.txt', uploaded: new Date('2026-04-03T00:00:00Z') }]),
+		);
+
+		expect(response.status).toBe(404);
+		await expect(response.json()).resolves.toMatchObject({
+			error: 'No PNG images found',
+			image_count: 0,
+		});
+	});
+
 	it('serves the most recently uploaded PNG image', async () => {
 		const response = await worker.fetch(
 			new Request('https://example.com'),

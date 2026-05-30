@@ -161,6 +161,29 @@ def test_generate_with_seed(client):
     assert data["metadata"].get("seed") == 42
 
 
+def test_generation_events_endpoint_records_recent_lifecycle(client):
+    """Generation lifecycle events should be inspectable after the request completes."""
+    payload = {"prompt": "observable test image", "client_request_id": "req-events-123"}
+
+    response = client.post("/api/generate", json=payload)
+    assert response.status_code == 200
+    generation_id = response.json()["id"]
+
+    events_response = client.get("/api/generation/events?limit=20")
+    assert events_response.status_code == 200
+    data = events_response.json()
+    assert data["limit"] == 20
+    assert data["total"] >= 1
+
+    matching = [event for event in data["events"] if event.get("id") == generation_id]
+    assert matching
+    assert any(event["type"] == "generation_started" for event in matching)
+    assert any(
+        event["type"] == "task_progress" and event["label"] == "Image ready" for event in matching
+    )
+    assert all("timestamp" in event for event in matching)
+
+
 def test_generation_config_endpoint(client):
     """The generation config endpoint should expose backend and LoRA settings."""
     response = client.get("/api/config/generation")

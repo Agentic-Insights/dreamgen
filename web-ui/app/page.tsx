@@ -8,6 +8,7 @@ import {
   Image as ImageIcon,
   Loader2,
   Play,
+  RotateCcw,
   Settings as SettingsIcon,
   Sparkles,
   Square,
@@ -21,6 +22,7 @@ import TaskProgress from "@/components/TaskProgress";
 import {
   API_BASE,
   api,
+  GenerationEvent,
   GenerateResponse,
   GenerationConfig,
   PluginInfo,
@@ -111,6 +113,15 @@ const formatCountdown = (target: Date | null) => {
 const truncatePrompt = (prompt: string, max = 88) =>
   prompt.length > max ? `${prompt.slice(0, max).trim()}...` : prompt;
 
+const describeGenerationEvent = (event: GenerationEvent) => {
+  if (event.type === "generation_error") return `Error: ${event.error ?? "unknown"}`;
+  if (event.type === "generation_started") return "Generation started";
+  if (event.type === "generation_completed") return "Generation completed";
+  if (event.label) return event.label;
+  if (event.name) return event.name.replaceAll("_", " ");
+  return event.type.replaceAll("_", " ");
+};
+
 export default function Home() {
   const [activeTab, setActiveTab] = useState<TabId>("generate");
   const [promptSeed, setPromptSeed] = useState("");
@@ -123,6 +134,7 @@ export default function Home() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [generationConfig, setGenerationConfig] = useState<GenerationConfig | null>(null);
+  const [generationEvents, setGenerationEvents] = useState<GenerationEvent[]>([]);
   const [nextRunAt, setNextRunAt] = useState<Date | null>(null);
   const [, setClockTick] = useState(Date.now());
   const [sessionCount, setSessionCount] = useState(0);
@@ -205,6 +217,17 @@ export default function Home() {
     }
   }, []);
 
+  const loadGenerationEvents = useCallback(async () => {
+    try {
+      const response = await api.getGenerationEvents(8);
+      startTransition(() => {
+        setGenerationEvents(response.events);
+      });
+    } catch (error) {
+      console.error("Failed to load generation events:", error);
+    }
+  }, []);
+
   runGenerationRef.current = async (source: "manual" | "loop") => {
     if (isGeneratingRef.current) return;
 
@@ -251,7 +274,12 @@ export default function Home() {
         setGenerationProgress(null);
       }, 1200);
       await galleryCache.clear();
-      await Promise.all([loadRecentImages(), loadDashboardControls(), api.getStatus().then(setStatus)]);
+      await Promise.all([
+        loadRecentImages(),
+        loadDashboardControls(),
+        loadGenerationEvents(),
+        api.getStatus().then(setStatus),
+      ]);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : "Unknown error";
       addLog(`Generation failed: ${errorMsg}`, "error");
@@ -298,6 +326,7 @@ export default function Home() {
     api.getStatus().then(setStatus).catch(console.error);
     loadRecentImages();
     loadDashboardControls();
+    loadGenerationEvents();
 
     const unsubscribe = api.subscribeWebSocket((data) => {
       const nextProgress = getTaskProgressUpdate(
@@ -318,8 +347,10 @@ export default function Home() {
         addLog(String(msg.message ?? "Loading model..."));
       } else if (msg.type === "generation_completed") {
         addLog(`Saved ${String(msg.image_path ?? "image")}.`);
+        void loadGenerationEvents();
       } else if (msg.type === "generation_error") {
         addLog(`Backend error: ${String(msg.error ?? "unknown")}`, "error");
+        void loadGenerationEvents();
       }
     });
 
@@ -329,7 +360,7 @@ export default function Home() {
         clearTimeout(generationResetTimeoutRef.current);
       }
     };
-  }, [loadDashboardControls, loadRecentImages]);
+  }, [loadDashboardControls, loadGenerationEvents, loadRecentImages]);
 
   useEffect(() => {
     if (!isGenerating || !generationProgress || generationProgress.progress >= 96) return;
@@ -799,6 +830,33 @@ export default function Home() {
                           </div>
                           <div className="mt-2 text-sm leading-6 text-foreground">{lastActivity}</div>
                         </div>
+
+                        <div className="rounded-2xl border border-border/60 bg-background/78 px-4 py-3">
+                          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                            Lifecycle
+                          </div>
+                          {generationEvents.length > 0 ? (
+                            <div className="mt-3 space-y-2">
+                              {generationEvents.slice(0, 4).map((event, index) => (
+                                <div
+                                  key={`${event.timestamp}-${event.id ?? index}-${event.type}`}
+                                  className="flex items-start justify-between gap-3 text-xs"
+                                >
+                                  <span className="min-w-0 capitalize text-foreground">
+                                    {describeGenerationEvent(event)}
+                                  </span>
+                                  <span className="shrink-0 text-muted-foreground">
+                                    {new Date(event.timestamp).toLocaleTimeString()}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="mt-2 text-sm leading-6 text-muted-foreground">
+                              No recorded lifecycle events yet.
+                            </div>
+                          )}
+                        </div>
                       </div>
 
                     </div>
@@ -818,38 +876,63 @@ export default function Home() {
                       {recentImages.length > 0 ? (
                         <div className="space-y-3">
                           {recentImages.slice(0, 3).map((image) => (
-                            <button
+                            <div
                               key={image.path}
-                              onClick={() => {
-                                setCurrentImage({
-                                  id: image.path,
-                                  prompt: image.prompt,
-                                  image_path: image.path,
-                                  metadata: {
-                                    backend: status?.backend ?? "unknown",
-                                    plugins_used: status?.active_plugins ?? [],
-                                  },
-                                  created_at: image.created_at,
-                                });
-                              }}
-                              className="flex w-full items-center gap-3 rounded-2xl border border-border/60 bg-background/78 p-3 text-left transition hover:border-primary/35 hover:bg-background/90"
+                              className="rounded-2xl border border-border/60 bg-background/78 p-3 transition hover:border-primary/35 hover:bg-background/90"
                             >
-                              {/* Backend-served generated files are not routed through Next image optimization. */}
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img
-                                src={`${API_BASE}${image.path}`}
-                                alt="Recent generation"
-                                className="h-16 w-16 rounded-xl object-cover"
-                              />
-                              <div className="min-w-0">
-                                <p className="text-xs text-muted-foreground">
-                                  {new Date(image.created_at).toLocaleString()}
-                                </p>
-                                <p className="mt-1 text-sm leading-6 text-foreground">
-                                  {truncatePrompt(image.prompt, 58)}
-                                </p>
+                              <button
+                                onClick={() => {
+                                  setCurrentImage({
+                                    id: image.path,
+                                    prompt: image.prompt,
+                                    image_path: image.path,
+                                    metadata: {
+                                      backend: status?.backend ?? "unknown",
+                                      plugins_used: status?.active_plugins ?? [],
+                                    },
+                                    created_at: image.created_at,
+                                  });
+                                }}
+                                className="flex w-full items-center gap-3 text-left"
+                              >
+                                {/* Backend-served generated files are not routed through Next image optimization. */}
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={`${API_BASE}${image.path}`}
+                                  alt="Recent generation"
+                                  className="h-16 w-16 rounded-xl object-cover"
+                                />
+                                <div className="min-w-0">
+                                  <p className="text-xs text-muted-foreground">
+                                    {new Date(image.created_at).toLocaleString()}
+                                  </p>
+                                  <p className="mt-1 text-sm leading-6 text-foreground">
+                                    {truncatePrompt(image.prompt, 58)}
+                                  </p>
+                                </div>
+                              </button>
+                              <div className="mt-3 flex gap-2">
+                                <button
+                                  onClick={() => setPromptSeed(image.prompt)}
+                                  className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-border/70 px-3 py-2 text-xs text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
+                                >
+                                  <Play className="h-3.5 w-3.5" />
+                                  Use prompt
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setPromptSeed(image.prompt);
+                                    promptSeedRef.current = image.prompt;
+                                    void runGenerationRef.current("manual");
+                                  }}
+                                  disabled={isGenerating}
+                                  className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary px-3 py-2 text-xs text-primary-foreground transition hover:opacity-95 disabled:opacity-60"
+                                >
+                                  <RotateCcw className="h-3.5 w-3.5" />
+                                  Rerun
+                                </button>
                               </div>
-                            </button>
+                            </div>
                           ))}
                         </div>
                       ) : (
