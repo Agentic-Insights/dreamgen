@@ -161,6 +161,53 @@ def test_generate_with_seed(client):
     assert data["metadata"].get("seed") == 42
 
 
+def test_generate_endpoint_records_durable_job(client):
+    """The compatibility generate endpoint should also persist durable job state."""
+    response = client.post(
+        "/api/generate",
+        json={"prompt": "Durable compatibility image", "seed": 24},
+    )
+    assert response.status_code == 200
+    generation = response.json()
+
+    job_response = client.get(f"/api/jobs/{generation['id']}")
+    assert job_response.status_code == 200
+    job = job_response.json()
+    assert job["status"] == "succeeded"
+    assert job["request"]["prompt"] == "Durable compatibility image"
+    assert job["metadata"]["seed"] == 24
+    assert job["relative_image_path"] == generation["image_path"]
+    assert any(event["name"] == "generation_completed" for event in job["events"])
+
+
+def test_jobs_endpoint_creates_and_lists_generation_job(client):
+    """Durable job endpoints should create, run, fetch, and list jobs."""
+    response = client.post(
+        "/api/jobs",
+        json={
+            "prompt": "Queued durable image",
+            "seed": 31,
+            "client_request_id": "req-job-api-1",
+        },
+    )
+    assert response.status_code == 200
+    created = response.json()
+    assert created["request"]["prompt"] == "Queued durable image"
+
+    job_response = client.get(f"/api/jobs/{created['id']}")
+    assert job_response.status_code == 200
+    job = job_response.json()
+    assert job["status"] == "succeeded"
+    assert job["client_request_id"] == "req-job-api-1"
+    assert job["relative_image_path"].startswith("/images/")
+    assert any(event["name"] == "succeeded" for event in job["events"])
+
+    list_response = client.get("/api/jobs?status=succeeded&limit=10")
+    assert list_response.status_code == 200
+    listed_ids = [item["id"] for item in list_response.json()["jobs"]]
+    assert created["id"] in listed_ids
+
+
 def test_generation_events_endpoint_records_recent_lifecycle(client):
     """Generation lifecycle events should be inspectable after the request completes."""
     payload = {"prompt": "observable test image", "client_request_id": "req-events-123"}
