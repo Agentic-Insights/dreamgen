@@ -2,6 +2,20 @@
 
 <!-- version list -->
 
+## v1.2.0 (2026-05-30)
+
+### Continuous Integration
+
+- Update actions to Node 24
+  ([`0219e8c`](https://github.com/Agentic-Insights/dreamgen/commit/0219e8c9c9e381a138e3817c124f4e239062ab2f))
+
+### Features
+
+- Add image generation service boundary
+  ([#47](https://github.com/Agentic-Insights/dreamgen/pull/47),
+  [`35f31b6`](https://github.com/Agentic-Insights/dreamgen/commit/35f31b640d031e3f6a37a90d0b256dfa8a62faa4))
+
+
 ## v1.1.6 (2026-04-26)
 
 ### Bug Fixes
