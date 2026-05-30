@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.4.0 (2026-05-30)
+
+### Features
+
+- Polish operator surfaces ([#51](https://github.com/Agentic-Insights/dreamgen/pull/51),
+  [`68cdc6e`](https://github.com/Agentic-Insights/dreamgen/commit/68cdc6ebee3b71588f9483f1b1af48390a020d7b))
+
+
 ## v1.3.0 (2026-05-30)
 
 ### Features
