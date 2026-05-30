@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import uuid
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -48,6 +49,7 @@ logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ALLOWED_IMAGE_BACKENDS = {"auto", "flux", "ollama", "zimage", "small", "turbo", "smoke", "mock"}
+MAX_RECENT_GENERATION_EVENTS = 100
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -378,6 +380,17 @@ class ConnectionManager:
 
 
 manager = ConnectionManager()
+recent_generation_events: deque[Dict[str, Any]] = deque(maxlen=MAX_RECENT_GENERATION_EVENTS)
+
+
+def record_generation_event(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Record a lightweight lifecycle event for recent operator diagnostics."""
+    payload = {
+        "timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        **event,
+    }
+    recent_generation_events.appendleft(payload)
+    return payload
 
 
 async def broadcast_task_progress(
@@ -390,19 +403,18 @@ async def broadcast_task_progress(
     detail: str,
 ) -> None:
     """Broadcast a normalized task progress event for frontend progress UIs."""
-    await manager.broadcast(
-        json.dumps(
-            {
-                "type": "task_progress",
-                "task": task,
-                "id": task_id,
-                "client_request_id": client_request_id,
-                "progress": progress,
-                "label": label,
-                "detail": detail,
-            }
-        )
+    payload = record_generation_event(
+        {
+            "type": "task_progress",
+            "task": task,
+            "id": task_id,
+            "client_request_id": client_request_id,
+            "progress": progress,
+            "label": label,
+            "detail": detail,
+        }
     )
+    await manager.broadcast(json.dumps(payload))
 
 
 async def prefetch_default_fallback_model() -> None:
@@ -965,6 +977,18 @@ async def generate_image(request: GenerateRequest):
     generation_id = str(uuid.uuid4())
 
     async def emit_generation_event(event: GenerationProgressEvent) -> None:
+        record_generation_event(
+            {
+                "type": "generation_lifecycle",
+                "name": event.name,
+                "id": generation_id,
+                "client_request_id": request.client_request_id,
+                "progress": event.progress,
+                "label": event.label,
+                "detail": event.detail,
+                "payload": event.payload,
+            }
+        )
         if event.progress is not None:
             await broadcast_task_progress(
                 task="image_generation",
@@ -1013,12 +1037,13 @@ async def generate_image(request: GenerateRequest):
     try:
         await manager.broadcast(
             json.dumps(
-                {
-                    "type": "generation_started",
-                    "id": generation_id,
-                    "client_request_id": request.client_request_id,
-                    "timestamp": datetime.now().isoformat(),
-                }
+                record_generation_event(
+                    {
+                        "type": "generation_started",
+                        "id": generation_id,
+                        "client_request_id": request.client_request_id,
+                    }
+                )
             )
         )
         service = ImageGenService(config, output_dir=OUTPUT_DIR)
@@ -1040,12 +1065,14 @@ async def generate_image(request: GenerateRequest):
         logger.error(f"Memory error loading image backend: {str(e)}")
         await manager.broadcast(
             json.dumps(
-                {
-                    "type": "generation_error",
-                    "id": generation_id,
-                    "client_request_id": request.client_request_id,
-                    "error": error_msg,
-                }
+                record_generation_event(
+                    {
+                        "type": "generation_error",
+                        "id": generation_id,
+                        "client_request_id": request.client_request_id,
+                        "error": error_msg,
+                    }
+                )
             )
         )
         raise HTTPException(status_code=507, detail=error_msg)
@@ -1055,16 +1082,25 @@ async def generate_image(request: GenerateRequest):
         # Broadcast error event
         await manager.broadcast(
             json.dumps(
-                {
-                    "type": "generation_error",
-                    "id": generation_id,
-                    "client_request_id": request.client_request_id,
-                    "error": str(e),
-                }
+                record_generation_event(
+                    {
+                        "type": "generation_error",
+                        "id": generation_id,
+                        "client_request_id": request.client_request_id,
+                        "error": str(e),
+                    }
+                )
             )
         )
 
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/generation/events")
+async def get_generation_events(limit: int = Query(25, ge=1, le=100)):
+    """Return recent generation lifecycle events for operator dashboards."""
+    events = list(recent_generation_events)[:limit]
+    return {"events": events, "total": len(recent_generation_events), "limit": limit}
 
 
 @app.get("/api/gallery")

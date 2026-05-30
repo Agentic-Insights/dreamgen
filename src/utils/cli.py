@@ -3,6 +3,7 @@ Command-line interface for the continuous image generation system.
 """
 
 import asyncio
+import json
 import os
 import sys
 import threading
@@ -365,6 +366,11 @@ def generate(
         "--mps-use-fp16",
         help="Use float16 precision on Apple Silicon (may improve performance)",
     ),
+    summary_json: bool = typer.Option(
+        False,
+        "--summary-json",
+        help="Print a machine-readable generation summary after success",
+    ),
 ) -> None:
     """Generate a single image using AI-generated prompts or a custom prompt."""
 
@@ -476,6 +482,23 @@ def generate(
                             border_style="green",
                         )
                     )
+                    if summary_json:
+                        print(
+                            json.dumps(
+                                {
+                                    "image_path": str(result.image_path),
+                                    "prompt_path": str(result.image_path.with_suffix(".txt")),
+                                    "relative_image_path": result.relative_image_path,
+                                    "prompt": result.prompt,
+                                    "backend": result.backend,
+                                    "model": result.model_name,
+                                    "generation_time": result.generation_time,
+                                    "metadata": result.metadata,
+                                    "created_at": result.created_at,
+                                },
+                                sort_keys=True,
+                            )
+                        )
 
                     # End metrics collection
                     metrics.end_batch()

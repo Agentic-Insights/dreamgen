@@ -136,6 +136,26 @@ export interface GenerationConfig {
   zimage_native_available?: boolean;
 }
 
+export interface GenerationEvent {
+  timestamp: string;
+  type: string;
+  id?: string;
+  task?: string;
+  client_request_id?: string | null;
+  progress?: number | null;
+  label?: string | null;
+  detail?: string | null;
+  error?: string;
+  name?: string;
+  payload?: Record<string, unknown>;
+}
+
+export interface GenerationEventsResponse {
+  events: GenerationEvent[];
+  total: number;
+  limit: number;
+}
+
 const extractErrorMessage = async (response: Response, fallback: string) => {
   try {
     const data = await response.json();
@@ -204,6 +224,12 @@ export class ImageGenAPI {
       body: JSON.stringify(request),
     });
     if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to generate image'));
+    return response.json();
+  }
+
+  async getGenerationEvents(limit: number = 25): Promise<GenerationEventsResponse> {
+    const response = await fetch(`${this.baseUrl}/api/generation/events?limit=${limit}`);
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to get generation events'));
     return response.json();
   }
 

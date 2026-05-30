@@ -1,6 +1,7 @@
 """Tests for CLI generation progress and diagnostics."""
 
 import asyncio
+import json
 from io import StringIO
 from pathlib import Path
 
@@ -45,6 +46,27 @@ def test_generate_accepts_model_alias_for_backend(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.stdout
     assert "requested: mock" in result.stdout
     assert "resolved: mock" in result.stdout
+
+
+def test_generate_summary_json_prints_machine_readable_result(tmp_path, monkeypatch):
+    """Automation can consume a stable summary after human-readable output."""
+    monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
+
+    result = runner.invoke(
+        app,
+        ["generate", "--mock", "--prompt", "json summary prompt", "--summary-json"],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    summary_line = next(
+        line for line in reversed(result.stdout.splitlines()) if line.startswith("{")
+    )
+    summary = json.loads(summary_line)
+    assert summary["backend"] == "mock"
+    assert summary["prompt"] == "json summary prompt"
+    assert summary["image_path"].endswith(".png")
+    assert summary["prompt_path"].endswith(".txt")
+    assert summary["relative_image_path"].startswith("/images/")
 
 
 @pytest.mark.asyncio
