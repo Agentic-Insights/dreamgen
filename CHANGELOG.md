@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.3.0 (2026-05-30)
+
+### Features
+
+- Route cli generation through image service
+  ([#48](https://github.com/Agentic-Insights/dreamgen/pull/48),
+  [`3ee0037`](https://github.com/Agentic-Insights/dreamgen/commit/3ee003727a2dbb0d2db50d355973a71d4a4c616d))
+
+
 ## v1.2.0 (2026-05-30)
 
 ### Continuous Integration
