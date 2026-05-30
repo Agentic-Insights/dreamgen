@@ -7,8 +7,9 @@ import os
 import sys
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Awaitable, Optional, TypeVar
+from typing import Awaitable, Iterator, Optional, TypeVar
 
 # Fix Windows Unicode handling
 if sys.platform == "win32":
@@ -35,10 +36,10 @@ from .. import __version__
 from ..generators.factory import create_image_generator, is_model_cached, resolve_image_backend
 from ..generators.prompt_generator import PromptGenerator
 from ..plugins import ensure_initialized, plugin_manager
+from ..services import GenerationProgressEvent, GenerationServiceRequest, ImageGenService
 from .config import Config
 from .logging_config import setup_logging
 from .metrics import MetricsCollector
-from .storage import StorageManager
 from .troubleshoot import SystemDiagnostics
 
 # Initialize rich console for better output
@@ -71,20 +72,31 @@ def get_runtime_config() -> Config:
     return app.state.config
 
 
+@contextmanager
+def temporary_backend_override(
+    config: Config,
+    backend_override: Optional[str] = None,
+    mock: bool = False,
+) -> Iterator[None]:
+    """Temporarily apply a one-shot generation backend override."""
+    original_backend = config.model.image_backend
+    effective_backend = "mock" if mock else backend_override
+
+    try:
+        if effective_backend:
+            config.model.image_backend = effective_backend.lower()
+        yield
+    finally:
+        config.model.image_backend = original_backend
+
+
 def create_generator_with_overrides(
     backend_override: Optional[str] = None,
     mock: bool = False,
 ):
     """Create an image generator while temporarily overriding the configured backend."""
-    original_backend = app.state.config.model.image_backend
-    effective_backend = "mock" if mock else backend_override
-
-    try:
-        if effective_backend:
-            app.state.config.model.image_backend = effective_backend.lower()
+    with temporary_backend_override(app.state.config, backend_override, mock):
         return create_image_generator(app.state.config)
-    finally:
-        app.state.config.model.image_backend = original_backend
 
 
 def resolve_backend_with_overrides(
@@ -92,15 +104,8 @@ def resolve_backend_with_overrides(
     mock: bool = False,
 ) -> str:
     """Resolve the effective backend while honoring one-shot CLI overrides."""
-    original_backend = app.state.config.model.image_backend
-    effective_backend = "mock" if mock else backend_override
-
-    try:
-        if effective_backend:
-            app.state.config.model.image_backend = effective_backend.lower()
+    with temporary_backend_override(app.state.config, backend_override, mock):
         return resolve_image_backend(app.state.config)
-    finally:
-        app.state.config.model.image_backend = original_backend
 
 
 def _valid_hf_token() -> bool:
@@ -182,17 +187,15 @@ async def await_with_generation_status(
     *,
     backend_name: str,
     phase: str,
-    output_path: Path,
+    output_path: Path | None,
     heartbeat_seconds: int = HEARTBEAT_SECONDS,
 ) -> T:
     """Await generation work while a thread emits visible lifecycle status."""
     started_at = time.monotonic()
     stop_event = threading.Event()
 
-    console.print(
-        f"[cyan]{phase}:[/cyan] request submitted to {backend_name}; "
-        f"output target: {output_path}"
-    )
+    output_detail = f"; output target: {output_path}" if output_path else ""
+    console.print(f"[cyan]{phase}:[/cyan] request submitted to {backend_name}{output_detail}")
 
     def heartbeat() -> None:
         while not stop_event.wait(heartbeat_seconds):
@@ -209,6 +212,30 @@ async def await_with_generation_status(
     finally:
         stop_event.set()
         heartbeat_thread.join(timeout=1)
+
+
+def print_generation_service_event(event: GenerationProgressEvent) -> None:
+    """Render service lifecycle events that matter to CLI users."""
+    if event.name == "prompt_ready":
+        console.print(
+            Panel(
+                f"[bold]Using provided prompt:[/bold]\n\n{event.payload.get('prompt', '')}",
+                title="Custom Prompt",
+                border_style="blue",
+            )
+        )
+    elif event.name == "prompt_generated":
+        console.print(
+            Panel(
+                f"[bold]Generated prompt:[/bold]\n\n{event.payload.get('prompt', '')}",
+                title="AI Prompt",
+                border_style="green",
+            )
+        )
+    elif event.name == "output_path_ready":
+        output_path = event.payload.get("output_path")
+        if output_path:
+            console.print(f"[cyan]Saving output to:[/cyan] {output_path}")
 
 
 @plugins_app.command("list")
@@ -366,96 +393,85 @@ def generate(
                         raise typer.Exit(1)
 
                     # Initialize components
-                    init_task = progress.add_task("[cyan]Initializing components...", total=None)
-                    prompt_gen = PromptGenerator(app.state.config)
+                    init_task = progress.add_task(
+                        "[cyan]Initializing generation service...", total=None
+                    )
                     if mock:
                         console.print(
                             "[yellow]Using mock image generator (no GPU required)[/yellow]"
                         )
-                        image_gen, backend_name = create_generator_with_overrides(mock=True)
-                    else:
-                        image_gen, backend_name = create_generator_with_overrides(
-                            backend_override=backend
-                        )
-                    storage = StorageManager()
+                    service = ImageGenService(
+                        app.state.config, output_dir=app.state.config.system.output_dir
+                    )
                     metrics = MetricsCollector(app.state.config.system.log_dir / "metrics")
                     progress.remove_task(init_task)
 
                     console.print(
-                        f"[cyan]Using image backend:[/cyan] {backend_name} "
+                        f"[cyan]Using image backend:[/cyan] {resolved_backend} "
                         f"(resolved: {resolved_backend}, "
                         f"requested: {_requested_backend_name(app.state.config, backend, mock)})"
-                    )
-                    console.print(
-                        f"[cyan]Model/provider:[/cyan] {_format_model_detail(image_gen)}; "
-                        f"device: {_format_device_detail(image_gen)}"
                     )
 
                     # Start metrics collection
                     metrics.start_batch()
 
-                    # Use provided prompt or generate one
-                    if prompt:
-                        generated_prompt = prompt
-                        console.print(
-                            Panel(
-                                f"[bold]Using provided prompt:[/bold]\n\n{generated_prompt}",
-                                title="Custom Prompt",
-                                border_style="blue",
-                            )
-                        )
-                    else:
+                    generation_prompt = prompt
+                    if not prompt and interactive:
+                        prompt_gen = PromptGenerator(app.state.config)
                         prompt_task = progress.add_task(
                             "[cyan]Generating creative prompt...", total=None
                         )
-                        if interactive:
-                            generated_prompt = await prompt_gen.get_prompt_with_feedback()
-                        else:
-                            generated_prompt = await prompt_gen.generate_prompt()
-                        progress.remove_task(prompt_task)
-                        console.print(
-                            Panel(
-                                f"[bold]Generated prompt:[/bold]\n\n{generated_prompt}",
-                                title="AI Prompt",
-                                border_style="green",
-                            )
-                        )
-
-                    # Get output path
-                    output_path = storage.get_output_path(generated_prompt)
-                    console.print(f"[cyan]Saving output to:[/cyan] {output_path}")
+                        try:
+                            generation_prompt = await prompt_gen.get_prompt_with_feedback()
+                        finally:
+                            progress.remove_task(prompt_task)
+                            prompt_gen.cleanup()
 
                     # Generate image
                     image_task = progress.add_task("[cyan]Generating image...", total=None)
                     try:
-                        output_path, gen_time, model_name = await await_with_generation_status(
-                            image_gen.generate_image(generated_prompt, output_path),
-                            backend_name=backend_name,
-                            phase="Image generation",
-                            output_path=output_path,
-                        )
+                        with temporary_backend_override(app.state.config, backend, mock):
+                            result = await await_with_generation_status(
+                                service.generate(
+                                    GenerationServiceRequest(
+                                        prompt=generation_prompt,
+                                        cleanup=True,
+                                    ),
+                                    callback=print_generation_service_event,
+                                ),
+                                backend_name=resolved_backend,
+                                phase="Image generation",
+                                output_path=None,
+                            )
                     except Exception as e:
                         console.print(
                             f"[red]Generation failed[/red]\n"
-                            f"Backend: {backend_name}\n"
-                            f"Phase: image generation\n"
+                            f"Backend: {resolved_backend}\n"
+                            "Phase: image generation\n"
                             f"Error: {str(e)}"
                         )
                         raise typer.Exit(1) from e
                     finally:
                         progress.remove_task(image_task)
 
-                    console.print(f"[green]Image received and saved[/green] ({gen_time:.1f}s)")
+                    console.print(
+                        f"[cyan]Model/provider:[/cyan] {result.model_name}; "
+                        f"backend: {result.backend}"
+                    )
+                    console.print(
+                        f"[green]Image received and saved[/green] ({result.generation_time:.1f}s)"
+                    )
 
                     # Show success message with details
                     console.print(
                         Panel(
                             f"[bold green]Image generated successfully![/bold green]\n\n"
-                            f"📁 Saved to: {output_path}\n"
-                            f"📝 Prompt saved to: {output_path.with_suffix('.txt')}\n\n"
-                            f"[dim]Model: {model_name}\n"
-                            f"Time: {gen_time:.1f}s\n"
-                            f"Prompt: {generated_prompt}[/dim]",
+                            f"Saved to: {result.image_path}\n"
+                            f"Prompt saved to: {result.image_path.with_suffix('.txt')}\n\n"
+                            f"[dim]Model: {result.model_name}\n"
+                            f"Backend: {result.backend}\n"
+                            f"Time: {result.generation_time:.1f}s\n"
+                            f"Prompt: {result.prompt}[/dim]",
                             title="Success",
                             border_style="green",
                         )
@@ -463,10 +479,6 @@ def generate(
 
                     # End metrics collection
                     metrics.end_batch()
-
-                    # Cleanup
-                    prompt_gen.cleanup()
-                    image_gen.cleanup()
 
                 except typer.Exit:
                     raise
@@ -673,7 +685,9 @@ def loop(
                         image_gen, backend_name = create_generator_with_overrides(
                             backend_override=backend
                         )
-                    storage = StorageManager()
+                    service = ImageGenService(
+                        app.state.config, output_dir=app.state.config.system.output_dir
+                    )
                     metrics = MetricsCollector(app.state.config.system.log_dir / "metrics")
                     progress.remove_task(init_task)
 
@@ -708,24 +722,37 @@ def loop(
                                 )
                             )
 
-                            # Get output path and generate
-                            output_path = storage.get_output_path(prompt)
-                            console.print(
-                                f"[cyan]Image {i+1}/{batch_size} output target:[/cyan] {output_path}"
-                            )
+                            def print_loop_event(event: GenerationProgressEvent) -> None:
+                                if event.name == "output_path_ready":
+                                    output_path = event.payload.get("output_path")
+                                    if output_path:
+                                        console.print(
+                                            f"[cyan]Image {i+1}/{batch_size} output target:[/cyan] "
+                                            f"{output_path}"
+                                        )
+
                             force_reinit = i > 0 and i % 5 == 0  # Reinit every 5 images
-                            output_path, gen_time, model_name = await await_with_generation_status(
-                                image_gen.generate_image(
-                                    prompt, output_path, force_reinit=force_reinit
-                                ),
-                                backend_name=backend_name,
-                                phase=f"Image {i+1}/{batch_size} generation",
-                                output_path=output_path,
-                            )
+                            with temporary_backend_override(app.state.config, backend, mock):
+                                result = await await_with_generation_status(
+                                    service.generate(
+                                        GenerationServiceRequest(
+                                            prompt=prompt,
+                                            force_reinit=force_reinit,
+                                        ),
+                                        callback=print_loop_event,
+                                        backend=image_gen,
+                                        backend_name=backend_name,
+                                    ),
+                                    backend_name=backend_name,
+                                    phase=f"Image {i+1}/{batch_size} generation",
+                                    output_path=None,
+                                )
+                            model_name = result.model_name
 
                             console.print(
-                                f"[green]✓[/green] Image {i+1} generated in {gen_time:.1f}s using {model_name}\n"
-                                f"   📁 {output_path}"
+                                f"[green]✓[/green] Image {i+1} generated in "
+                                f"{result.generation_time:.1f}s using {result.model_name}\n"
+                                f"   {result.image_path}"
                             )
 
                             progress.update(batch_task, advance=1)

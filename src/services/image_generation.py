@@ -150,6 +150,8 @@ class ImageGenService:
         self,
         request: GenerationServiceRequest,
         callback: ProgressCallback | None = None,
+        backend: ImageBackend | None = None,
+        backend_name: str | None = None,
     ) -> GenerationServiceResult:
         """Run one generation workflow and return persisted artifact details."""
         await self._emit(
@@ -163,8 +165,13 @@ class ImageGenService:
         )
 
         final_prompt = await self._resolve_prompt(request, callback)
-        image_gen_raw, backend_name = create_image_generator(self.config)
-        image_gen = cast(ImageBackend, image_gen_raw)
+        if backend is None:
+            image_gen_raw, backend_name = create_image_generator(self.config)
+            image_gen = cast(ImageBackend, image_gen_raw)
+        else:
+            if backend_name is None:
+                raise ValueError("backend_name is required when passing a reusable backend")
+            image_gen = backend
         await self._emit(
             callback,
             GenerationProgressEvent(
@@ -190,6 +197,13 @@ class ImageGenService:
 
         storage = StorageManager(str(self.output_dir))
         requested_output_path = storage.get_output_path(final_prompt)
+        await self._emit(
+            callback,
+            GenerationProgressEvent(
+                name="output_path_ready",
+                payload={"output_path": requested_output_path},
+            ),
+        )
         try:
             image_path, generation_time, model_name = await image_gen.generate_image(
                 final_prompt,

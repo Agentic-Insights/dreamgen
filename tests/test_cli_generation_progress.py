@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 
 from src.utils import cli
 from src.utils.cli import app
+from src.utils.publication_catalog import load_catalog
 
 runner = CliRunner()
 
@@ -27,6 +28,9 @@ def test_generate_mock_prints_lifecycle_status(tmp_path, monkeypatch):
     assert "request submitted" in result.stdout
     assert "Image received and saved" in result.stdout
     assert "Saved to:" in result.stdout
+
+    catalog = load_catalog(tmp_path)
+    assert len(catalog["assets"]) == 1
 
 
 def test_generate_accepts_model_alias_for_backend(tmp_path, monkeypatch):
