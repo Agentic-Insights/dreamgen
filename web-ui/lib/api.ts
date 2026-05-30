@@ -156,6 +156,53 @@ export interface GenerationEventsResponse {
   limit: number;
 }
 
+export type PublicationState = 'draft' | 'published' | 'hidden' | 'featured' | 'rejected';
+
+export interface GalleryPublication {
+  id: string;
+  state: PublicationState;
+  publishable: boolean;
+  quality_flags: string[];
+}
+
+export interface GalleryCatalogEntry {
+  id: string;
+  path: string;
+  image_url?: string;
+  prompt: string;
+  created_at: string;
+  updated_at: string;
+  publication_state: PublicationState;
+  publishable: boolean;
+  quality_flags: string[];
+  metadata: Record<string, unknown>;
+  size?: number;
+}
+
+export interface GalleryCatalogResponse {
+  assets: GalleryCatalogEntry[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface GallerySyncStatus {
+  bucket: string;
+  approved_states: string[];
+  catalog_present: boolean;
+  output_present: boolean;
+  ready: boolean;
+  needs_publish: boolean;
+  upload_images: number;
+  upload_files: number;
+  skipped_assets: number;
+  delete_objects: number;
+  preview_assets: Array<{ key: string; reason: string }>;
+  skipped_preview: Array<{ key: string; reason: string }>;
+  command: string;
+  message: string;
+}
+
 const extractErrorMessage = async (response: Response, fallback: string) => {
   try {
     const data = await response.json();
@@ -253,6 +300,59 @@ export class ImageGenAPI {
       }
       throw error;
     }
+  }
+
+  async getGalleryCatalog(
+    limit: number = 100,
+    offset: number = 0,
+    state?: PublicationState | 'all',
+    timeoutMs: number = 20000
+  ): Promise<GalleryCatalogResponse> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    const params = new URLSearchParams({
+      limit: String(limit),
+      offset: String(offset),
+    });
+    if (state && state !== 'all') params.set('state', state);
+
+    try {
+      const response = await fetch(`${this.baseUrl}/api/gallery/catalog?${params.toString()}`, {
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to get gallery catalog'));
+      return response.json();
+    } catch (error) {
+      clearTimeout(timeoutId);
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error(`Gallery catalog request timed out after ${Math.round(timeoutMs / 1000)}s`);
+      }
+      throw error;
+    }
+  }
+
+  async getGallerySyncStatus(limit: number = 10): Promise<GallerySyncStatus> {
+    const response = await fetch(`${this.baseUrl}/api/gallery/sync/status?limit=${limit}`);
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to get gallery sync status'));
+    return response.json();
+  }
+
+  async updatePublicationState(
+    imagePath: string,
+    state: PublicationState,
+    allowPlaceholderPublish: boolean = false
+  ): Promise<GalleryCatalogEntry> {
+    const response = await fetch(`${this.baseUrl}/api/gallery/publication/${encodeURIComponent(imagePath)}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ state, allow_placeholder_publish: allowPlaceholderPublish }),
+    });
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to update publication state'));
+    return response.json();
   }
 
   async deleteImage(imagePath: string) {

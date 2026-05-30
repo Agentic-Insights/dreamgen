@@ -194,6 +194,89 @@ def build_publish_plan(
     return PublishPlan(assets=assets, skipped=skipped, image_count=included_images, delete_count=0)
 
 
+def build_publish_status(
+    output_dir: Path,
+    *,
+    bucket: str = DEFAULT_BUCKET,
+    since: str | None = None,
+    limit: int | None = None,
+    include_featured: bool = True,
+    prune: bool = False,
+    preview_limit: int = 10,
+) -> dict[str, object]:
+    """Return a non-mutating local status snapshot for the R2 publish workflow."""
+    approved_states = sorted(_approved_states(include_featured))
+    command = "uv run dreamgen publish --execute"
+    if bucket != DEFAULT_BUCKET:
+        command += f" --bucket {bucket}"
+    if since:
+        command += f" --since {since}"
+    if limit is not None:
+        command += f" --limit {limit}"
+    if not include_featured:
+        command += " --no-include-featured"
+    if prune:
+        command += " --prune"
+
+    status: dict[str, object] = {
+        "bucket": bucket,
+        "approved_states": approved_states,
+        "catalog_present": catalog_path_for(output_dir).exists(),
+        "output_present": output_dir.exists(),
+        "ready": False,
+        "needs_publish": False,
+        "upload_images": 0,
+        "upload_files": 0,
+        "skipped_assets": 0,
+        "delete_objects": 0,
+        "preview_assets": [],
+        "skipped_preview": [],
+        "command": command,
+        "message": "",
+    }
+
+    if not output_dir.exists():
+        status["message"] = f"Output directory does not exist: {output_dir}"
+        return status
+    if not catalog_path_for(output_dir).exists():
+        status["message"] = (
+            "Publication catalog is missing. Backfill or generate through the backend first."
+        )
+        return status
+
+    plan = build_publish_plan(
+        output_dir,
+        parse_since(since),
+        limit,
+        include_featured=include_featured,
+        prune=prune,
+    )
+
+    status.update(
+        {
+            "ready": True,
+            "needs_publish": plan.file_count > 0 or (prune and plan.delete_count > 0),
+            "upload_images": plan.image_count,
+            "upload_files": plan.file_count,
+            "skipped_assets": len(plan.skipped),
+            "delete_objects": plan.delete_count if prune else 0,
+            "preview_assets": [
+                {"key": asset.key, "reason": asset.reason} for asset in plan.assets[:preview_limit]
+            ],
+            "skipped_preview": [
+                {"key": skipped.key, "reason": skipped.reason}
+                for skipped in plan.skipped[:preview_limit]
+            ],
+            "message": (
+                "Approved local assets are ready for R2 publishing."
+                if plan.file_count
+                else "No approved local assets are currently in the publish plan."
+            ),
+        }
+    )
+    return status
+
+
 def discover_assets(output_dir: Path, since: float | None, limit: int | None) -> list[PublishAsset]:
     """Compatibility wrapper used by tests and older callers."""
     return build_publish_plan(output_dir, since, limit).assets
