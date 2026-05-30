@@ -60,6 +60,12 @@ For now, the hybrid approach (rclone + wrangler) works perfectly!
 - **Binding**: `GALLERY` → `dreamgen-gallery`
 - **Function**: Full gallery with slideshow
 - **API**: `/api/images` lists all, `/api/images/{key}` serves individual files
+- **Views**: `Latest` shows all published images; `Featured` only shows assets whose
+  publication metadata is marked `featured`. If no featured assets exist, the gallery
+  presents an empty state with a return action instead of treating the view as broken.
+- **Viewer controls**: The public gallery reserves top and bottom chrome space for
+  filters, caption metadata, playback controls, and thumbnails so prompt text does not
+  overlap the navigation controls.
 
 ## Deployment Workflow
 
