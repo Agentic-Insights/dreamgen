@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.4.1 (2026-05-30)
+
+### Bug Fixes
+
+- Polish public gallery controls
+  ([`a378e8e`](https://github.com/Agentic-Insights/dreamgen/commit/a378e8e71461429de60b49e7bb55d31e0eebba4c))
+
+
 ## v1.4.0 (2026-05-30)
 
 ### Features
