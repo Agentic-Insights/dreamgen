@@ -76,7 +76,7 @@ lint-errors:
 
 # Type check Python code
 typecheck:
-    uv run mypy src/
+    uv run mypy
 
 # Lint web UI
 web-lint:

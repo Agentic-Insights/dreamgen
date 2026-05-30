@@ -19,15 +19,11 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel, Field
 
-from src.generators.factory import (
-    backend_label,
-    create_image_generator,
-    is_model_cached,
-    resolve_image_backend,
-)
+from src.generators.factory import backend_label, is_model_cached, resolve_image_backend
 from src.generators.prompt_generator import PromptGenerator
 from src.plugins import plugin_manager, register_lora_plugin
 from src.plugins.lora import get_available_loras
+from src.services import GenerationProgressEvent, GenerationServiceRequest, ImageGenService
 from src.utils.config import Config
 from src.utils.ollama import (
     get_ollama_version,
@@ -44,13 +40,7 @@ from src.utils.publication_catalog import (
     remove_image,
     set_publication_state,
 )
-from src.utils.storage import (
-    StorageManager,
-    metadata_path_for,
-    read_image_metadata,
-    save_image_and_prompt,
-    write_image_metadata,
-)
+from src.utils.storage import StorageManager, metadata_path_for, save_image_and_prompt
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -974,8 +964,53 @@ async def generate_image(request: GenerateRequest):
     """Generate a single image"""
     generation_id = str(uuid.uuid4())
 
+    async def emit_generation_event(event: GenerationProgressEvent) -> None:
+        if event.progress is not None:
+            await broadcast_task_progress(
+                task="image_generation",
+                task_id=generation_id,
+                client_request_id=request.client_request_id,
+                progress=event.progress,
+                label=event.label or event.name,
+                detail=event.detail or "",
+            )
+
+        if event.name == "prompt_generated":
+            await manager.broadcast(
+                json.dumps(
+                    {
+                        "type": "prompt_generated",
+                        "id": generation_id,
+                        "client_request_id": request.client_request_id,
+                        "prompt": event.payload.get("prompt", ""),
+                    }
+                )
+            )
+        elif event.name == "model_loading":
+            await manager.broadcast(
+                json.dumps(
+                    {
+                        "type": "model_loading",
+                        "id": generation_id,
+                        "client_request_id": request.client_request_id,
+                        "message": event.payload.get("message", event.detail or ""),
+                    }
+                )
+            )
+        elif event.name == "generation_completed":
+            await manager.broadcast(
+                json.dumps(
+                    {
+                        "type": "generation_completed",
+                        "id": generation_id,
+                        "client_request_id": request.client_request_id,
+                        "image_path": event.payload.get("image_path", ""),
+                        "prompt": event.payload.get("prompt", ""),
+                    }
+                )
+            )
+
     try:
-        # Broadcast start event
         await manager.broadcast(
             json.dumps(
                 {
@@ -986,211 +1021,34 @@ async def generate_image(request: GenerateRequest):
                 }
             )
         )
-        await broadcast_task_progress(
-            task="image_generation",
-            task_id=generation_id,
-            client_request_id=request.client_request_id,
-            progress=8,
-            label="Preparing image request",
-            detail="Collecting the prompt, active plugins, and runtime settings.",
-        )
-
-        # Generate prompt if not provided
-        if request.prompt:
-            final_prompt = request.prompt
-            await broadcast_task_progress(
-                task="image_generation",
-                task_id=generation_id,
-                client_request_id=request.client_request_id,
-                progress=24,
-                label="Prompt ready",
-                detail="Using the prompt you provided directly.",
-            )
-        else:
-            prompt_gen = PromptGenerator(config)
-            await broadcast_task_progress(
-                task="image_generation",
-                task_id=generation_id,
-                client_request_id=request.client_request_id,
-                progress=24,
-                label="Generating prompt",
-                detail="Building a fresh prompt from Ollama and the active plugins.",
-            )
-            final_prompt = await prompt_gen.generate_prompt()
-
-            # Broadcast prompt generated event
-            await manager.broadcast(
-                json.dumps(
-                    {
-                        "type": "prompt_generated",
-                        "id": generation_id,
-                        "client_request_id": request.client_request_id,
-                        "prompt": final_prompt,
-                    }
-                )
-            )
-            await broadcast_task_progress(
-                task="image_generation",
-                task_id=generation_id,
-                client_request_id=request.client_request_id,
-                progress=40,
-                label="Prompt ready",
-                detail="The prompt is assembled. Preparing the image backend next.",
-            )
-
-        try:
-            image_gen, backend_name = create_image_generator(config)
-            logger.info("Using image backend: %s", backend_name)
-            await broadcast_task_progress(
-                task="image_generation",
-                task_id=generation_id,
-                client_request_id=request.client_request_id,
-                progress=55,
-                label="Backend ready",
-                detail="The selected image backend is loaded and ready to render.",
-            )
-        except MemoryError as e:
-            error_msg = "Insufficient memory to load the configured image backend."
-            logger.error(f"Memory error loading Flux model: {str(e)}")
-            await manager.broadcast(
-                json.dumps(
-                    {
-                        "type": "generation_error",
-                        "id": generation_id,
-                        "client_request_id": request.client_request_id,
-                        "error": error_msg,
-                    }
-                )
-            )
-            raise HTTPException(status_code=507, detail=error_msg)
-        except Exception as e:
-            error_msg = f"Failed to load image backend: {str(e)}"
-            logger.error(error_msg)
-            await manager.broadcast(
-                json.dumps(
-                    {
-                        "type": "generation_error",
-                        "id": generation_id,
-                        "client_request_id": request.client_request_id,
-                        "error": error_msg,
-                    }
-                )
-            )
-            raise HTTPException(status_code=500, detail=error_msg)
-
-        backend_name = backend_label(config, resolve_image_backend(config))
-        loading_message = {
-            "mock": "Using mock image generator.",
-            "smoke-test": "Loading smoke-test image model.",
-            "small-sd": "Loading small Stable Diffusion fallback model.",
-            "sd-turbo": "Loading turbo image model.",
-            "ollama": "Requesting an image from the configured Ollama host.",
-        }.get(backend_name, "Loading Flux model (this may take several minutes on first run)...")
-
-        await manager.broadcast(
-            json.dumps(
-                {
-                    "type": "model_loading",
-                    "id": generation_id,
-                    "client_request_id": request.client_request_id,
-                    "message": loading_message,
-                }
-            )
-        )
-        await broadcast_task_progress(
-            task="image_generation",
-            task_id=generation_id,
-            client_request_id=request.client_request_id,
-            progress=68,
-            label="Rendering image",
-            detail=loading_message,
-        )
-
-        # Generate and save the image through the active backend.
-        storage = StorageManager(str(OUTPUT_DIR))
-        requested_output_path = storage.get_output_path(final_prompt)
-        image_path, _, _ = await image_gen.generate_image(
-            final_prompt,
-            requested_output_path,
-            force_reinit=False,
-            seed=request.seed,
-        )
-        await broadcast_task_progress(
-            task="image_generation",
-            task_id=generation_id,
-            client_request_id=request.client_request_id,
-            progress=92,
-            label="Finalizing output",
-            detail="Saving metadata and writing the finished image to the gallery.",
-        )
-        generation_metadata = getattr(image_gen, "last_generation_metadata", {}) or {}
-        seed_supported = generation_metadata.get("seed_supported", True)
-        resolved_seed = generation_metadata.get("seed")
-        if resolved_seed is None and request.seed is not None and seed_supported:
-            resolved_seed = request.seed
-        existing_metadata = read_image_metadata(image_path)
-        saved_metadata = {
-            **existing_metadata,
-            **generation_metadata,
-            "backend": backend_name,
-            "configured_backend": config.model.image_backend,
-            "generated_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
-            "seed": resolved_seed,
-        }
-        write_image_metadata(image_path, saved_metadata)
-        publication_entry = register_image(
-            image_path,
-            OUTPUT_DIR,
-            prompt=final_prompt,
-            metadata=saved_metadata,
-            publication_state="draft",
-        )
-
-        # Create relative path for API response
-        relative_path = f"/images/{image_path.relative_to(OUTPUT_DIR).as_posix()}"
-
-        # Broadcast completion event
-        await manager.broadcast(
-            json.dumps(
-                {
-                    "type": "generation_completed",
-                    "id": generation_id,
-                    "client_request_id": request.client_request_id,
-                    "image_path": relative_path,
-                    "prompt": final_prompt,
-                }
-            )
-        )
-        await broadcast_task_progress(
-            task="image_generation",
-            task_id=generation_id,
-            client_request_id=request.client_request_id,
-            progress=100,
-            label="Image ready",
-            detail="The generated image is saved and ready to review.",
+        service = ImageGenService(config, output_dir=OUTPUT_DIR)
+        result = await service.generate(
+            GenerationServiceRequest(prompt=request.prompt, seed=request.seed),
+            callback=emit_generation_event,
         )
 
         return GenerateResponse(
             id=generation_id,
-            prompt=final_prompt,
-            image_path=relative_path,
-            metadata={
-                **generation_metadata,
-                "backend": backend_name,
-                "publication": {
-                    "id": publication_entry["id"],
-                    "state": publication_entry["publication_state"],
-                    "publishable": publication_entry["publishable"],
-                    "quality_flags": publication_entry["quality_flags"],
-                },
-                "plugins_used": [
-                    name for name, info in plugin_manager.plugins.items() if info.enabled
-                ],
-                "seed": resolved_seed,
-            },
-            created_at=datetime.now().isoformat(),
+            prompt=result.prompt,
+            image_path=result.relative_image_path,
+            metadata=result.metadata,
+            created_at=result.created_at,
         )
 
+    except MemoryError as e:
+        error_msg = "Insufficient memory to load the configured image backend."
+        logger.error(f"Memory error loading image backend: {str(e)}")
+        await manager.broadcast(
+            json.dumps(
+                {
+                    "type": "generation_error",
+                    "id": generation_id,
+                    "client_request_id": request.client_request_id,
+                    "error": error_msg,
+                }
+            )
+        )
+        raise HTTPException(status_code=507, detail=error_msg)
     except Exception as e:
         logger.error(f"Generation failed: {str(e)}")
 

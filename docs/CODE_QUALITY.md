@@ -264,14 +264,15 @@ just web-lint-fix
 # Type check Python code
 just typecheck
 
-# Specific file
-uv run mypy src/main.py
+# The default mypy command checks the current typed green zone from mypy.ini.
+uv run mypy
 ```
 
 ### Configuration
 
 **mypy** (`mypy.ini`):
 - Python 3.11+
+- Uses an explicit `files` allowlist for typed green-zone modules while legacy debt is tracked in GitHub
 - Ignore missing imports (ML libraries)
 - No strict optional
 - Excludes: venv, node_modules, output, tests
