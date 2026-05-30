@@ -30,15 +30,25 @@ class GenerationJobCreate:
     publication_state: str = "draft"
     client_request_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    recipe_id: str | None = None
+    recipe_version: int | None = None
+    config_overrides: dict[str, Any] = field(default_factory=dict)
 
     def to_service_request(self, job_id: str) -> GenerationServiceRequest:
         """Convert a persisted job payload to the service request boundary."""
+        metadata = {**self.metadata, "job_id": job_id}
+        if self.recipe_id:
+            metadata["recipe"] = {
+                **metadata.get("recipe", {}),
+                "id": self.recipe_id,
+                "version": self.recipe_version,
+            }
         return GenerationServiceRequest(
             prompt=self.prompt,
             meta_prompt=self.meta_prompt,
             seed=self.seed,
             publication_state=self.publication_state,
-            metadata={**self.metadata, "job_id": job_id},
+            metadata=metadata,
         )
 
 
@@ -121,6 +131,9 @@ class SQLiteGenerationJobStore:
             "seed": payload.seed,
             "publication_state": payload.publication_state,
             "metadata": payload.metadata,
+            "recipe_id": payload.recipe_id,
+            "recipe_version": payload.recipe_version,
+            "config_overrides": payload.config_overrides,
         }
         with self._connect() as connection:
             connection.execute(
@@ -379,6 +392,9 @@ class SQLiteGenerationJobStore:
             publication_state=request.get("publication_state", "draft"),
             client_request_id=job.get("client_request_id"),
             metadata=request.get("metadata") or {},
+            recipe_id=request.get("recipe_id"),
+            recipe_version=request.get("recipe_version"),
+            config_overrides=request.get("config_overrides") or {},
         )
 
     def _connect(self) -> sqlite3.Connection:
@@ -461,4 +477,7 @@ def job_payload_from_service_request(
         publication_state=data.get("publication_state", "draft"),
         client_request_id=client_request_id,
         metadata=data.get("metadata") or {},
+        recipe_id=data.get("recipe_id"),
+        recipe_version=data.get("recipe_version"),
+        config_overrides=data.get("config_overrides") or {},
     )

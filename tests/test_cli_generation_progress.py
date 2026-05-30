@@ -69,6 +69,27 @@ def test_generate_summary_json_prints_machine_readable_result(tmp_path, monkeypa
     assert summary["relative_image_path"].startswith("/images/")
 
 
+def test_generate_accepts_workflow_recipe(tmp_path, monkeypatch):
+    """CLI generation should resolve built-in recipes into generation metadata."""
+    monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
+
+    result = runner.invoke(
+        app,
+        ["generate", "--recipe", "mock-smoke", "--summary-json"],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    assert "Using workflow recipe:" in result.stdout
+    summary_line = next(
+        line for line in reversed(result.stdout.splitlines()) if line.startswith("{")
+    )
+    summary = json.loads(summary_line)
+    assert summary["backend"] == "mock"
+    assert summary["prompt"] == "DreamGen mock smoke test image"
+    assert summary["metadata"]["recipe"]["id"] == "mock-smoke"
+    assert summary["metadata"]["recipe"]["version"] == 1
+
+
 @pytest.mark.asyncio
 async def test_generation_status_emits_heartbeat_for_slow_operation(monkeypatch):
     """Long-running generation should produce periodic visible waiting output."""

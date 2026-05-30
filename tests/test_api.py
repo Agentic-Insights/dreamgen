@@ -293,6 +293,57 @@ def test_set_generation_config_updates_backend_and_loras(client):
         api_config.model.lora.application_probability = original_probability
 
 
+def test_recipes_endpoints_list_and_resolve_builtin_recipe(client):
+    """Recipe APIs should expose built-ins and resolve them into job payloads."""
+    response = client.get("/api/recipes")
+    assert response.status_code == 200
+    recipe_ids = {recipe["id"] for recipe in response.json()["recipes"]}
+    assert "mock-smoke" in recipe_ids
+
+    detail_response = client.get("/api/recipes/mock-smoke")
+    assert detail_response.status_code == 200
+    assert detail_response.json()["backend_preference"] == "mock"
+
+    resolve_response = client.post(
+        "/api/recipes/mock-smoke/resolve",
+        json={"seed": 22, "client_request_id": "req-resolve-1"},
+    )
+    assert resolve_response.status_code == 200
+    resolved = resolve_response.json()["job_request"]
+    assert resolved["prompt"] == "DreamGen mock smoke test image"
+    assert resolved["seed"] == 22
+    assert resolved["recipe_id"] == "mock-smoke"
+    assert resolved["recipe_version"] == 1
+    assert resolved["metadata"]["recipe"]["id"] == "mock-smoke"
+    assert resolved["config_overrides"]["model"]["image_backend"] == "mock"
+
+
+def test_jobs_endpoint_runs_recipe_and_persists_recipe_metadata(client):
+    """Generation jobs created from recipes should persist recipe ID/version."""
+    response = client.post(
+        "/api/jobs",
+        json={
+            "recipe_id": "mock-smoke",
+            "seed": 33,
+            "client_request_id": "req-job-recipe-1",
+        },
+    )
+    assert response.status_code == 200
+    created = response.json()
+    assert created["request"]["recipe_id"] == "mock-smoke"
+    assert created["request"]["recipe_version"] == 1
+    assert created["request"]["config_overrides"]["model"]["image_backend"] == "mock"
+
+    job_response = client.get(f"/api/jobs/{created['id']}")
+    assert job_response.status_code == 200
+    job = job_response.json()
+    assert job["status"] == "succeeded"
+    assert job["request"]["recipe_id"] == "mock-smoke"
+    assert job["metadata"]["recipe"]["id"] == "mock-smoke"
+    assert job["metadata"]["recipe"]["version"] == 1
+    assert job["metadata"]["seed"] == 33
+
+
 def test_ollama_models_endpoint_includes_capabilities_and_resolved_models(client, monkeypatch):
     """The Ollama models endpoint should expose capabilities plus resolved prompt/image selections."""
     original_prompt_model = api_config.model.ollama_model

@@ -253,6 +253,7 @@ class ImageGenService:
         relative_image_path = f"/images/{image_path.relative_to(self.output_dir).as_posix()}"
         active_plugins = [name for name, info in plugin_manager.plugins.items() if info.enabled]
         response_metadata = {
+            **request.metadata,
             **generation_metadata,
             "backend": backend_name,
             "publication": {
