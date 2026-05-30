@@ -4,18 +4,33 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Trash2, Download, X, Loader2, Clock, FileText,
-  Calendar, Grid, ChevronRight, Folder
+  Calendar, Grid, ChevronRight, Folder, Star, Eye, EyeOff, Archive,
+  UploadCloud
 } from "lucide-react";
-import { api, API_BASE } from "@/lib/api";
+import {
+  api,
+  API_BASE,
+  type GalleryCatalogEntry,
+  type GallerySyncStatus,
+  type PublicationState,
+} from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import galleryCache from "@/lib/cache";
 
 interface GalleryImage {
   path: string;
+  catalog_path: string;
   prompt: string;
   created_at: string;
   size: number;
+  metadata: Record<string, unknown>;
+  publication: {
+    id: string;
+    state: PublicationState;
+    publishable: boolean;
+    quality_flags: string[];
+  };
 }
 
 interface GalleryResponse {
@@ -34,11 +49,46 @@ interface WeekGroup {
 }
 
 type ViewMode = "week" | "all";
+type CatalogFilter = PublicationState | "all";
 
 const ALL_PAGE_SIZE = 20;
 const WEEK_PAGE_SIZE = 200;
 const CACHE_TIMEOUT_MS = 800;
 const GALLERY_TIMEOUT_MS = 30000;
+const PUBLICATION_OPTIONS: Array<{
+  state: PublicationState;
+  label: string;
+  icon: typeof Star;
+}> = [
+  { state: "featured", label: "Featured", icon: Star },
+  { state: "published", label: "Published", icon: Eye },
+  { state: "draft", label: "Draft", icon: FileText },
+  { state: "hidden", label: "Hidden", icon: EyeOff },
+  { state: "rejected", label: "Rejected", icon: Archive },
+];
+
+const stateStyles: Record<PublicationState, string> = {
+  featured: "bg-amber-500 text-black",
+  published: "bg-emerald-600 text-white",
+  draft: "bg-slate-500 text-white",
+  hidden: "bg-zinc-700 text-white",
+  rejected: "bg-rose-700 text-white",
+};
+
+const toGalleryImage = (entry: GalleryCatalogEntry): GalleryImage => ({
+  path: entry.image_url || `/images/${entry.path}`,
+  catalog_path: entry.path,
+  prompt: entry.prompt || "",
+  created_at: entry.created_at,
+  size: entry.size || 0,
+  metadata: entry.metadata || {},
+  publication: {
+    id: entry.id,
+    state: entry.publication_state,
+    publishable: entry.publishable,
+    quality_flags: entry.quality_flags || [],
+  },
+});
 
 const withTimeout = async <T,>(
   promise: Promise<T>,
@@ -78,8 +128,11 @@ export default function Gallery() {
   const [page, setPage] = useState(0);
   const [total, setTotal] = useState(0);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [publicationUpdating, setPublicationUpdating] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("week");
+  const [catalogFilter, setCatalogFilter] = useState<CatalogFilter>("all");
+  const [syncStatus, setSyncStatus] = useState<GallerySyncStatus | null>(null);
   const loadRequestRef = useRef(0);
 
   const imagesPerPage = viewMode === "all" ? ALL_PAGE_SIZE : WEEK_PAGE_SIZE;
@@ -127,16 +180,25 @@ export default function Gallery() {
     loadRequestRef.current = requestId;
     const limit = viewMode === "all" ? ALL_PAGE_SIZE : WEEK_PAGE_SIZE;
     const offset = viewMode === "all" ? page * ALL_PAGE_SIZE : 0;
-    const cacheKey = `gallery_${viewMode}_${page}_${limit}`;
+    const cacheKey = `gallery_catalog_${viewMode}_${catalogFilter}_${page}_${limit}`;
 
     setLoading(true);
     setError(null);
 
     try {
-      console.log('Fetching gallery from API');
-      const response: GalleryResponse = await api.getGallery(limit, offset, GALLERY_TIMEOUT_MS);
+      console.log('Fetching gallery catalog from API');
+      const [catalogResponse, publishStatus] = await Promise.all([
+        api.getGalleryCatalog(limit, offset, catalogFilter, GALLERY_TIMEOUT_MS),
+        api.getGallerySyncStatus(10),
+      ]);
 
       if (loadRequestRef.current !== requestId) return;
+      const response: GalleryResponse = {
+        images: catalogResponse.assets.map(toGalleryImage),
+        total: catalogResponse.total,
+        limit: catalogResponse.limit,
+        offset: catalogResponse.offset,
+      };
 
       void withTimeout(galleryCache.set(cacheKey, {
         images: response.images,
@@ -147,6 +209,7 @@ export default function Gallery() {
 
       setImages(response.images);
       setTotal(response.total);
+      setSyncStatus(publishStatus);
 
       if (viewMode === "week") {
         organizeByWeek(response.images);
@@ -173,14 +236,14 @@ export default function Gallery() {
         setError(null);
       } else {
         const message = err instanceof Error ? err.message : "Unknown error";
-        setError(`Failed to load gallery. ${message}`);
+        setError(`Failed to load gallery catalog. ${message}`);
       }
     } finally {
       if (loadRequestRef.current === requestId) {
         setLoading(false);
       }
     }
-  }, [organizeByWeek, page, viewMode]);
+  }, [catalogFilter, organizeByWeek, page, viewMode]);
 
   const getWeekNumber = (date: Date): number => {
     const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -218,6 +281,10 @@ export default function Gallery() {
     void loadImages();
   }, [loadImages]);
 
+  useEffect(() => {
+    setPage(0);
+  }, [catalogFilter, viewMode]);
+
   const handleDelete = async (imagePath: string, event: React.MouseEvent) => {
     event.stopPropagation();
     if (!confirm("Are you sure you want to delete this image?")) return;
@@ -240,6 +307,36 @@ export default function Gallery() {
       alert("Failed to delete image");
     } finally {
       setDeleting(null);
+    }
+  };
+
+  const handlePublicationChange = async (
+    image: GalleryImage,
+    state: PublicationState,
+    event?: React.MouseEvent
+  ) => {
+    event?.stopPropagation();
+    const updateKey = `${image.catalog_path}:${state}`;
+    setPublicationUpdating(updateKey);
+    try {
+      const updatedEntry = await api.updatePublicationState(image.catalog_path, state);
+      const updatedImage = toGalleryImage(updatedEntry);
+
+      setImages((currentImages) => currentImages.map((item) => (
+        item.catalog_path === image.catalog_path ? updatedImage : item
+      )));
+      setSelectedImage((currentImage) => (
+        currentImage?.catalog_path === image.catalog_path ? updatedImage : currentImage
+      ));
+
+      await withTimeout(galleryCache.clear(), CACHE_TIMEOUT_MS, undefined);
+      await loadImages();
+    } catch (err) {
+      console.error("Failed to update publication state:", err);
+      const message = err instanceof Error ? err.message : "Failed to update publication state";
+      alert(message);
+    } finally {
+      setPublicationUpdating(null);
     }
   };
 
@@ -271,10 +368,23 @@ export default function Gallery() {
   };
 
   const formatSize = (bytes: number) => {
+    if (bytes <= 0) return "Unknown size";
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
+
+  const renderStateBadge = (state: PublicationState, className?: string) => (
+    <span
+      className={cn(
+        "inline-flex items-center rounded px-2 py-0.5 text-[11px] font-medium capitalize",
+        stateStyles[state],
+        className
+      )}
+    >
+      {state}
+    </span>
+  );
 
   const renderImageGrid = (images: GalleryImage[]) => (
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2 sm:gap-3 lg:gap-4">
@@ -292,6 +402,9 @@ export default function Gallery() {
             className="w-full h-full object-cover"
             loading="lazy"
           />
+          <div className="absolute left-2 top-2">
+            {renderStateBadge(image.publication.state, "shadow-sm")}
+          </div>
 
           <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
             <div className="absolute bottom-0 left-0 right-0 p-3">
@@ -311,8 +424,24 @@ export default function Gallery() {
                 <button
                   onClick={(e) => handleDownload(image.path, image.prompt, e)}
                   className="p-1.5 bg-primary/80 hover:bg-primary rounded text-primary-foreground"
+                  title="Download image"
                 >
                   <Download className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={(e) => handlePublicationChange(image, "featured", e)}
+                  className="p-1.5 bg-amber-500/90 hover:bg-amber-500 rounded text-black disabled:opacity-50"
+                  disabled={
+                    image.publication.state === "featured"
+                    || publicationUpdating === `${image.catalog_path}:featured`
+                  }
+                  title="Mark featured"
+                >
+                  {publicationUpdating === `${image.catalog_path}:featured` ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Star className="w-3.5 h-3.5" />
+                  )}
                 </button>
               </div>
             </div>
@@ -372,12 +501,36 @@ export default function Gallery() {
       <div className="h-full flex flex-col">
         {/* Header */}
         <div className="px-4 sm:px-6 py-4 border-b border-border">
-          <div className="flex items-center justify-between">
-            <div>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
               <h2 className="text-lg font-semibold">Gallery</h2>
-              <p className="text-sm text-muted-foreground">{total} images generated</p>
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                <span>{total} cataloged images</span>
+                {syncStatus && (
+                  <span className="inline-flex items-center gap-1.5 rounded border border-border px-2 py-1 text-xs">
+                    <UploadCloud className="h-3.5 w-3.5" />
+                    {syncStatus.ready
+                      ? `${syncStatus.upload_images} approved / ${syncStatus.upload_files} files ready`
+                      : syncStatus.message}
+                  </span>
+                )}
+              </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={catalogFilter}
+                onChange={(event) => setCatalogFilter(event.target.value as CatalogFilter)}
+                className="h-8 rounded-md border border-border bg-background px-2 text-sm"
+                title="Filter by publication state"
+              >
+                <option value="all">All states</option>
+                {PUBLICATION_OPTIONS.map((option) => (
+                  <option key={option.state} value={option.state}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+
               {/* View Mode Toggle */}
               <div className="flex bg-muted rounded-md p-1">
                 <button
@@ -558,6 +711,7 @@ export default function Gallery() {
                       {formatDate(selectedImage.created_at)}
                     </span>
                     <span>{formatSize(selectedImage.size)}</span>
+                    {renderStateBadge(selectedImage.publication.state)}
                   </div>
                 </div>
                 <button
@@ -580,28 +734,70 @@ export default function Gallery() {
 
             {/* Modal Footer */}
             <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-background via-background/80 to-transparent p-4">
-              <div className="flex gap-2 justify-end">
-                <button
-                  onClick={(e) => handleDownload(selectedImage.path, selectedImage.prompt, e)}
-                  className="px-4 py-2 bg-primary text-primary-foreground rounded hover:opacity-90 flex items-center gap-2"
-                >
-                  <Download className="w-4 h-4" />
-                  Download
-                </button>
-                <button
-                  onClick={(e) => {
-                    handleDelete(selectedImage.path, e);
-                  }}
-                  className="px-4 py-2 bg-destructive text-destructive-foreground rounded hover:opacity-90 flex items-center gap-2"
-                  disabled={deleting === selectedImage.path}
-                >
-                  {deleting === selectedImage.path ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Trash2 className="w-4 h-4" />
-                  )}
-                  Delete
-                </button>
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                <div className="min-w-0">
+                  <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <span>Publish state</span>
+                    {!selectedImage.publication.publishable && (
+                      <span className="rounded border border-border px-2 py-0.5">not publishable</span>
+                    )}
+                    {selectedImage.publication.quality_flags.map((flag) => (
+                      <span key={flag} className="rounded border border-border px-2 py-0.5">
+                        {flag}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {PUBLICATION_OPTIONS.map((option) => {
+                      const Icon = option.icon;
+                      const updateKey = `${selectedImage.catalog_path}:${option.state}`;
+                      const isCurrent = selectedImage.publication.state === option.state;
+                      return (
+                        <button
+                          key={option.state}
+                          onClick={(event) => handlePublicationChange(selectedImage, option.state, event)}
+                          className={cn(
+                            "flex h-9 items-center gap-2 rounded border border-border px-3 text-sm transition-colors",
+                            isCurrent
+                              ? "bg-primary text-primary-foreground"
+                              : "bg-background/80 hover:bg-muted"
+                          )}
+                          disabled={isCurrent || publicationUpdating === updateKey}
+                        >
+                          {publicationUpdating === updateKey ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Icon className="h-4 w-4" />
+                          )}
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <button
+                    onClick={(e) => handleDownload(selectedImage.path, selectedImage.prompt, e)}
+                    className="px-4 py-2 bg-primary text-primary-foreground rounded hover:opacity-90 flex items-center gap-2"
+                  >
+                    <Download className="w-4 h-4" />
+                    Download
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      handleDelete(selectedImage.path, e);
+                    }}
+                    className="px-4 py-2 bg-destructive text-destructive-foreground rounded hover:opacity-90 flex items-center gap-2"
+                    disabled={deleting === selectedImage.path}
+                  >
+                    {deleting === selectedImage.path ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="w-4 h-4" />
+                    )}
+                    Delete
+                  </button>
+                </div>
               </div>
             </div>
           </div>

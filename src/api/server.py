@@ -26,6 +26,7 @@ from src.plugins import plugin_manager, register_lora_plugin
 from src.plugins.lora import get_available_loras
 from src.services import GenerationProgressEvent, GenerationServiceRequest, ImageGenService
 from src.utils.config import Config
+from src.utils.gallery_publisher import DEFAULT_BUCKET, build_publish_status
 from src.utils.ollama import (
     get_ollama_version,
     list_ollama_models,
@@ -1138,12 +1139,42 @@ async def get_gallery_catalog(
         normalized_state = publication_state.strip().lower()
         entries = [entry for entry in entries if entry.get("publication_state") == normalized_state]
 
+    page_entries = []
+    for entry in entries[offset : offset + limit]:
+        payload = dict(entry)
+        image_file = OUTPUT_DIR / str(entry.get("path", ""))
+        if image_file.exists():
+            payload["size"] = image_file.stat().st_size
+            payload["image_url"] = f"/images/{image_file.relative_to(OUTPUT_DIR).as_posix()}"
+        page_entries.append(payload)
+
     return {
-        "assets": entries[offset : offset + limit],
+        "assets": page_entries,
         "total": len(entries),
         "limit": limit,
         "offset": offset,
     }
+
+
+@app.get("/api/gallery/sync/status")
+async def get_gallery_sync_status(
+    bucket: str = DEFAULT_BUCKET,
+    since: Optional[str] = None,
+    limit: Optional[int] = Query(None, ge=1, le=500),
+    include_featured: bool = True,
+):
+    """Return the local catalog-driven R2 publish plan status."""
+    try:
+        return await asyncio.to_thread(
+            build_publish_status,
+            OUTPUT_DIR,
+            bucket=bucket,
+            since=since,
+            limit=limit,
+            include_featured=include_featured,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/gallery/catalog/backfill")

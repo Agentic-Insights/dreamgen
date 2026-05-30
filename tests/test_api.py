@@ -443,6 +443,51 @@ def test_publication_state_controls_gallery_visibility(client):
     assert response.status_code == 200
     assert response.json()["publication_state"] == "published"
 
+    response = client.patch(
+        f"/api/gallery/publication/{relative_path}",
+        json={"state": "featured"},
+    )
+    assert response.status_code == 200
+    assert response.json()["publication_state"] == "featured"
+
+    response = client.get("/api/gallery?limit=100&offset=0")
+    assert response.status_code == 200
+    featured_item = next(
+        item for item in response.json()["images"] if item["path"].endswith("cafefeed.png")
+    )
+    assert featured_item["publication"]["state"] == "featured"
+
+
+def test_gallery_sync_status_reports_catalog_publish_plan(client):
+    """Operators should be able to see what the R2 publish step would upload."""
+    output_root = Path(_TEST_OUTPUT_DIR)
+    week_dir = output_root / "2099" / "week_05"
+    week_dir.mkdir(parents=True, exist_ok=True)
+
+    image_path = week_dir / "image_20990105_000001_syncfeed.png"
+    image = Image.new("RGB", (64, 64), color=(20, 60, 90))
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((8, 8, 48, 48), fill=(220, 180, 60))
+    image.save(image_path)
+    image_path.with_suffix(".txt").write_text("sync me")
+    write_image_metadata(image_path, {"backend": "small-sd", "is_placeholder": False})
+
+    response = client.post("/api/gallery/catalog/backfill?default_state=published")
+    assert response.status_code == 200
+
+    response = client.get("/api/gallery/sync/status")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["bucket"] == "dreamgen-gallery"
+    assert data["catalog_present"] is True
+    assert data["ready"] is True
+    assert data["needs_publish"] is True
+    assert data["upload_images"] >= 1
+    assert data["upload_files"] >= 1
+    assert "published" in data["approved_states"]
+    assert "featured" in data["approved_states"]
+    assert any(asset["key"].endswith("syncfeed.png") for asset in data["preview_assets"])
+
 
 def test_placeholder_cannot_be_published_without_override(client):
     """Mock placeholders should stay unpublished unless the operator explicitly overrides."""
