@@ -3,9 +3,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Trash2, Download, X, Loader2, Clock, FileText,
-  Calendar, Grid, ChevronRight, Folder, Star, Eye, EyeOff, Archive,
-  UploadCloud
+  Trash2, Download, X, Loader2, Clock, FileText, Copy, Check,
+  Calendar, Grid, ChevronLeft, ChevronRight, Folder, Star, Eye, EyeOff, Archive,
+  UploadCloud, ExternalLink, Info
 } from "lucide-react";
 import {
   api,
@@ -133,9 +133,14 @@ export default function Gallery() {
   const [viewMode, setViewMode] = useState<ViewMode>("week");
   const [catalogFilter, setCatalogFilter] = useState<CatalogFilter>("all");
   const [syncStatus, setSyncStatus] = useState<GallerySyncStatus | null>(null);
+  const [copiedPromptPath, setCopiedPromptPath] = useState<string | null>(null);
   const loadRequestRef = useRef(0);
 
   const imagesPerPage = viewMode === "all" ? ALL_PAGE_SIZE : WEEK_PAGE_SIZE;
+  const selectedImageIndex = selectedImage
+    ? images.findIndex((image) => image.catalog_path === selectedImage.catalog_path)
+    : -1;
+  const canNavigateSelectedImage = selectedImageIndex >= 0 && images.length > 1;
 
   const organizeByWeek = useCallback((images: GalleryImage[]) => {
     const groups = new Map<string, WeekGroup>();
@@ -285,6 +290,37 @@ export default function Gallery() {
     setPage(0);
   }, [catalogFilter, viewMode]);
 
+  const getImageUrl = (imagePath: string) => `${API_BASE}${imagePath}`;
+
+  const selectAdjacentImage = useCallback((direction: -1 | 1) => {
+    if (!selectedImage || images.length <= 1) return;
+
+    const currentIndex = images.findIndex((image) => (
+      image.catalog_path === selectedImage.catalog_path
+    ));
+    if (currentIndex < 0) return;
+
+    const nextIndex = (currentIndex + direction + images.length) % images.length;
+    setSelectedImage(images[nextIndex]);
+  }, [images, selectedImage]);
+
+  useEffect(() => {
+    if (!selectedImage) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setSelectedImage(null);
+      } else if (event.key === "ArrowLeft") {
+        selectAdjacentImage(-1);
+      } else if (event.key === "ArrowRight") {
+        selectAdjacentImage(1);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectAdjacentImage, selectedImage]);
+
   const handleDelete = async (imagePath: string, event: React.MouseEvent) => {
     event.stopPropagation();
     if (!confirm("Are you sure you want to delete this image?")) return;
@@ -343,12 +379,35 @@ export default function Gallery() {
   const handleDownload = (imagePath: string, prompt: string, event: React.MouseEvent) => {
     event.stopPropagation();
     const link = document.createElement("a");
-    link.href = `${API_BASE}${imagePath}`;
+    link.href = getImageUrl(imagePath);
     const filename = imagePath.split("/").pop() || "image.png";
     link.download = filename;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const handleCopyPrompt = async (image: GalleryImage, event: React.MouseEvent) => {
+    event.stopPropagation();
+    if (!image.prompt.trim()) return;
+
+    try {
+      await navigator.clipboard.writeText(image.prompt);
+      setCopiedPromptPath(image.catalog_path);
+      window.setTimeout(() => {
+        setCopiedPromptPath((currentPath) => (
+          currentPath === image.catalog_path ? null : currentPath
+        ));
+      }, 1600);
+    } catch (err) {
+      console.error("Failed to copy prompt:", err);
+      alert("Failed to copy prompt");
+    }
+  };
+
+  const handleOpenOriginal = (image: GalleryImage, event: React.MouseEvent) => {
+    event.stopPropagation();
+    window.open(getImageUrl(image.path), "_blank", "noopener,noreferrer");
   };
 
   const formatDate = (dateString: string) => {
@@ -374,6 +433,39 @@ export default function Gallery() {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
+  const formatMetadataValue = (value: unknown) => {
+    if (value === null || value === undefined || value === "") return "n/a";
+    if (typeof value === "boolean") return value ? "yes" : "no";
+    if (typeof value === "number") return Number.isInteger(value) ? String(value) : value.toFixed(3);
+    return String(value);
+  };
+
+  const getMetadataRows = (image: GalleryImage) => {
+    const preferredKeys = [
+      "backend",
+      "configured_backend",
+      "model",
+      "device",
+      "seed",
+      "width",
+      "height",
+      "steps",
+      "num_inference_steps",
+      "guidance_scale",
+      "true_cfg_scale",
+    ];
+
+    return preferredKeys
+      .filter((key) => Object.prototype.hasOwnProperty.call(image.metadata, key))
+      .map((key) => ({
+        key,
+        label: key.replaceAll("_", " "),
+        value: formatMetadataValue(image.metadata[key]),
+      }));
+  };
+
+  const selectedMetadataRows = selectedImage ? getMetadataRows(selectedImage) : [];
+
   const renderStateBadge = (state: PublicationState, className?: string) => (
     <span
       className={cn(
@@ -397,7 +489,7 @@ export default function Gallery() {
           onClick={() => setSelectedImage(image)}
         >
           <img
-            src={`${API_BASE}${image.path}`}
+            src={getImageUrl(image.path)}
             alt={image.prompt}
             className="w-full h-full object-cover"
             loading="lazy"
@@ -626,7 +718,7 @@ export default function Gallery() {
                             onClick={(e) => e.stopPropagation()}
                           >
                             <img
-                              src={`${API_BASE}${img.path}`}
+                              src={getImageUrl(img.path)}
                               alt=""
                               className="w-full h-full object-cover"
                             />
@@ -690,119 +782,221 @@ export default function Gallery() {
         )}
       </div>
 
-      {/* Modal for selected image */}
-      {selectedImage && (
-        <div
-          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
-          onClick={() => setSelectedImage(null)}
-        >
-          <div
-            className="relative max-w-6xl max-h-[90vh] bg-background rounded-lg overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
+      <AnimatePresence>
+        {selectedImage && (
+          <motion.div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/82 p-2 backdrop-blur-sm sm:p-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setSelectedImage(null)}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Gallery image preview"
           >
-            {/* Modal Header */}
-            <div className="absolute top-0 left-0 right-0 bg-gradient-to-b from-background via-background/80 to-transparent p-4 z-10">
-              <div className="flex items-start justify-between">
-                <div className="flex-1 mr-4">
-                  <p className="text-sm font-medium line-clamp-2">{selectedImage.prompt}</p>
-                  <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
-                    <span className="flex items-center gap-1">
-                      <Clock className="w-3 h-3" />
-                      {formatDate(selectedImage.created_at)}
+            <motion.div
+              className="grid h-full max-h-[94vh] w-full max-w-7xl overflow-hidden rounded-lg border border-border bg-background shadow-2xl lg:grid-cols-[minmax(0,1fr)_380px]"
+              initial={{ opacity: 0, scale: 0.98, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.98, y: 10 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="relative flex min-h-[45vh] items-center justify-center bg-black">
+                <div className="absolute left-3 top-3 z-10 flex items-center gap-2">
+                  {renderStateBadge(selectedImage.publication.state, "shadow-sm")}
+                  {selectedImageIndex >= 0 && (
+                    <span className="rounded bg-black/65 px-2 py-1 text-xs text-white">
+                      {selectedImageIndex + 1} / {images.length}
                     </span>
-                    <span>{formatSize(selectedImage.size)}</span>
-                    {renderStateBadge(selectedImage.publication.state)}
-                  </div>
+                  )}
                 </div>
-                <button
-                  onClick={() => setSelectedImage(null)}
-                  className="p-2 hover:bg-muted rounded-lg transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
+
+                {canNavigateSelectedImage && (
+                  <>
+                    <button
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        selectAdjacentImage(-1);
+                      }}
+                      className="absolute left-3 top-1/2 z-10 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/65 text-white transition hover:bg-black/85"
+                      title="Previous image"
+                      aria-label="Previous image"
+                    >
+                      <ChevronLeft className="h-5 w-5" />
+                    </button>
+                    <button
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        selectAdjacentImage(1);
+                      }}
+                      className="absolute right-3 top-1/2 z-10 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/65 text-white transition hover:bg-black/85"
+                      title="Next image"
+                      aria-label="Next image"
+                    >
+                      <ChevronRight className="h-5 w-5" />
+                    </button>
+                  </>
+                )}
+
+                <img
+                  src={getImageUrl(selectedImage.path)}
+                  alt={selectedImage.prompt}
+                  className="max-h-full max-w-full object-contain"
+                />
               </div>
-            </div>
 
-            {/* Modal Body - Image */}
-            <div className="flex items-center justify-center">
-              <img
-                src={`${API_BASE}${selectedImage.path}`}
-                alt={selectedImage.prompt}
-                className="max-w-full max-h-[80vh] object-contain"
-              />
-            </div>
-
-            {/* Modal Footer */}
-            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-background via-background/80 to-transparent p-4">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-                <div className="min-w-0">
-                  <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <span>Publish state</span>
-                    {!selectedImage.publication.publishable && (
-                      <span className="rounded border border-border px-2 py-0.5">not publishable</span>
-                    )}
-                    {selectedImage.publication.quality_flags.map((flag) => (
-                      <span key={flag} className="rounded border border-border px-2 py-0.5">
-                        {flag}
-                      </span>
-                    ))}
+              <aside className="flex min-h-0 flex-col border-t border-border bg-background lg:border-l lg:border-t-0">
+                <div className="flex items-start justify-between gap-3 border-b border-border p-4">
+                  <div className="min-w-0">
+                    <div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                      <Info className="h-3.5 w-3.5" />
+                      Review
+                    </div>
+                    <p className="line-clamp-4 text-sm font-medium leading-6 text-foreground">
+                      {selectedImage.prompt || "No prompt saved for this image."}
+                    </p>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    {PUBLICATION_OPTIONS.map((option) => {
-                      const Icon = option.icon;
-                      const updateKey = `${selectedImage.catalog_path}:${option.state}`;
-                      const isCurrent = selectedImage.publication.state === option.state;
-                      return (
-                        <button
-                          key={option.state}
-                          onClick={(event) => handlePublicationChange(selectedImage, option.state, event)}
-                          className={cn(
-                            "flex h-9 items-center gap-2 rounded border border-border px-3 text-sm transition-colors",
-                            isCurrent
-                              ? "bg-primary text-primary-foreground"
-                              : "bg-background/80 hover:bg-muted"
-                          )}
-                          disabled={isCurrent || publicationUpdating === updateKey}
-                        >
-                          {publicationUpdating === updateKey ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Icon className="h-4 w-4" />
-                          )}
-                          {option.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-                <div className="flex gap-2 justify-end">
                   <button
-                    onClick={(e) => handleDownload(selectedImage.path, selectedImage.prompt, e)}
-                    className="px-4 py-2 bg-primary text-primary-foreground rounded hover:opacity-90 flex items-center gap-2"
+                    onClick={() => setSelectedImage(null)}
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                    title="Close preview"
+                    aria-label="Close preview"
                   >
-                    <Download className="w-4 h-4" />
-                    Download
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      handleDelete(selectedImage.path, e);
-                    }}
-                    className="px-4 py-2 bg-destructive text-destructive-foreground rounded hover:opacity-90 flex items-center gap-2"
-                    disabled={deleting === selectedImage.path}
-                  >
-                    {deleting === selectedImage.path ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="w-4 h-4" />
-                    )}
-                    Delete
+                    <X className="h-4 w-4" />
                   </button>
                 </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+
+                <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                  <div className="grid gap-3 text-sm">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="rounded-md border border-border bg-muted/30 p-3">
+                        <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Created</div>
+                        <div className="mt-1 flex items-center gap-1.5 text-xs text-foreground">
+                          <Clock className="h-3.5 w-3.5 text-primary" />
+                          {formatDate(selectedImage.created_at)}
+                        </div>
+                      </div>
+                      <div className="rounded-md border border-border bg-muted/30 p-3">
+                        <div className="text-[11px] uppercase tracking-wide text-muted-foreground">File</div>
+                        <div className="mt-1 truncate text-xs text-foreground">{formatSize(selectedImage.size)}</div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-md border border-border bg-muted/30 p-3">
+                      <div className="mb-2 text-[11px] uppercase tracking-wide text-muted-foreground">Path</div>
+                      <div className="break-all font-mono text-xs text-foreground">{selectedImage.catalog_path}</div>
+                    </div>
+
+                    <div className="rounded-md border border-border bg-muted/30 p-3">
+                      <div className="mb-2 flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-wide text-muted-foreground">
+                        <span>Publication</span>
+                        {!selectedImage.publication.publishable && (
+                          <span className="rounded border border-border px-2 py-0.5 normal-case tracking-normal">
+                            not publishable
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {PUBLICATION_OPTIONS.map((option) => {
+                          const Icon = option.icon;
+                          const updateKey = `${selectedImage.catalog_path}:${option.state}`;
+                          const isCurrent = selectedImage.publication.state === option.state;
+                          return (
+                            <button
+                              key={option.state}
+                              onClick={(event) => handlePublicationChange(selectedImage, option.state, event)}
+                              className={cn(
+                                "flex h-9 items-center gap-2 rounded-md border px-3 text-sm transition-colors",
+                                isCurrent
+                                  ? "border-primary bg-primary text-primary-foreground"
+                                  : "border-border bg-background/80 hover:bg-muted"
+                              )}
+                              disabled={isCurrent || publicationUpdating === updateKey}
+                            >
+                              {publicationUpdating === updateKey ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Icon className="h-4 w-4" />
+                              )}
+                              {option.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {selectedImage.publication.quality_flags.length > 0 && (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {selectedImage.publication.quality_flags.map((flag) => (
+                            <span key={flag} className="rounded border border-border px-2 py-0.5 text-xs text-muted-foreground">
+                              {flag}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {selectedMetadataRows.length > 0 && (
+                      <div className="rounded-md border border-border bg-muted/30 p-3">
+                        <div className="mb-2 text-[11px] uppercase tracking-wide text-muted-foreground">Metadata</div>
+                        <dl className="grid gap-2">
+                          {selectedMetadataRows.map((row) => (
+                            <div key={row.key} className="grid grid-cols-[120px_minmax(0,1fr)] gap-3 text-xs">
+                              <dt className="capitalize text-muted-foreground">{row.label}</dt>
+                              <dd className="break-words font-medium text-foreground">{row.value}</dd>
+                            </div>
+                          ))}
+                        </dl>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="border-t border-border p-4">
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={(event) => handleCopyPrompt(selectedImage, event)}
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border bg-background text-sm transition hover:bg-muted"
+                      disabled={!selectedImage.prompt.trim()}
+                    >
+                      {copiedPromptPath === selectedImage.catalog_path ? (
+                        <Check className="h-4 w-4 text-emerald-500" />
+                      ) : (
+                        <Copy className="h-4 w-4" />
+                      )}
+                      {copiedPromptPath === selectedImage.catalog_path ? "Copied" : "Prompt"}
+                    </button>
+                    <button
+                      onClick={(event) => handleOpenOriginal(selectedImage, event)}
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border bg-background text-sm transition hover:bg-muted"
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                      Open
+                    </button>
+                    <button
+                      onClick={(event) => handleDownload(selectedImage.path, selectedImage.prompt, event)}
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-primary text-sm text-primary-foreground transition hover:opacity-90"
+                    >
+                      <Download className="h-4 w-4" />
+                      Download
+                    </button>
+                    <button
+                      onClick={(event) => handleDelete(selectedImage.path, event)}
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-destructive text-sm text-destructive-foreground transition hover:opacity-90"
+                      disabled={deleting === selectedImage.path}
+                    >
+                      {deleting === selectedImage.path ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-4 w-4" />
+                      )}
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </aside>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </>
   );
 }
