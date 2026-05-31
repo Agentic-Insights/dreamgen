@@ -11,6 +11,14 @@ from .image_generation import (
     GenerationServiceResult,
     ImageGenService,
 )
+from .workflow_recipes import (
+    ResolvedWorkflowRecipe,
+    WorkflowRecipe,
+    apply_config_overrides,
+    get_workflow_recipe,
+    list_workflow_recipes,
+    resolve_workflow_recipe,
+)
 
 __all__ = [
     "GenerationJobCreate",
@@ -18,6 +26,12 @@ __all__ = [
     "GenerationServiceRequest",
     "GenerationServiceResult",
     "ImageGenService",
+    "ResolvedWorkflowRecipe",
     "SQLiteGenerationJobStore",
+    "WorkflowRecipe",
+    "apply_config_overrides",
+    "get_workflow_recipe",
     "job_payload_from_service_request",
+    "list_workflow_recipes",
+    "resolve_workflow_recipe",
 ]

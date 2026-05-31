@@ -45,7 +45,13 @@ from ..generators.factory import (
 )
 from ..generators.prompt_generator import PromptGenerator
 from ..plugins import ensure_initialized, plugin_manager
-from ..services import GenerationProgressEvent, GenerationServiceRequest, ImageGenService
+from ..services import (
+    GenerationProgressEvent,
+    GenerationServiceRequest,
+    ImageGenService,
+    apply_config_overrides,
+    resolve_workflow_recipe,
+)
 from .config import Config
 from .logging_config import setup_logging
 from .metrics import MetricsCollector
@@ -388,6 +394,11 @@ def generate(
         "--model",
         help="Override the image backend for this run (flux, ollama, zimage, qwen, small, turbo, smoke, mock)",
     ),
+    recipe: Optional[str] = typer.Option(
+        None,
+        "--recipe",
+        help="Run a built-in workflow recipe (for example text2img-default or mock-smoke)",
+    ),
     mock: bool = typer.Option(
         False,
         "--mock",
@@ -416,124 +427,151 @@ def generate(
                 transient=True,  # Hide finished tasks
             ) as progress:
                 try:
-                    # Update config with CLI options
-                    app.state.config.system.mps_use_fp16 = mps_use_fp16
+                    recipe_resolution = (
+                        resolve_workflow_recipe(recipe, prompt=prompt) if recipe else None
+                    )
+                    config_overrides = (
+                        recipe_resolution.config_overrides if recipe_resolution else {}
+                    )
+                    with apply_config_overrides(app.state.config, config_overrides):
+                        # Update config with CLI options
+                        app.state.config.system.mps_use_fp16 = mps_use_fp16
 
-                    resolved_backend = resolve_backend_with_overrides(
-                        backend_override=backend, mock=mock
-                    )
-                    validation_errors = validate_generation_config(
-                        app.state.config, resolved_backend
-                    )
-                    if validation_errors:
-                        for error in validation_errors:
-                            console.print(f"[red]Configuration error:[/red] {error}")
-                        raise typer.Exit(1)
+                        resolved_backend = resolve_backend_with_overrides(
+                            backend_override=backend, mock=mock
+                        )
+                        validation_errors = validate_generation_config(
+                            app.state.config, resolved_backend
+                        )
+                        if validation_errors:
+                            for error in validation_errors:
+                                console.print(f"[red]Configuration error:[/red] {error}")
+                            raise typer.Exit(1)
 
-                    # Initialize components
-                    init_task = progress.add_task(
-                        "[cyan]Initializing generation service...", total=None
-                    )
-                    if mock:
+                        # Initialize components
+                        init_task = progress.add_task(
+                            "[cyan]Initializing generation service...", total=None
+                        )
+                        if mock:
+                            console.print(
+                                "[yellow]Using mock image generator (no GPU required)[/yellow]"
+                            )
+                        if recipe_resolution:
+                            console.print(
+                                f"[cyan]Using workflow recipe:[/cyan] "
+                                f"{recipe_resolution.recipe.id}@{recipe_resolution.recipe.version}"
+                            )
+                        service = ImageGenService(
+                            app.state.config, output_dir=app.state.config.system.output_dir
+                        )
+                        metrics = MetricsCollector(app.state.config.system.log_dir / "metrics")
+                        progress.remove_task(init_task)
+
                         console.print(
-                            "[yellow]Using mock image generator (no GPU required)[/yellow]"
+                            f"[cyan]Using image backend:[/cyan] {resolved_backend} "
+                            f"(resolved: {resolved_backend}, "
+                            f"requested: {_requested_backend_name(app.state.config, backend, mock)})"
                         )
-                    service = ImageGenService(
-                        app.state.config, output_dir=app.state.config.system.output_dir
-                    )
-                    metrics = MetricsCollector(app.state.config.system.log_dir / "metrics")
-                    progress.remove_task(init_task)
 
-                    console.print(
-                        f"[cyan]Using image backend:[/cyan] {resolved_backend} "
-                        f"(resolved: {resolved_backend}, "
-                        f"requested: {_requested_backend_name(app.state.config, backend, mock)})"
-                    )
+                        # Start metrics collection
+                        metrics.start_batch()
 
-                    # Start metrics collection
-                    metrics.start_batch()
-
-                    generation_prompt = prompt
-                    if not prompt and interactive:
-                        prompt_gen = PromptGenerator(app.state.config)
-                        prompt_task = progress.add_task(
-                            "[cyan]Generating creative prompt...", total=None
+                        generation_prompt = (
+                            recipe_resolution.prompt if recipe_resolution else prompt
                         )
+                        generation_meta_prompt = (
+                            recipe_resolution.meta_prompt if recipe_resolution else None
+                        )
+                        generation_metadata = (
+                            recipe_resolution.metadata if recipe_resolution else {}
+                        )
+                        publication_state = (
+                            recipe_resolution.publication_state if recipe_resolution else "draft"
+                        )
+                        if not generation_prompt and interactive:
+                            prompt_gen = PromptGenerator(app.state.config)
+                            prompt_task = progress.add_task(
+                                "[cyan]Generating creative prompt...", total=None
+                            )
+                            try:
+                                generation_prompt = await prompt_gen.get_prompt_with_feedback()
+                            finally:
+                                progress.remove_task(prompt_task)
+                                prompt_gen.cleanup()
+
+                        # Generate image
+                        image_task = progress.add_task("[cyan]Generating image...", total=None)
                         try:
-                            generation_prompt = await prompt_gen.get_prompt_with_feedback()
-                        finally:
-                            progress.remove_task(prompt_task)
-                            prompt_gen.cleanup()
-
-                    # Generate image
-                    image_task = progress.add_task("[cyan]Generating image...", total=None)
-                    try:
-                        with temporary_backend_override(app.state.config, backend, mock):
-                            result = await await_with_generation_status(
-                                service.generate(
-                                    GenerationServiceRequest(
-                                        prompt=generation_prompt,
-                                        cleanup=True,
+                            with temporary_backend_override(app.state.config, backend, mock):
+                                result = await await_with_generation_status(
+                                    service.generate(
+                                        GenerationServiceRequest(
+                                            prompt=generation_prompt,
+                                            meta_prompt=generation_meta_prompt,
+                                            publication_state=publication_state,
+                                            metadata=generation_metadata,
+                                            cleanup=True,
+                                        ),
+                                        callback=print_generation_service_event,
                                     ),
-                                    callback=print_generation_service_event,
-                                ),
-                                backend_name=resolved_backend,
-                                phase="Image generation",
-                                output_path=None,
+                                    backend_name=resolved_backend,
+                                    phase="Image generation",
+                                    output_path=None,
+                                )
+                        except Exception as e:
+                            console.print(
+                                f"[red]Generation failed[/red]\n"
+                                f"Backend: {resolved_backend}\n"
+                                "Phase: image generation\n"
+                                f"Error: {str(e)}"
                             )
-                    except Exception as e:
+                            raise typer.Exit(1) from e
+                        finally:
+                            progress.remove_task(image_task)
+
                         console.print(
-                            f"[red]Generation failed[/red]\n"
-                            f"Backend: {resolved_backend}\n"
-                            "Phase: image generation\n"
-                            f"Error: {str(e)}"
+                            f"[cyan]Model/provider:[/cyan] {result.model_name}; "
+                            f"backend: {result.backend}"
                         )
-                        raise typer.Exit(1) from e
-                    finally:
-                        progress.remove_task(image_task)
-
-                    console.print(
-                        f"[cyan]Model/provider:[/cyan] {result.model_name}; "
-                        f"backend: {result.backend}"
-                    )
-                    console.print(
-                        f"[green]Image received and saved[/green] ({result.generation_time:.1f}s)"
-                    )
-
-                    # Show success message with details
-                    console.print(
-                        Panel(
-                            f"[bold green]Image generated successfully![/bold green]\n\n"
-                            f"Saved to: {result.image_path}\n"
-                            f"Prompt saved to: {result.image_path.with_suffix('.txt')}\n\n"
-                            f"[dim]Model: {result.model_name}\n"
-                            f"Backend: {result.backend}\n"
-                            f"Time: {result.generation_time:.1f}s\n"
-                            f"Prompt: {result.prompt}[/dim]",
-                            title="Success",
-                            border_style="green",
+                        console.print(
+                            f"[green]Image received and saved[/green] "
+                            f"({result.generation_time:.1f}s)"
                         )
-                    )
-                    if summary_json:
-                        print(
-                            json.dumps(
-                                {
-                                    "image_path": str(result.image_path),
-                                    "prompt_path": str(result.image_path.with_suffix(".txt")),
-                                    "relative_image_path": result.relative_image_path,
-                                    "prompt": result.prompt,
-                                    "backend": result.backend,
-                                    "model": result.model_name,
-                                    "generation_time": result.generation_time,
-                                    "metadata": result.metadata,
-                                    "created_at": result.created_at,
-                                },
-                                sort_keys=True,
+
+                        # Show success message with details
+                        console.print(
+                            Panel(
+                                f"[bold green]Image generated successfully![/bold green]\n\n"
+                                f"Saved to: {result.image_path}\n"
+                                f"Prompt saved to: {result.image_path.with_suffix('.txt')}\n\n"
+                                f"[dim]Model: {result.model_name}\n"
+                                f"Backend: {result.backend}\n"
+                                f"Time: {result.generation_time:.1f}s\n"
+                                f"Prompt: {result.prompt}[/dim]",
+                                title="Success",
+                                border_style="green",
                             )
                         )
+                        if summary_json:
+                            print(
+                                json.dumps(
+                                    {
+                                        "image_path": str(result.image_path),
+                                        "prompt_path": str(result.image_path.with_suffix(".txt")),
+                                        "relative_image_path": result.relative_image_path,
+                                        "prompt": result.prompt,
+                                        "backend": result.backend,
+                                        "model": result.model_name,
+                                        "generation_time": result.generation_time,
+                                        "metadata": result.metadata,
+                                        "created_at": result.created_at,
+                                    },
+                                    sort_keys=True,
+                                )
+                            )
 
-                    # End metrics collection
-                    metrics.end_batch()
+                        # End metrics collection
+                        metrics.end_batch()
 
                 except typer.Exit:
                     raise

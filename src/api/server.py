@@ -38,6 +38,10 @@ from src.services import (
     GenerationProgressEvent,
     ImageGenService,
     SQLiteGenerationJobStore,
+    apply_config_overrides,
+    get_workflow_recipe,
+    list_workflow_recipes,
+    resolve_workflow_recipe,
 )
 from src.utils.config import Config
 from src.utils.gallery_publisher import DEFAULT_BUCKET, build_publish_status
@@ -306,6 +310,7 @@ class GenerateRequest(BaseModel):
     prompt: Optional[str] = Field(None, description="Optional custom prompt")
     enable_plugins: bool = Field(True, description="Enable plugin enhancements")
     seed: Optional[int] = Field(None, description="Random seed for reproducibility")
+    recipe_id: Optional[str] = Field(None, description="Optional workflow recipe ID")
     client_request_id: Optional[str] = Field(
         None, description="Client-provided request ID used to correlate progress events"
     )
@@ -327,6 +332,7 @@ class JobCreateRequest(BaseModel):
     prompt: Optional[str] = Field(None, description="Optional custom prompt")
     meta_prompt: Optional[str] = Field(None, description="Optional prompt-generation steering text")
     seed: Optional[int] = Field(None, description="Random seed for reproducibility")
+    recipe_id: Optional[str] = Field(None, description="Optional workflow recipe ID")
     publication_state: str = Field("draft", description="Initial publication state")
     client_request_id: Optional[str] = Field(
         None, description="Client-provided request ID used to correlate progress events"
@@ -392,6 +398,18 @@ class PromptResponse(BaseModel):
     """Response model for prompt generation."""
 
     prompt: str = Field(..., description="Generated prompt text")
+
+
+class RecipeResolveRequest(BaseModel):
+    """Request model for resolving a workflow recipe into a job payload."""
+
+    prompt: Optional[str] = Field(None, description="Optional prompt override")
+    meta_prompt: Optional[str] = Field(None, description="Optional meta-prompt override")
+    seed: Optional[int] = Field(None, description="Optional seed override")
+    client_request_id: Optional[str] = Field(
+        None, description="Client-provided request ID used to correlate progress events"
+    )
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Extra request metadata")
 
 
 class SystemStatus(BaseModel):
@@ -571,7 +589,11 @@ async def run_generation_job(job_id: str):
 
         try:
             service = ImageGenService(config, output_dir=OUTPUT_DIR)
-            result = await service.generate(job_payload.to_service_request(job_id), callback=emit)
+            with apply_config_overrides(config, job_payload.config_overrides):
+                result = await service.generate(
+                    job_payload.to_service_request(job_id),
+                    callback=emit,
+                )
             generation_job_store.complete_job(
                 job_id,
                 prompt=result.prompt,
@@ -611,6 +633,38 @@ async def run_generation_job_safely(job_id: str) -> None:
         await run_generation_job(job_id)
     except Exception as exc:
         logger.error("Generation job %s failed: %s", job_id, exc)
+
+
+def generation_job_from_request(
+    *,
+    prompt: Optional[str],
+    meta_prompt: Optional[str],
+    seed: Optional[int],
+    publication_state: str,
+    client_request_id: Optional[str],
+    metadata: Dict[str, Any] | None = None,
+    recipe_id: Optional[str] = None,
+) -> GenerationJobCreate:
+    """Build a job creation payload, resolving a workflow recipe when requested."""
+    if not recipe_id:
+        return GenerationJobCreate(
+            prompt=prompt,
+            meta_prompt=meta_prompt,
+            seed=seed,
+            publication_state=publication_state,
+            client_request_id=client_request_id,
+            metadata=metadata or {},
+        )
+
+    resolution = resolve_workflow_recipe(
+        recipe_id,
+        prompt=prompt,
+        meta_prompt=meta_prompt,
+        seed=seed,
+        metadata=metadata,
+    )
+    payload = resolution.to_job_payload(client_request_id=client_request_id)
+    return GenerationJobCreate(**payload)
 
 
 async def prefetch_default_fallback_model() -> None:
@@ -1141,6 +1195,43 @@ async def set_generation_config(data: dict):
         raise HTTPException(status_code=500, detail=f"Failed to update configuration: {str(e)}")
 
 
+@app.get("/api/recipes")
+async def get_workflow_recipes():
+    """List built-in workflow recipes."""
+    return {"recipes": [recipe.summary() for recipe in list_workflow_recipes()]}
+
+
+@app.get("/api/recipes/{recipe_id}")
+async def get_workflow_recipe_detail(recipe_id: str):
+    """Return a built-in workflow recipe definition."""
+    try:
+        return get_workflow_recipe(recipe_id).to_dict()
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/api/recipes/{recipe_id}/resolve")
+async def resolve_workflow_recipe_endpoint(recipe_id: str, request: RecipeResolveRequest):
+    """Resolve a workflow recipe into a generation job payload."""
+    try:
+        resolution = resolve_workflow_recipe(
+            recipe_id,
+            prompt=request.prompt,
+            meta_prompt=request.meta_prompt,
+            seed=request.seed,
+            metadata=request.metadata,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {
+        "recipe": resolution.recipe.to_dict(),
+        "job_request": resolution.to_job_payload(client_request_id=request.client_request_id),
+    }
+
+
 @app.post("/api/prompt", response_model=PromptResponse)
 async def generate_prompt(request: PromptRequest):
     """Generate a prompt without creating an image."""
@@ -1181,13 +1272,22 @@ async def generate_prompt(request: PromptRequest):
 @app.post("/api/generate", response_model=GenerateResponse)
 async def generate_image(request: GenerateRequest):
     """Generate a single image"""
-    job = generation_job_store.create_job(
-        GenerationJobCreate(
-            prompt=request.prompt,
-            seed=request.seed,
-            client_request_id=request.client_request_id,
+    try:
+        job = generation_job_store.create_job(
+            generation_job_from_request(
+                prompt=request.prompt,
+                meta_prompt=None,
+                seed=request.seed,
+                publication_state="draft",
+                client_request_id=request.client_request_id,
+                recipe_id=request.recipe_id,
+            )
         )
-    )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     generation_id = job["id"]
     try:
         result = await run_generation_job(generation_id)
@@ -1214,16 +1314,23 @@ async def generate_image(request: GenerateRequest):
 @app.post("/api/jobs")
 async def create_generation_job(request: JobCreateRequest, background_tasks: BackgroundTasks):
     """Create a durable generation job and schedule it on the local worker."""
-    job = generation_job_store.create_job(
-        GenerationJobCreate(
-            prompt=request.prompt,
-            meta_prompt=request.meta_prompt,
-            seed=request.seed,
-            publication_state=request.publication_state,
-            client_request_id=request.client_request_id,
-            metadata=request.metadata,
+    try:
+        job = generation_job_store.create_job(
+            generation_job_from_request(
+                prompt=request.prompt,
+                meta_prompt=request.meta_prompt,
+                seed=request.seed,
+                publication_state=request.publication_state,
+                client_request_id=request.client_request_id,
+                metadata=request.metadata,
+                recipe_id=request.recipe_id,
+            )
         )
-    )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     background_tasks.add_task(run_generation_job_safely, job["id"])
     return job
 

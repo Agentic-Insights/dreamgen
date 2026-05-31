@@ -1,0 +1,21 @@
+{
+  "id": "zimage-lora",
+  "version": 1,
+  "name": "Z-Image LoRA",
+  "description": "Prefer the local Z-Image backend while allowing configured LoRA selection.",
+  "mode": "text2img",
+  "backend_preference": "zimage",
+  "prompt_strategy": {
+    "type": "generated",
+    "meta_prompt": "Create a detailed image prompt that can benefit from active LoRA style modifiers."
+  },
+  "image": {},
+  "plugins": {},
+  "lora": {
+    "application_probability": 1.0
+  },
+  "publication": {
+    "state": "draft"
+  },
+  "post_processing": []
+}

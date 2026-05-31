@@ -1,0 +1,27 @@
+{
+  "id": "mock-smoke",
+  "version": 1,
+  "name": "Mock Smoke",
+  "description": "Generate a deterministic placeholder image for API, CLI, and job smoke tests.",
+  "mode": "text2img",
+  "backend_preference": "mock",
+  "prompt_strategy": {
+    "type": "fixed",
+    "prompt": "DreamGen mock smoke test image"
+  },
+  "image": {
+    "width": 512,
+    "height": 512
+  },
+  "plugins": {
+    "enabled": []
+  },
+  "lora": {
+    "enabled_loras": [],
+    "application_probability": 0.0
+  },
+  "publication": {
+    "state": "draft"
+  },
+  "post_processing": []
+}
