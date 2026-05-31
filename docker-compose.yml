@@ -54,7 +54,7 @@ services:
       - TRUE_CFG_SCALE=${TRUE_CFG_SCALE:-1.0}
       - MAX_SEQUENCE_LENGTH=${MAX_SEQUENCE_LENGTH:-512}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - CORS_ORIGINS=http://localhost:${FRONTEND_PORT:-7860},http://127.0.0.1:${FRONTEND_PORT:-7860},http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:${FRONTEND_PORT:-7860},http://127.0.0.1:${FRONTEND_PORT:-7860},http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
@@ -70,13 +70,14 @@ services:
       context: .
       dockerfile: Dockerfile.frontend
       args:
-        - NEXT_PUBLIC_API_URL=http://localhost:${BACKEND_PORT:-25800}
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:${BACKEND_PORT:-25800}}
     container_name: imagegen-frontend
     ports:
       - "${FRONTEND_PORT:-7860}:7860"
     environment:
       - NODE_ENV=production
-      - NEXT_PUBLIC_API_URL=http://localhost:${BACKEND_PORT:-25800}
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:${BACKEND_PORT:-25800}}
+      - NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL:-http://localhost:${FRONTEND_PORT:-7860}}
       - PORT=7860
     depends_on:
       - backend
