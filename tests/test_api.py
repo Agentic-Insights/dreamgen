@@ -192,6 +192,10 @@ def test_generation_config_endpoint(client):
 
     data = response.json()
     assert data["image_backend"] == "mock"
+    assert data["prompt_model"] == "llama3.2:3b"
+    assert data["image_model"] == "mock generator"
+    assert data["pipeline"]["prompt"]["model"] == "llama3.2:3b"
+    assert data["pipeline"]["image"]["backend"] == "mock"
     assert isinstance(data["enabled_loras"], list)
     assert isinstance(data["available_loras"], list)
     assert "lora_application_probability" in data
@@ -204,6 +208,7 @@ def test_generation_config_endpoint(client):
 def test_set_generation_config_updates_backend_and_loras(client):
     """Runtime generation settings should accept backend and LoRA updates."""
     original_backend = api_config.model.image_backend
+    original_ollama_model = api_config.model.ollama_model
     original_ollama_image_model = api_config.model.ollama_image_model
     original_qwen_prompt_magic = api_config.model.qwen_prompt_magic
     original_qwen_device_map = api_config.model.qwen_device_map
@@ -215,6 +220,7 @@ def test_set_generation_config_updates_backend_and_loras(client):
             "/api/config/generation",
             json={
                 "image_backend": "small",
+                "ollama_model": "qwen3.6:27b",
                 "ollama_image_model": "x/z-image-turbo:latest",
                 "qwen_prompt_magic": False,
                 "qwen_device_map": "none",
@@ -226,12 +232,18 @@ def test_set_generation_config_updates_backend_and_loras(client):
 
         data = response.json()["config"]
         assert data["image_backend"] == "small"
+        assert data["ollama_model"] == "qwen3.6:27b"
+        assert data["prompt_model"] == "qwen3.6:27b"
+        assert data["image_model"] == api_config.model.small_sd_model
+        assert data["pipeline"]["prompt"]["model"] == "qwen3.6:27b"
+        assert data["pipeline"]["image"]["model"] == api_config.model.small_sd_model
         assert data["ollama_image_model"] == "x/z-image-turbo:latest"
         assert data["qwen_prompt_magic"] is False
         assert data["qwen_device_map"] == "none"
         assert data["enabled_loras"] == ["pixel-art", "comic"]
         assert data["lora_application_probability"] == 0.25
         assert api_config.model.image_backend == "small"
+        assert api_config.model.ollama_model == "qwen3.6:27b"
         assert api_config.model.ollama_image_model == "x/z-image-turbo:latest"
         assert api_config.model.qwen_prompt_magic is False
         assert api_config.model.qwen_device_map == "none"
@@ -239,6 +251,7 @@ def test_set_generation_config_updates_backend_and_loras(client):
         assert api_config.model.lora.application_probability == 0.25
     finally:
         api_config.model.image_backend = original_backend
+        api_config.model.ollama_model = original_ollama_model
         api_config.model.ollama_image_model = original_ollama_image_model
         api_config.model.qwen_prompt_magic = original_qwen_prompt_magic
         api_config.model.qwen_device_map = original_qwen_device_map

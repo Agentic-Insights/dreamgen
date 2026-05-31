@@ -20,6 +20,9 @@ import {
   ArrowDown,
   SlidersHorizontal,
   Sparkles,
+  Brain,
+  Image as ImageIcon,
+  ArrowRight,
 } from "lucide-react";
 import {
   api,
@@ -181,6 +184,7 @@ export default function Settings({ systemStatus }: SettingsProps) {
       await api.setOllamaModel(modelName);
       setMessage({ type: 'success', text: `Switched to ${modelName}` });
       await loadOllamaModels(); // Refresh to show updated current model
+      await loadGenerationConfig();
     } catch (error) {
       setMessage({
         type: 'error',
@@ -345,11 +349,18 @@ export default function Settings({ systemStatus }: SettingsProps) {
   const activePromptModel = ollamaModels?.current ?? null;
   const configuredImageModel = generationConfig?.ollama_image_model ?? ollamaModels?.configured_image ?? "";
   const activeImageModel = ollamaModels?.current_image ?? null;
+  const activeImageModelLabel =
+    selectedBackend === "ollama"
+      ? (activeImageModel ?? configuredImageModel) || "No Ollama image model"
+      : generationConfig?.image_model ?? selectedBackend;
+  const selectedBackendLabel =
+    IMAGE_BACKEND_OPTIONS.find((backend) => backend.id === selectedBackend)?.label ?? selectedBackend;
+  const promptModelFallback = generationConfig?.prompt_model ?? configuredPromptModel;
 
   const sections = [
     { id: "models", label: "Models", icon: Database },
     { id: "plugins", label: "Plugins", icon: SettingsIcon },
-    { id: "ollama", label: "Ollama", icon: Cpu },
+    { id: "ollama", label: "Prompt & Ollama", icon: Cpu },
     { id: "auth", label: "Authentication", icon: Key },
     { id: "system", label: "System", icon: Server },
   ];
@@ -404,13 +415,14 @@ export default function Settings({ systemStatus }: SettingsProps) {
                   <div>
                     <h3 className="text-xl font-semibold">Model Management</h3>
                     <p className="text-sm text-muted-foreground mt-1">
-                      Download and manage AI models for image generation
+                      Pick the prompt model first, then the image model that renders it.
                     </p>
                   </div>
                   <button
                     onClick={() => {
                       loadModelStatus();
                       loadGenerationConfig();
+                      loadOllamaModels();
                     }}
                     className="p-2 hover:bg-background rounded-md transition-colors"
                     title="Refresh model status"
@@ -432,13 +444,111 @@ export default function Settings({ systemStatus }: SettingsProps) {
                 )}
 
                 <div className="mb-6 space-y-6">
+                  <div className="border border-primary/30 bg-primary/5 rounded-lg p-4">
+                    <div className="mb-4 flex items-start justify-between gap-3">
+                      <div>
+                        <h4 className="font-medium">Two-stage generation pipeline</h4>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          DreamGen first asks Ollama for a final prompt, then sends that prompt to the selected image renderer.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setActiveSection("ollama")}
+                        className="shrink-0 rounded-md border border-border bg-background px-3 py-1.5 text-xs transition-colors hover:border-primary/50"
+                      >
+                        All Ollama models
+                      </button>
+                    </div>
+
+                    <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] lg:items-stretch">
+                      <div className="rounded-lg border border-border bg-background/85 p-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2">
+                            <Brain className="h-4 w-4 text-primary" />
+                            <span className="text-sm font-medium">Stage 1: Prompt model</span>
+                          </div>
+                          <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
+                            Ollama
+                          </span>
+                        </div>
+                        <div className="mt-3 text-sm font-medium text-foreground break-all">
+                          {activePromptModel ?? promptModelFallback ?? "No prompt model"}
+                        </div>
+                        {configuredPromptModel && activePromptModel && configuredPromptModel !== activePromptModel && (
+                          <div className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+                            Configured {configuredPromptModel}; using {activePromptModel}.
+                          </div>
+                        )}
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {loadingOllama ? (
+                            <span className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                              Loading prompt models
+                            </span>
+                          ) : promptCapableModels.length > 0 ? (
+                            promptCapableModels.slice(0, 4).map((model) => {
+                              const isCurrent = model.name === activePromptModel;
+                              return (
+                                <button
+                                  key={`pipeline-prompt-${model.name}`}
+                                  type="button"
+                                  onClick={() => handleOllamaModelSelect(model.name)}
+                                  className={cn(
+                                    "rounded-full border px-3 py-1.5 text-xs transition-colors",
+                                    isCurrent
+                                      ? "border-primary bg-primary text-primary-foreground"
+                                      : "border-border hover:bg-muted/40"
+                                  )}
+                                >
+                                  {model.name}
+                                </button>
+                              );
+                            })
+                          ) : (
+                            <span className="text-xs text-muted-foreground">
+                              No completion-capable Ollama models found.
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="hidden items-center justify-center text-muted-foreground lg:flex">
+                        <ArrowRight className="h-5 w-5" />
+                      </div>
+
+                      <div className="rounded-lg border border-border bg-background/85 p-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2">
+                            <ImageIcon className="h-4 w-4 text-primary" />
+                            <span className="text-sm font-medium">Stage 2: Image model</span>
+                          </div>
+                          <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
+                            {selectedBackendLabel}
+                          </span>
+                        </div>
+                        <div className="mt-3 text-sm font-medium text-foreground break-all">
+                          {activeImageModelLabel}
+                        </div>
+                        {selectedBackend === "ollama" && configuredImageModel && activeImageModel && configuredImageModel !== activeImageModel && (
+                          <div className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+                            Configured {configuredImageModel}; using {activeImageModel}.
+                          </div>
+                        )}
+                        <div className="mt-3 text-xs text-muted-foreground">
+                          Use the backend choices below for local Diffusers, Qwen, Z-Image, or Ollama image rendering.
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
                   <div className="border border-border rounded-lg p-4">
                     <div className="flex items-center gap-2 mb-3">
                       <SlidersHorizontal className="w-4 h-4 text-primary" />
                       <div>
-                        <h4 className="font-medium">Active Image Backend</h4>
+                        <h4 className="font-medium">Image backend selector</h4>
                         <p className="text-sm text-muted-foreground">
-                          Choose which backend DreamGen uses for new generations.
+                          Choose which renderer DreamGen uses in stage 2.
                         </p>
                       </div>
                     </div>
@@ -594,6 +704,12 @@ export default function Settings({ systemStatus }: SettingsProps) {
                 </div>
 
                 <div className="space-y-4">
+                  <div>
+                    <h4 className="font-medium">Image model downloads</h4>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Hugging Face and local checkpoints used by the stage 2 renderers.
+                    </p>
+                  </div>
                   {modelStatus?.models.map((model) => {
                     const isDownloading = downloadingModels.has(model.id);
                     const canDownload =
@@ -679,9 +795,9 @@ export default function Settings({ systemStatus }: SettingsProps) {
               <div className="max-w-4xl">
                 <div className="flex items-center justify-between mb-6">
                   <div>
-                    <h3 className="text-xl font-semibold">Ollama Model Selection</h3>
+                    <h3 className="text-xl font-semibold">Prompt and Ollama Image Models</h3>
                     <p className="text-sm text-muted-foreground mt-1">
-                      Select which Ollama models DreamGen uses for prompt generation and the Ollama image backend
+                      Pick the Ollama model for prompt generation separately from Ollama image rendering.
                     </p>
                   </div>
                   <button

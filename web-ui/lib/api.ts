@@ -126,8 +126,21 @@ export interface GenerationConfig {
   guidance_scale: number;
   true_cfg_scale: number;
   ollama_temperature: number;
+  ollama_model?: string;
+  prompt_model?: string;
   image_backend?: string;
+  image_model?: string;
   ollama_image_model?: string;
+  pipeline?: {
+    prompt: {
+      provider: string;
+      model: string;
+    };
+    image: {
+      backend: string;
+      model: string;
+    };
+  };
   enabled_loras?: string[];
   available_loras?: string[];
   lora_application_probability?: number;

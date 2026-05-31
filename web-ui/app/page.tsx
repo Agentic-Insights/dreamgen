@@ -163,6 +163,11 @@ export default function Home() {
   const enabledPlugins = plugins.filter((plugin) => plugin.enabled);
   const selectedBackend = generationConfig?.image_backend ?? "auto";
   const enabledLoras = generationConfig?.enabled_loras ?? [];
+  const promptModelLabel = generationConfig?.prompt_model ?? generationConfig?.ollama_model ?? "Ollama prompt model";
+  const imageModelLabel =
+    selectedBackend === "ollama"
+      ? generationConfig?.ollama_image_model || "Ollama image model"
+      : generationConfig?.image_model ?? selectedBackend;
   const lastActivity = logs[logs.length - 1];
   const selectedCadence =
     CADENCE_OPTIONS.find((option) => option.minutes === cadenceMinutes) ?? CADENCE_OPTIONS[2];
@@ -697,6 +702,30 @@ export default function Home() {
                         </div>
 
                         <div className="grid content-start gap-4">
+                          <div className="rounded-[1.75rem] border border-primary/25 bg-primary/10 p-4">
+                            <div className="mb-3 text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                              Model pipeline
+                            </div>
+                            <div className="grid gap-3">
+                              <div className="rounded-2xl border border-border/60 bg-background/78 px-3 py-3">
+                                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                                  Stage 1 prompt
+                                </div>
+                                <div className="mt-1 truncate text-sm font-medium text-foreground" title={promptModelLabel}>
+                                  {promptModelLabel}
+                                </div>
+                              </div>
+                              <div className="rounded-2xl border border-border/60 bg-background/78 px-3 py-3">
+                                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                                  Stage 2 image
+                                </div>
+                                <div className="mt-1 truncate text-sm font-medium text-foreground" title={imageModelLabel}>
+                                  {imageModelLabel}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
                           <div className="rounded-[1.75rem] border border-border/70 bg-background/82 p-4">
                             <div className="mb-3 flex items-center justify-between gap-3">
                               <div className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">

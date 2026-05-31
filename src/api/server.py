@@ -149,6 +149,20 @@ def inspect_local_zimage_model(model_path: Path) -> tuple[str, int]:
 
 def generation_config_payload() -> Dict[str, Any]:
     """Serialize mutable generation/runtime settings for the frontend."""
+    image_backend = config.model.image_backend
+    image_model_by_backend = {
+        "auto": "auto resolver",
+        "flux": config.model.flux_model,
+        "ollama": config.model.ollama_image_model,
+        "zimage": str(config.model.zimage_model_path),
+        "qwen": config.model.qwen_image_model,
+        "small": config.model.small_sd_model,
+        "turbo": config.model.turbo_model,
+        "smoke": config.model.smoke_test_model,
+        "mock": "mock generator",
+    }
+    image_model = image_model_by_backend.get(image_backend, image_backend)
+
     return {
         "width": config.image.width,
         "height": config.image.height,
@@ -156,8 +170,21 @@ def generation_config_payload() -> Dict[str, Any]:
         "guidance_scale": config.image.guidance_scale,
         "true_cfg_scale": config.image.true_cfg_scale,
         "ollama_temperature": config.model.ollama_temperature,
-        "image_backend": config.model.image_backend,
+        "ollama_model": config.model.ollama_model,
+        "prompt_model": config.model.ollama_model,
+        "image_backend": image_backend,
+        "image_model": image_model,
         "ollama_image_model": config.model.ollama_image_model,
+        "pipeline": {
+            "prompt": {
+                "provider": "ollama",
+                "model": config.model.ollama_model,
+            },
+            "image": {
+                "backend": image_backend,
+                "model": image_model,
+            },
+        },
         "enabled_loras": config.model.lora.enabled_loras,
         "available_loras": get_available_loras(config.model.lora.lora_dir),
         "lora_application_probability": config.model.lora.application_probability,
@@ -925,6 +952,12 @@ async def set_generation_config(data: dict):
             config.image.true_cfg_scale = float(data["true_cfg_scale"])
         if "ollama_temperature" in data:
             config.model.ollama_temperature = float(data["ollama_temperature"])
+        if "ollama_model" in data:
+            prompt_model = str(data["ollama_model"]).strip()
+            if not prompt_model:
+                raise ValueError("ollama_model must not be empty")
+            config.model.ollama_model = prompt_model
+            os.environ["OLLAMA_MODEL"] = prompt_model
         if "image_backend" in data:
             backend = str(data["image_backend"]).lower()
             if backend not in ALLOWED_IMAGE_BACKENDS:
