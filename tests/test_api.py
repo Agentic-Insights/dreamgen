@@ -75,6 +75,7 @@ def test_status_endpoint(client):
         "sd-turbo",
         "flux-schnell",
         "flux-dev",
+        "qwen-image",
     ]
 
 
@@ -195,12 +196,17 @@ def test_generation_config_endpoint(client):
     assert isinstance(data["available_loras"], list)
     assert "lora_application_probability" in data
     assert "zimage_model_path" in data
+    assert data["qwen_image_model"] == "diffusers/qwen-image-nf4"
+    assert data["qwen_prompt_magic"] is True
+    assert data["qwen_device_map"] == "balanced"
 
 
 def test_set_generation_config_updates_backend_and_loras(client):
     """Runtime generation settings should accept backend and LoRA updates."""
     original_backend = api_config.model.image_backend
     original_ollama_image_model = api_config.model.ollama_image_model
+    original_qwen_prompt_magic = api_config.model.qwen_prompt_magic
+    original_qwen_device_map = api_config.model.qwen_device_map
     original_enabled_loras = list(api_config.model.lora.enabled_loras)
     original_probability = api_config.model.lora.application_probability
 
@@ -210,6 +216,8 @@ def test_set_generation_config_updates_backend_and_loras(client):
             json={
                 "image_backend": "small",
                 "ollama_image_model": "x/z-image-turbo:latest",
+                "qwen_prompt_magic": False,
+                "qwen_device_map": "none",
                 "enabled_loras": ["pixel-art", "comic"],
                 "lora_application_probability": 0.25,
             },
@@ -219,15 +227,21 @@ def test_set_generation_config_updates_backend_and_loras(client):
         data = response.json()["config"]
         assert data["image_backend"] == "small"
         assert data["ollama_image_model"] == "x/z-image-turbo:latest"
+        assert data["qwen_prompt_magic"] is False
+        assert data["qwen_device_map"] == "none"
         assert data["enabled_loras"] == ["pixel-art", "comic"]
         assert data["lora_application_probability"] == 0.25
         assert api_config.model.image_backend == "small"
         assert api_config.model.ollama_image_model == "x/z-image-turbo:latest"
+        assert api_config.model.qwen_prompt_magic is False
+        assert api_config.model.qwen_device_map == "none"
         assert api_config.model.lora.enabled_loras == ["pixel-art", "comic"]
         assert api_config.model.lora.application_probability == 0.25
     finally:
         api_config.model.image_backend = original_backend
         api_config.model.ollama_image_model = original_ollama_image_model
+        api_config.model.qwen_prompt_magic = original_qwen_prompt_magic
+        api_config.model.qwen_device_map = original_qwen_device_map
         api_config.model.lora.enabled_loras = original_enabled_loras
         api_config.model.lora.application_probability = original_probability
 

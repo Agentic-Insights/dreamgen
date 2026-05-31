@@ -5,6 +5,7 @@ Command-line interface for the continuous image generation system.
 import asyncio
 import json
 import os
+import shutil
 import sys
 import threading
 import time
@@ -34,7 +35,14 @@ from rich.progress import (
 from rich.table import Table
 
 from .. import __version__
-from ..generators.factory import create_image_generator, is_model_cached, resolve_image_backend
+from ..generators.factory import (
+    create_image_generator,
+    incomplete_model_downloads,
+    is_model_cached,
+    model_cache_path,
+    required_model_cache_gb,
+    resolve_image_backend,
+)
 from ..generators.prompt_generator import PromptGenerator
 from ..plugins import ensure_initialized, plugin_manager
 from ..services import GenerationProgressEvent, GenerationServiceRequest, ImageGenService
@@ -120,15 +128,23 @@ def _requires_hf_token(model_name: str) -> bool:
     return any(marker in normalized for marker in ("flux.1-dev", "flux.1-fill"))
 
 
+def _free_cache_gb(model_name: str) -> float:
+    """Return free GB on the filesystem that stores the model cache."""
+    cache_path = model_cache_path(model_name)
+    target = cache_path if cache_path.exists() else cache_path.parent
+    target.mkdir(parents=True, exist_ok=True)
+    return shutil.disk_usage(target).free / 1024**3
+
+
 def validate_generation_config(config: Config, resolved_backend: str) -> list[str]:
     """Validate config that can fail before submitting long generation work."""
     errors = config.validate()
-    valid_backends = {"auto", "flux", "ollama", "zimage", "small", "turbo", "smoke", "mock"}
+    valid_backends = {"auto", "flux", "ollama", "zimage", "qwen", "small", "turbo", "smoke", "mock"}
 
     if resolved_backend not in valid_backends:
         errors.append(
             f"Invalid image backend: {resolved_backend} "
-            "(must be one of auto, flux, ollama, zimage, small, turbo, smoke, mock)"
+            "(must be one of auto, flux, ollama, zimage, qwen, small, turbo, smoke, mock)"
         )
 
     if (
@@ -149,6 +165,22 @@ def validate_generation_config(config: Config, resolved_backend: str) -> list[st
             f"Z-Image model path does not exist: {config.model.zimage_model_path}. "
             "Download Tongyi-MAI/Z-Image-Turbo or choose another backend."
         )
+
+    if resolved_backend == "qwen":
+        incomplete = incomplete_model_downloads(config.model.qwen_image_model)
+        free_gb = _free_cache_gb(config.model.qwen_image_model)
+        if incomplete:
+            errors.append(
+                f"Qwen-Image cache has {len(incomplete)} incomplete download(s). "
+                "Complete the model download or delete the incomplete cache files before generation."
+            )
+        required_gb = required_model_cache_gb(config.model.qwen_image_model)
+        if not is_model_cached(config.model.qwen_image_model) and free_gb < required_gb:
+            errors.append(
+                f"Qwen-Image is not fully cached and the Hugging Face cache filesystem has "
+                f"only {free_gb:.1f} GB free. Free at least {required_gb} GB or move "
+                "HF_HOME/HF_HUB_CACHE to a larger disk before using --backend qwen."
+            )
 
     return errors
 
@@ -354,7 +386,7 @@ def generate(
         None,
         "--backend",
         "--model",
-        help="Override the image backend for this run (flux, ollama, zimage, small, turbo, smoke, mock)",
+        help="Override the image backend for this run (flux, ollama, zimage, qwen, small, turbo, smoke, mock)",
     ),
     mock: bool = typer.Option(
         False,
@@ -654,7 +686,7 @@ def loop(
         None,
         "--backend",
         "--model",
-        help="Override the image backend for this run (flux, ollama, zimage, small, turbo, smoke, mock)",
+        help="Override the image backend for this run (flux, ollama, zimage, qwen, small, turbo, smoke, mock)",
     ),
     mock: bool = typer.Option(
         False,

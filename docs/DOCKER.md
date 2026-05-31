@@ -14,6 +14,7 @@ This repo now uses a single simple Docker flow aimed at end users: start the sta
    - `IMAGE_BACKEND=auto` for the default behavior: use FLUX when cached, otherwise fall back to the small public model
    - `IMAGE_BACKEND=ollama` if you want DreamGen to call Ollama's image-generation endpoint
    - `IMAGE_BACKEND=zimage` if you want to review the Z-Image path specifically
+   - `IMAGE_BACKEND=qwen` if you want Qwen-Image for text-rich posters, signs, and bilingual typography
    - `IMAGE_BACKEND=small` for the usable first-run fallback
    - `IMAGE_BACKEND=turbo` for the fast few-step turbo backend
    - `IMAGE_BACKEND=smoke` only for diagnostics and smoke tests
@@ -65,6 +66,7 @@ docker compose --env-file .env.docker up -d
 - Ollama is expected to run outside Docker by default. `host.docker.internal` is mapped for Docker Desktop and Linux host-gateway setups.
 - DreamGen now resolves the prompt model and Ollama image model independently, so a stale `OLLAMA_MODEL` no longer breaks the Playground prompt button if another completion-capable model is installed.
 - The small and turbo fallback models are public and do not normally require a Hugging Face token.
+- Qwen-Image is public Apache-2.0, but it is much larger than the fallback models and is best treated as an opt-in quality backend.
 - The smoke backend is only for diagnostics; it is not expected to produce good-looking images.
 - If you do not have a compatible GPU and only want placeholder images, set `IMAGE_BACKEND=mock`.
 

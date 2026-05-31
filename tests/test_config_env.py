@@ -161,6 +161,10 @@ MPS_USE_FP16=true
             assert config.model.ollama_model == "llama3.2:3b"
             assert config.model.ollama_temperature == 0.8
             assert config.model.flux_model == "black-forest-labs/FLUX.1-dev"
+            assert config.model.qwen_image_model == "diffusers/qwen-image-nf4"
+            assert config.model.qwen_prompt_magic is True
+            assert config.model.qwen_device_map == "balanced"
+            assert config.model.qwen_lightning is False
             assert config.model.max_sequence_length == 256
 
             # Verify image configuration

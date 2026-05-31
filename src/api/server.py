@@ -49,7 +49,17 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-ALLOWED_IMAGE_BACKENDS = {"auto", "flux", "ollama", "zimage", "small", "turbo", "smoke", "mock"}
+ALLOWED_IMAGE_BACKENDS = {
+    "auto",
+    "flux",
+    "ollama",
+    "zimage",
+    "qwen",
+    "small",
+    "turbo",
+    "smoke",
+    "mock",
+}
 MAX_RECENT_GENERATION_EVENTS = 100
 
 # Initialize FastAPI app
@@ -154,7 +164,20 @@ def generation_config_payload() -> Dict[str, Any]:
         "lora_dir": str(config.model.lora.lora_dir),
         "zimage_model_path": str(config.model.zimage_model_path),
         "zimage_native_available": zimage_native_source_path().exists(),
+        "qwen_image_model": config.model.qwen_image_model,
+        "qwen_prompt_magic": config.model.qwen_prompt_magic,
+        "qwen_device_map": config.model.qwen_device_map,
+        "qwen_lightning": config.model.qwen_lightning,
     }
+
+
+def parse_bool_config(value: Any) -> bool:
+    """Parse JSON boolean-like config values from API clients."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "1", "yes", "on")
+    return bool(value)
 
 
 # Output directory setup
@@ -548,7 +571,7 @@ async def get_model_status():
             "downloadable": True,
         },
         {
-            "id": "Qwen/Qwen-Image",
+            "id": config.model.qwen_image_model,
             "name": "Qwen-Image",
             "type": "text-to-image",
             "downloadable": True,
@@ -912,6 +935,16 @@ async def set_generation_config(data: dict):
             config.model.image_backend = backend
         if "ollama_image_model" in data:
             config.model.ollama_image_model = str(data["ollama_image_model"]).strip()
+        if "qwen_image_model" in data:
+            config.model.qwen_image_model = (
+                str(data["qwen_image_model"]).strip() or "diffusers/qwen-image-nf4"
+            )
+        if "qwen_prompt_magic" in data:
+            config.model.qwen_prompt_magic = parse_bool_config(data["qwen_prompt_magic"])
+        if "qwen_device_map" in data:
+            config.model.qwen_device_map = str(data["qwen_device_map"]).strip() or "balanced"
+        if "qwen_lightning" in data:
+            config.model.qwen_lightning = parse_bool_config(data["qwen_lightning"])
         if "enabled_loras" in data:
             enabled_loras = data["enabled_loras"]
             if not isinstance(enabled_loras, list):

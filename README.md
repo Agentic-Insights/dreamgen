@@ -55,6 +55,7 @@ cp .env.example .env
 # - OLLAMA_MODEL must point at a local Ollama model
 # - OLLAMA_IMAGE_MODEL is optional and only used for IMAGE_BACKEND=ollama
 # - HF_TOKEN is optional for small/turbo/smoke public models
+# - IMAGE_BACKEND=qwen enables the NF4 Qwen-Image backend for text-heavy posters and signage
 # - IMAGE_BACKEND=auto uses FLUX if cached, otherwise the small public fallback
 
 # Generate from the CLI
@@ -101,6 +102,14 @@ For Ollama-backed image generation:
 - use **Settings → Ollama** to pick the Ollama prompt model and Ollama image model separately
 - use **Settings → Models** to switch the active backend to `Ollama Image`
 
+For Qwen-Image typography generation:
+
+- use **Settings → Models** to download `diffusers/qwen-image-nf4`
+- switch the active backend to `Qwen-Image`
+- use prompts with explicit text such as signs, menus, posters, labels, or bilingual English/Chinese layouts
+- set `QWEN_IMAGE_MODEL=Qwen/Qwen-Image` only on machines with enough memory for the full model
+- enable `QWEN_IMAGE_LIGHTNING=true` only if you also want the optional Lightning LoRA few-step path
+
 ## 🔑 Why Choose This?
 
 - **🏠 100% Local**: No cloud APIs, no usage limits, complete privacy
@@ -128,6 +137,9 @@ uv run dreamgen generate --mock
 
 # Force the local Z-Image backend
 uv run dreamgen generate --backend zimage
+
+# Force Qwen-Image for text-rich posters and signs
+uv run dreamgen generate --backend qwen
 
 # List prompt plugins
 uv run dreamgen plugins list
