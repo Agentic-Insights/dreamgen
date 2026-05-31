@@ -16,6 +16,7 @@ export interface GenerateRequest {
   use_mock?: boolean;
   enable_plugins?: boolean;
   seed?: number;
+  recipe_id?: string;
   client_request_id?: string;
 }
 
@@ -160,6 +161,56 @@ export interface GenerationEventsResponse {
   limit: number;
 }
 
+export type GenerationJobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+
+export interface GenerationJobRequest {
+  prompt?: string | null;
+  meta_prompt?: string | null;
+  seed?: number | null;
+  publication_state?: string;
+  metadata?: Record<string, unknown>;
+  recipe_id?: string | null;
+  recipe_version?: number | null;
+  config_overrides?: Record<string, unknown>;
+}
+
+export interface GenerationJob {
+  id: string;
+  status: GenerationJobStatus;
+  request: GenerationJobRequest;
+  client_request_id?: string | null;
+  created_at: string;
+  updated_at: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+  progress: number;
+  prompt?: string | null;
+  backend?: string | null;
+  model_name?: string | null;
+  image_path?: string | null;
+  relative_image_path?: string | null;
+  generation_time?: number | null;
+  error?: string | null;
+  attempts: number;
+  metadata: Record<string, unknown>;
+}
+
+export interface GenerationJobsResponse {
+  jobs: GenerationJob[];
+  limit: number;
+  offset: number;
+}
+
+export interface CreateGenerationJobRequest {
+  prompt?: string;
+  meta_prompt?: string;
+  seed?: number;
+  recipe_id?: string;
+  publication_state?: string;
+  client_request_id?: string;
+  metadata?: Record<string, unknown>;
+}
+
 export type PublicationState = 'draft' | 'published' | 'hidden' | 'featured' | 'rejected';
 
 export interface GalleryPublication {
@@ -281,6 +332,34 @@ export class ImageGenAPI {
   async getGenerationEvents(limit: number = 25): Promise<GenerationEventsResponse> {
     const response = await fetch(`${this.baseUrl}/api/generation/events?limit=${limit}`);
     if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to get generation events'));
+    return response.json();
+  }
+
+  async getGenerationJobs(
+    limit: number = 12,
+    offset: number = 0,
+    status?: GenerationJobStatus
+  ): Promise<GenerationJobsResponse> {
+    const params = new URLSearchParams({
+      limit: String(limit),
+      offset: String(offset),
+    });
+    if (status) params.set('status', status);
+
+    const response = await fetch(`${this.baseUrl}/api/jobs?${params.toString()}`);
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to get generation jobs'));
+    return response.json();
+  }
+
+  async createGenerationJob(request: CreateGenerationJobRequest): Promise<GenerationJob> {
+    const response = await fetch(`${this.baseUrl}/api/jobs`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(request),
+    });
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to create generation job'));
     return response.json();
   }
 
