@@ -85,6 +85,7 @@ def loading_message_for_backend(backend_name: str) -> str:
         "small-sd": "Loading small Stable Diffusion fallback model.",
         "sd-turbo": "Loading turbo image model.",
         "ollama": "Requesting an image from the configured Ollama host.",
+        "qwen-image": "Loading Qwen-Image typography model.",
     }.get(backend_name, "Loading Flux model (this may take several minutes on first run)...")
 
 

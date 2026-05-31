@@ -40,6 +40,7 @@ interface SettingsProps {
 const IMAGE_BACKEND_OPTIONS = [
   { id: "auto", label: "Auto", description: "Use the best ready local backend." },
   { id: "zimage", label: "Z-Image", description: "Use the Z-Image stack and local LoRAs." },
+  { id: "qwen", label: "Qwen-Image", description: "Use Qwen-Image for text-rich posters, signs, and bilingual typography." },
   { id: "ollama", label: "Ollama Image", description: "Use an image-capable Ollama model over the local Ollama host API." },
   { id: "flux", label: "FLUX", description: "Prefer the FLUX transformer path." },
   { id: "small", label: "Small SD", description: "Use the lightweight public fallback." },

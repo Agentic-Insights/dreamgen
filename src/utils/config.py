@@ -31,6 +31,12 @@ class ModelConfig:
     zimage_model_path: Path
     zimage_attention: str
     zimage_compile: bool
+    qwen_image_model: str
+    qwen_prompt_magic: bool
+    qwen_device_map: str
+    qwen_lightning: bool
+    qwen_lightning_lora: str
+    qwen_lightning_weight: str
     ollama_model: str
     ollama_image_model: str
     ollama_temperature: float
@@ -130,7 +136,7 @@ class Config:
             image_backend = "mock"
         elif configured_backend:
             image_backend = configured_backend
-        elif legacy_image_model in {"flux", "ollama", "zimage"}:
+        elif legacy_image_model in {"flux", "ollama", "zimage", "qwen"}:
             image_backend = legacy_image_model
         else:
             image_backend = "auto"
@@ -150,6 +156,27 @@ class Config:
             "1",
             "yes",
             "on",
+        )
+        qwen_image_model = os.getenv("QWEN_IMAGE_MODEL", "diffusers/qwen-image-nf4")
+        qwen_prompt_magic = os.getenv("QWEN_IMAGE_PROMPT_MAGIC", "true").lower() in (
+            "true",
+            "1",
+            "yes",
+            "on",
+        )
+        qwen_device_map = os.getenv("QWEN_IMAGE_DEVICE_MAP", "balanced")
+        qwen_lightning = os.getenv("QWEN_IMAGE_LIGHTNING", "false").lower() in (
+            "true",
+            "1",
+            "yes",
+            "on",
+        )
+        qwen_lightning_lora = os.getenv(
+            "QWEN_IMAGE_LIGHTNING_LORA", "lightx2v/Qwen-Image-Lightning"
+        )
+        qwen_lightning_weight = os.getenv(
+            "QWEN_IMAGE_LIGHTNING_WEIGHT",
+            "Qwen-Image-Lightning-8steps-V1.0.safetensors",
         )
 
         legacy_tiny_model = os.getenv("TINY_SD_MODEL")
@@ -182,6 +209,12 @@ class Config:
             zimage_model_path=zimage_model_path,
             zimage_attention=zimage_attention,
             zimage_compile=zimage_compile,
+            qwen_image_model=qwen_image_model,
+            qwen_prompt_magic=qwen_prompt_magic,
+            qwen_device_map=qwen_device_map,
+            qwen_lightning=qwen_lightning,
+            qwen_lightning_lora=qwen_lightning_lora,
+            qwen_lightning_weight=qwen_lightning_weight,
             ollama_model=ollama_model,
             ollama_image_model=ollama_image_model,
             ollama_temperature=float(ollama_temp),
@@ -307,6 +340,7 @@ class Config:
             "flux",
             "ollama",
             "zimage",
+            "qwen",
             "small",
             "turbo",
             "smoke",
@@ -314,7 +348,7 @@ class Config:
         }:
             errors.append(
                 f"Invalid image backend: {self.model.image_backend} "
-                "(must be one of auto, flux, ollama, zimage, small, turbo, smoke, mock)"
+                "(must be one of auto, flux, ollama, zimage, qwen, small, turbo, smoke, mock)"
             )
         if not (1 <= self.image.num_inference_steps <= 150):
             errors.append(

@@ -23,10 +23,38 @@ def _hf_cache_root() -> Path:
     return Path(os.getenv("HF_HUB_CACHE", os.path.expanduser("~/.cache/huggingface/hub")))
 
 
+def model_cache_path(model_id: str) -> Path:
+    """Return the Hugging Face cache path for a model repository."""
+    return _hf_cache_root() / f"models--{model_id.replace('/', '--')}"
+
+
+def incomplete_model_downloads(model_id: str) -> list[Path]:
+    """Return incomplete blob downloads for a cached model repository."""
+    blobs_path = model_cache_path(model_id) / "blobs"
+    if not blobs_path.exists():
+        return []
+    return list(blobs_path.glob("*.incomplete"))
+
+
 def is_model_cached(model_id: str) -> bool:
-    model_path = _hf_cache_root() / f"models--{model_id.replace('/', '--')}"
+    model_path = model_cache_path(model_id)
     snapshots_path = model_path / "snapshots"
-    return model_path.exists() and snapshots_path.exists() and any(snapshots_path.iterdir())
+    return (
+        model_path.exists()
+        and snapshots_path.exists()
+        and any(snapshots_path.iterdir())
+        and not incomplete_model_downloads(model_id)
+    )
+
+
+def required_model_cache_gb(model_id: str) -> int:
+    """Return a conservative free-space guardrail for model downloads."""
+    normalized = model_id.lower()
+    if normalized == "qwen/qwen-image":
+        return 60
+    if "qwen-image" in normalized:
+        return 30
+    return 25
 
 
 def resolve_image_backend(config: Config) -> str:
@@ -58,6 +86,8 @@ def backend_label(config: Config, backend: str) -> str:
         return "ollama"
     if backend == "zimage":
         return "z-image"
+    if backend == "qwen":
+        return "qwen-image"
 
     flux_model = config.model.flux_model.lower()
     if "schnell" in flux_model:
@@ -107,6 +137,10 @@ def create_image_generator(config: Config) -> Tuple[object, str]:
         from .zimage_generator import ZImageGenerator
 
         return ZImageGenerator(config), backend_label(config, backend)
+    if backend == "qwen":
+        from .qwen_image_generator import QwenImageGenerator
+
+        return QwenImageGenerator(config), backend_label(config, backend)
     if backend == "flux":
         from .image_generator import ImageGenerator
 

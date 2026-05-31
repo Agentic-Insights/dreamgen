@@ -134,6 +134,10 @@ export interface GenerationConfig {
   lora_dir?: string;
   zimage_model_path?: string;
   zimage_native_available?: boolean;
+  qwen_image_model?: string;
+  qwen_prompt_magic?: boolean;
+  qwen_device_map?: string;
+  qwen_lightning?: boolean;
 }
 
 export interface GenerationEvent {

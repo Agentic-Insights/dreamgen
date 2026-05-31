@@ -63,6 +63,7 @@ const CADENCE_OPTIONS: CadenceOption[] = [
 const DASHBOARD_BACKEND_OPTIONS = [
   { id: "auto", label: "Auto" },
   { id: "zimage", label: "Z-Image" },
+  { id: "qwen", label: "Qwen" },
   { id: "ollama", label: "Ollama" },
   { id: "small", label: "Small SD" },
   { id: "turbo", label: "Turbo" },
