@@ -17,12 +17,14 @@ import {
 import { AnimatePresence, motion } from "framer-motion";
 
 import Gallery from "@/components/Gallery";
+import QueueHistory from "@/components/QueueHistory";
 import Settings from "@/components/Settings";
 import TaskProgress from "@/components/TaskProgress";
 import {
   API_BASE,
   api,
   GenerationEvent,
+  GenerationJob,
   GenerateResponse,
   GenerationConfig,
   PluginInfo,
@@ -136,6 +138,8 @@ export default function Home() {
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [generationConfig, setGenerationConfig] = useState<GenerationConfig | null>(null);
   const [generationEvents, setGenerationEvents] = useState<GenerationEvent[]>([]);
+  const [generationJobs, setGenerationJobs] = useState<GenerationJob[]>([]);
+  const [isJobsLoading, setIsJobsLoading] = useState(false);
   const [nextRunAt, setNextRunAt] = useState<Date | null>(null);
   const [, setClockTick] = useState(Date.now());
   const [sessionCount, setSessionCount] = useState(0);
@@ -229,6 +233,20 @@ export default function Home() {
     }
   }, []);
 
+  const loadGenerationJobs = useCallback(async () => {
+    setIsJobsLoading(true);
+    try {
+      const response = await api.getGenerationJobs(12);
+      startTransition(() => {
+        setGenerationJobs(response.jobs);
+      });
+    } catch (error) {
+      console.error("Failed to load generation jobs:", error);
+    } finally {
+      setIsJobsLoading(false);
+    }
+  }, []);
+
   runGenerationRef.current = async (source: "manual" | "loop") => {
     if (isGeneratingRef.current) return;
 
@@ -279,6 +297,7 @@ export default function Home() {
         loadRecentImages(),
         loadDashboardControls(),
         loadGenerationEvents(),
+        loadGenerationJobs(),
         api.getStatus().then(setStatus),
       ]);
     } catch (error) {
@@ -328,6 +347,7 @@ export default function Home() {
     loadRecentImages();
     loadDashboardControls();
     loadGenerationEvents();
+    loadGenerationJobs();
 
     const unsubscribe = api.subscribeWebSocket((data) => {
       const nextProgress = getTaskProgressUpdate(
@@ -349,9 +369,11 @@ export default function Home() {
       } else if (msg.type === "generation_completed") {
         addLog(`Saved ${String(msg.image_path ?? "image")}.`);
         void loadGenerationEvents();
+        void loadGenerationJobs();
       } else if (msg.type === "generation_error") {
         addLog(`Backend error: ${String(msg.error ?? "unknown")}`, "error");
         void loadGenerationEvents();
+        void loadGenerationJobs();
       }
     });
 
@@ -361,7 +383,20 @@ export default function Home() {
         clearTimeout(generationResetTimeoutRef.current);
       }
     };
-  }, [loadDashboardControls, loadGenerationEvents, loadRecentImages]);
+  }, [loadDashboardControls, loadGenerationEvents, loadGenerationJobs, loadRecentImages]);
+
+  useEffect(() => {
+    const hasActiveJobs = generationJobs.some(
+      (job) => job.status === "queued" || job.status === "running"
+    );
+    if (!hasActiveJobs) return;
+
+    const intervalId = window.setInterval(() => {
+      void loadGenerationJobs();
+    }, 4000);
+
+    return () => window.clearInterval(intervalId);
+  }, [generationJobs, loadGenerationJobs]);
 
   useEffect(() => {
     if (!isGenerating || !generationProgress || generationProgress.progress >= 96) return;
@@ -435,6 +470,34 @@ export default function Home() {
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
       addLog(`Failed to change backend: ${message}`, "error");
+    }
+  };
+
+  const copyJobPrompt = (prompt: string) => {
+    setPromptSeed(prompt);
+    promptSeedRef.current = prompt;
+    addLog("Copied job prompt into the generator.");
+  };
+
+  const rerunJob = async (job: GenerationJob) => {
+    try {
+      const prompt = job.prompt || job.request.prompt || undefined;
+      const queued = await api.createGenerationJob({
+        prompt,
+        meta_prompt: prompt ? undefined : job.request.meta_prompt ?? undefined,
+        seed: job.request.seed ?? undefined,
+        recipe_id: job.request.recipe_id ?? undefined,
+        publication_state: job.request.publication_state ?? "draft",
+        metadata: {
+          ...(job.request.metadata ?? {}),
+          rerun_of_job_id: job.id,
+        },
+      });
+      addLog(`Queued rerun ${queued.id.slice(0, 8)}.`);
+      await loadGenerationJobs();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      addLog(`Failed to queue rerun: ${message}`, "error");
     }
   };
 
@@ -861,6 +924,14 @@ export default function Home() {
                       </div>
 
                     </div>
+
+                    <QueueHistory
+                      jobs={generationJobs}
+                      isLoading={isJobsLoading}
+                      onRefresh={() => void loadGenerationJobs()}
+                      onCopyPrompt={copyJobPrompt}
+                      onRerun={(job) => void rerunJob(job)}
+                    />
 
                     <div className="ambient-panel rounded-[1.75rem] border border-border/80 p-5">
                       <div className="mb-4 flex items-center justify-between gap-3">
