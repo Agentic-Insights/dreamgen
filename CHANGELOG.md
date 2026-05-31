@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.7.0 (2026-05-31)
+
+### Features
+
+- Add generation queue history UI ([#58](https://github.com/Agentic-Insights/dreamgen/pull/58),
+  [`121dcb5`](https://github.com/Agentic-Insights/dreamgen/commit/121dcb5a4cd359f7d11ebcdb43ea9ddce4b1a74b))
+
+
 ## v1.6.0 (2026-05-31)
 
 ### Features
