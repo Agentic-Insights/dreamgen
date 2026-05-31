@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.6.0 (2026-05-31)
+
+### Features
+
+- Add workflow recipes ([#56](https://github.com/Agentic-Insights/dreamgen/pull/56),
+  [`6c4adf9`](https://github.com/Agentic-Insights/dreamgen/commit/6c4adf9c805ffee478853ddf278e2886e1eb8211))
+
+
 ## v1.5.0 (2026-05-31)
 
 ### Features
