@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.5.0 (2026-05-31)
+
+### Features
+
+- Add durable generation jobs ([#55](https://github.com/Agentic-Insights/dreamgen/pull/55),
+  [`4d1f0f6`](https://github.com/Agentic-Insights/dreamgen/commit/4d1f0f659e4ef78c0ea05cabf3a7da1352945fd1))
+
+
 ## v1.4.1 (2026-05-30)
 
 ### Bug Fixes
