@@ -10,6 +10,9 @@ import {
   Play,
   RotateCcw,
   Settings as SettingsIcon,
+  ChevronDown,
+  ChevronRight,
+  SlidersHorizontal,
   Sparkles,
   Square,
   Wand2,
@@ -19,6 +22,8 @@ import { AnimatePresence, motion } from "framer-motion";
 import Gallery from "@/components/Gallery";
 import QueueHistory from "@/components/QueueHistory";
 import Settings from "@/components/Settings";
+import AdvancedControls from "@/components/AdvancedControls";
+import MetaPromptModal from "@/components/MetaPromptModal";
 import TaskProgress from "@/components/TaskProgress";
 import {
   API_BASE,
@@ -35,12 +40,13 @@ import {
   getFallbackProgress,
   getTaskProgressUpdate,
   INITIAL_IMAGE_PROGRESS,
+  INITIAL_PROMPT_PROGRESS,
   type ProgressSnapshot,
 } from "@/lib/task-progress";
 import { cn } from "@/lib/utils";
 import galleryCache from "@/lib/cache";
 
-type TabId = "generate" | "gallery" | "settings" | "playground";
+type TabId = "generate" | "gallery" | "settings";
 
 type CadenceOption = {
   label: string;
@@ -66,6 +72,7 @@ const DASHBOARD_BACKEND_OPTIONS = [
   { id: "auto", label: "Auto" },
   { id: "zimage", label: "Z-Image" },
   { id: "qwen", label: "Qwen" },
+  { id: "ernie", label: "ERNIE" },
   { id: "ollama", label: "Ollama" },
   { id: "small", label: "Small SD" },
   { id: "turbo", label: "Turbo" },
@@ -128,6 +135,14 @@ const describeGenerationEvent = (event: GenerationEvent) => {
 export default function Home() {
   const [activeTab, setActiveTab] = useState<TabId>("generate");
   const [promptSeed, setPromptSeed] = useState("");
+  const [metaPrompt, setMetaPrompt] = useState("");
+  const [promptError, setPromptError] = useState<string | null>(null);
+  const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
+  const [promptProgress, setPromptProgress] = useState<ProgressSnapshot | null>(null);
+  const [showMetaPromptModal, setShowMetaPromptModal] = useState(false);
+  const [promptBuilderOpen, setPromptBuilderOpen] = useState(true);
+  const [runControlsOpen, setRunControlsOpen] = useState(false);
+  const [seed, setSeed] = useState<number | null>(null);
   const [cadenceMinutes, setCadenceMinutes] = useState(60);
   const [loopEnabled, setLoopEnabled] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -152,7 +167,9 @@ export default function Home() {
   const runGenerationRef = useRef<(source: "manual" | "loop") => Promise<void>>(
     async () => {}
   );
+  const promptRequestIdRef = useRef<string | null>(null);
   const generationRequestIdRef = useRef<string | null>(null);
+  const promptResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const generationResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const currentBackend =
@@ -167,9 +184,12 @@ export default function Home() {
   const enabledPlugins = plugins.filter((plugin) => plugin.enabled);
   const selectedBackend = generationConfig?.image_backend ?? "auto";
   const enabledLoras = generationConfig?.enabled_loras ?? [];
+  const promptModelLabel = generationConfig?.prompt_model ?? generationConfig?.ollama_model ?? "Ollama prompt model";
+  const imageModelLabel =
+    selectedBackend === "ollama"
+      ? generationConfig?.ollama_image_model || "Ollama image model"
+      : generationConfig?.image_model ?? selectedBackend;
   const lastActivity = logs[logs.length - 1];
-  const selectedCadence =
-    CADENCE_OPTIONS.find((option) => option.minutes === cadenceMinutes) ?? CADENCE_OPTIONS[2];
 
   const addLog = (message: string, type: "info" | "error" = "info") => {
     const timestamp = new Date().toLocaleTimeString();
@@ -272,6 +292,7 @@ export default function Home() {
       const response = await api.generate({
         prompt: promptSeedRef.current.trim() || undefined,
         enable_plugins: true,
+        seed: seed ?? undefined,
         client_request_id: clientRequestId,
       });
 
@@ -350,6 +371,17 @@ export default function Home() {
     loadGenerationJobs();
 
     const unsubscribe = api.subscribeWebSocket((data) => {
+      const nextPromptProgress = getTaskProgressUpdate(
+        data,
+        "prompt_generation",
+        promptRequestIdRef.current
+      );
+      if (nextPromptProgress) {
+        setPromptProgress((prev) =>
+          prev && prev.progress > nextPromptProgress.progress ? prev : nextPromptProgress
+        );
+      }
+
       const nextProgress = getTaskProgressUpdate(
         data,
         "image_generation",
@@ -379,6 +411,9 @@ export default function Home() {
 
     return () => {
       unsubscribe();
+      if (promptResetTimeoutRef.current) {
+        clearTimeout(promptResetTimeoutRef.current);
+      }
       if (generationResetTimeoutRef.current) {
         clearTimeout(generationResetTimeoutRef.current);
       }
@@ -411,6 +446,18 @@ export default function Home() {
   }, [generationProgress, isGenerating]);
 
   useEffect(() => {
+    if (!isGeneratingPrompt || !promptProgress || promptProgress.progress >= 96) return;
+
+    const timeoutId = setTimeout(() => {
+      setPromptProgress((prev) =>
+        prev ? getFallbackProgress("prompt_generation", prev) : prev
+      );
+    }, 1800);
+
+    return () => clearTimeout(timeoutId);
+  }, [isGeneratingPrompt, promptProgress]);
+
+  useEffect(() => {
     if (!loopEnabled) {
       setNextRunAt(null);
       return;
@@ -440,8 +487,45 @@ export default function Home() {
     { id: "generate" as const, label: "Create", icon: Sparkles },
     { id: "gallery" as const, label: "Gallery", icon: ImageIcon },
     { id: "settings" as const, label: "Settings", icon: SettingsIcon },
-    { id: "playground" as const, label: "Advanced", icon: Wand2 },
   ];
+
+  const generatePromptDraft = async () => {
+    const clientRequestId = createClientRequestId("prompt");
+    promptRequestIdRef.current = clientRequestId;
+    if (promptResetTimeoutRef.current) {
+      clearTimeout(promptResetTimeoutRef.current);
+    }
+    setIsGeneratingPrompt(true);
+    setPromptError(null);
+    setPromptProgress(INITIAL_PROMPT_PROGRESS);
+
+    try {
+      const response = await api.generatePrompt(metaPrompt || undefined, clientRequestId);
+      setPromptSeed(response.prompt);
+      promptSeedRef.current = response.prompt;
+      addLog("Prompt draft generated.");
+      setPromptProgress({
+        progress: 100,
+        title: "Prompt ready",
+        detail: "The draft prompt is ready to edit or run.",
+      });
+      promptResetTimeoutRef.current = setTimeout(() => {
+        setPromptProgress(null);
+      }, 900);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to generate prompt";
+      setPromptError(message);
+      addLog(`Prompt generation failed: ${message}`, "error");
+      setPromptProgress(null);
+    } finally {
+      promptRequestIdRef.current = null;
+      setIsGeneratingPrompt(false);
+    }
+  };
+
+  const handleRuntimeConfigChange = (updates: Partial<GenerationConfig>) => {
+    setGenerationConfig((current) => (current ? { ...current, ...updates } : current));
+  };
 
   const togglePlugin = async (pluginName: string) => {
     try {
@@ -571,25 +655,14 @@ export default function Home() {
               exit={{ opacity: 0, y: -8 }}
               className="h-full overflow-y-auto"
             >
-              <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
-                <div className="grid gap-4 lg:grid-cols-2">
-                  <div className="ambient-panel rounded-2xl border border-primary/35 bg-primary/10 p-5">
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <div className="text-[11px] uppercase tracking-[0.22em] text-primary">
-                          Ad-hoc
-                        </div>
-                        <h2 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
-                          Generate once
-                        </h2>
-                      </div>
-                      <Sparkles className="h-5 w-5 text-primary" />
-                    </div>
-                    <div className="mt-4 flex flex-wrap items-center gap-3">
+              <div className="mx-auto max-w-[1600px] px-4 py-4 sm:px-6">
+                <div className="ambient-panel rounded-2xl border border-border/80 bg-card/75 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex flex-wrap items-center gap-2">
                       <button
                         onClick={() => void runGenerationRef.current("manual")}
                         disabled={isGenerating}
-                        className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-medium text-primary-foreground transition hover:opacity-95 disabled:opacity-60"
+                        className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition hover:opacity-95 disabled:opacity-60"
                       >
                         {isGenerating ? (
                           <Loader2 className="h-4 w-4 animate-spin" />
@@ -598,58 +671,29 @@ export default function Home() {
                         )}
                         {isGenerating
                           ? `Generating ${generationProgress?.progress ?? INITIAL_IMAGE_PROGRESS.progress}%`
-                          : "Generate once"}
+                          : "Generate"}
                       </button>
-                      <span className="text-xs text-muted-foreground">
-                        {promptSeed.trim() ? "Using prompt seed" : "Using generated prompt"}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div
-                    className={cn(
-                      "ambient-panel rounded-2xl border p-5",
-                      loopEnabled
-                        ? "border-destructive/35 bg-destructive/10"
-                        : "border-border/80 bg-card/70"
-                    )}
-                  >
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <div className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">
-                          Schedule
-                        </div>
-                        <h2 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
-                          Scheduled loop
-                        </h2>
-                        <div className="mt-2 inline-flex rounded-full border border-primary/35 bg-primary/10 px-3 py-1 text-xs font-medium text-foreground">
-                          Cadence: {selectedCadence.label}
-                        </div>
-                      </div>
-                      {loopEnabled ? (
-                        <Square className="h-5 w-5 text-foreground" />
-                      ) : (
-                        <Play className="h-5 w-5 text-foreground" />
-                      )}
-                    </div>
-                    <div className="mt-4 flex flex-wrap items-center gap-3">
                       <button
                         onClick={() => setLoopEnabled((value) => !value)}
                         className={cn(
-                          "inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm font-medium transition",
+                          "inline-flex items-center gap-2 rounded-full border px-4 py-2.5 text-sm font-medium transition",
                           loopEnabled
-                            ? "bg-destructive text-destructive-foreground hover:opacity-95"
-                            : "bg-foreground text-background hover:opacity-95"
+                            ? "border-destructive/40 bg-destructive/12 text-foreground hover:bg-destructive/18"
+                            : "border-border/70 bg-background/75 text-muted-foreground hover:border-primary/30 hover:text-foreground"
                         )}
                       >
                         {loopEnabled ? <Square className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-                        {loopEnabled ? "Stop schedule" : "Start schedule"}
+                        {loopEnabled ? "Stop loop" : "Start loop"}
                       </button>
-                      <span className="text-xs text-muted-foreground">
-                        Next run: {loopEnabled ? formatCountdown(nextRunAt) : "Not scheduled"}
-                      </span>
                     </div>
-                    <div className="mt-4 flex flex-wrap gap-2">
+
+                    <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
+                      <span className="status-pill">
+                        {promptSeed.trim() ? "Prompt locked" : "Prompt from plugins"}
+                      </span>
+                      <span className="status-pill">
+                        Next: {loopEnabled ? formatCountdown(nextRunAt) : "Not scheduled"}
+                      </span>
                       {CADENCE_OPTIONS.map((option) => (
                         <button
                           key={option.minutes}
@@ -658,7 +702,7 @@ export default function Home() {
                           className={cn(
                             "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition",
                             cadenceMinutes === option.minutes
-                              ? "border-primary bg-primary text-primary-foreground shadow-[0_0_0_3px_hsl(var(--primary)/0.16)]"
+                              ? "border-primary bg-primary text-primary-foreground"
                               : "border-border/70 bg-background/70 text-muted-foreground hover:border-primary/30 hover:text-foreground"
                           )}
                         >
@@ -673,8 +717,8 @@ export default function Home() {
                 </div>
 
                 <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
-                  <section className="grid content-start gap-5">
-                    <div className="ambient-panel rounded-[2rem] border border-border/80 p-6">
+                  <section className="grid content-start gap-5 lg:grid-cols-[minmax(380px,460px)_minmax(0,1fr)] lg:items-start">
+                    <div className="ambient-panel rounded-[2rem] border border-border/80 p-6 lg:col-start-1 lg:row-start-1">
                       <div className="flex flex-wrap items-start justify-between gap-4">
                         <div>
                           <div className="text-[11px] uppercase tracking-[0.22em] text-primary">
@@ -719,47 +763,142 @@ export default function Home() {
                             ? `LoRA path armed: ${enabledLoras.slice(0, 3).join(", ")}${enabledLoras.length > 3 ? "..." : ""}.`
                             : selectedBackend === "ollama"
                               ? `Ollama image backend${generationConfig?.ollama_image_model ? ` using ${generationConfig.ollama_image_model}` : " using auto model selection"}.`
+                              : selectedBackend === "ernie"
+                                ? `ERNIE-Image${generationConfig?.ernie_prompt_enhancer === false ? "" : " prompt enhancer"} using ${generationConfig?.ernie_image_model ?? "baidu/ERNIE-Image-Turbo"}.`
                               : "Use Settings for downloads, auth, and deeper model configuration."}
                         </div>
                       </div>
 
-                      <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.9fr)]">
+                      <div className="mt-5 grid gap-4">
                         <div className="grid content-start gap-4">
-                          <div>
-                            <label className="mb-2 block text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                              Prompt seed
-                            </label>
-                            <textarea
-                              value={promptSeed}
-                              onChange={(event) => setPromptSeed(event.target.value)}
-                              rows={5}
-                              placeholder="Optional: brutalist greenhouse, paper diorama city, weathered arcade shrine..."
-                              className="w-full rounded-[1.75rem] border border-input/85 bg-background/95 px-4 py-4 text-sm leading-6 text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
-                            />
+                          <div className="rounded-[1.75rem] border border-border/70 bg-background/82 p-4">
+                            <button
+                              type="button"
+                              onClick={() => setPromptBuilderOpen((value) => !value)}
+                              className="flex w-full items-center justify-between gap-3 text-left"
+                            >
+                              <div className="flex items-center gap-2">
+                                <Wand2 className="h-4 w-4 text-primary" />
+                                <span className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                                  Prompt builder
+                                </span>
+                              </div>
+                              {promptBuilderOpen ? (
+                                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                              ) : (
+                                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                              )}
+                            </button>
+
+                            <AnimatePresence initial={false}>
+                              {promptBuilderOpen && (
+                                <motion.div
+                                  initial={{ height: 0, opacity: 0 }}
+                                  animate={{ height: "auto", opacity: 1 }}
+                                  exit={{ height: 0, opacity: 0 }}
+                                  className="overflow-hidden"
+                                >
+                                  <div className="mt-4 grid gap-3">
+                                    <div className="flex flex-wrap gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => setShowMetaPromptModal(true)}
+                                        className="inline-flex items-center gap-2 rounded-full border border-border/70 px-4 py-2 text-sm text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
+                                      >
+                                        <SettingsIcon className="h-3.5 w-3.5" />
+                                        Meta prompt
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => void generatePromptDraft()}
+                                        disabled={isGeneratingPrompt}
+                                        className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-95 disabled:opacity-60"
+                                      >
+                                        {isGeneratingPrompt ? (
+                                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                        ) : (
+                                          <Sparkles className="h-3.5 w-3.5" />
+                                        )}
+                                        Draft prompt
+                                      </button>
+                                    </div>
+
+                                    {isGeneratingPrompt && promptProgress && (
+                                      <TaskProgress progress={promptProgress} compact />
+                                    )}
+
+                                    {promptError && (
+                                      <div className="rounded-2xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                                        {promptError}
+                                      </div>
+                                    )}
+
+                                    <div>
+                                      <label className="mb-2 block text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                                        Final prompt
+                                      </label>
+                                      <textarea
+                                        value={promptSeed}
+                                        onChange={(event) => setPromptSeed(event.target.value)}
+                                        rows={6}
+                                        placeholder="Optional: brutalist greenhouse, paper diorama city, weathered arcade shrine..."
+                                        className="w-full rounded-[1.25rem] border border-input/85 bg-background/95 px-4 py-4 text-sm leading-6 text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                                      />
+                                    </div>
+
+                                    <div className="flex flex-wrap items-center justify-between gap-3">
+                                      <span className="text-xs leading-6 text-muted-foreground">
+                                        {promptSeed.trim()
+                                          ? "Ready to run as written."
+                                          : "Leave empty to generate from plugins at run time."}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => setPromptSeed("")}
+                                        className="rounded-full border border-border/70 px-4 py-2 text-sm text-muted-foreground transition hover:border-primary/30 hover:text-foreground"
+                                      >
+                                        Clear
+                                      </button>
+                                    </div>
+                                  </div>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
                           </div>
 
                           <div className="rounded-[1.75rem] border border-border/70 bg-background/80 px-4 py-4">
-                            <div className="text-sm text-foreground">
-                              {promptSeed.trim()
-                                ? "The one-off action will use this prompt seed."
-                                : "The one-off action will request a generated prompt."}
+                            <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                              Last activity
                             </div>
-                            <div className="mt-2 text-xs leading-6 text-muted-foreground">
-                              Last activity: {lastActivity}
-                            </div>
-                          </div>
-
-                          <div className="flex flex-wrap gap-2">
-                            <button
-                              onClick={() => setPromptSeed("")}
-                              className="rounded-full border border-border/70 px-4 py-3 text-sm text-muted-foreground transition hover:border-primary/30 hover:text-foreground"
-                            >
-                              Clear prompt
-                            </button>
+                            <div className="mt-2 text-sm leading-6 text-foreground">{lastActivity}</div>
                           </div>
                         </div>
 
                         <div className="grid content-start gap-4">
+                          <div className="rounded-[1.75rem] border border-primary/25 bg-primary/10 p-4">
+                            <div className="mb-3 text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                              Model pipeline
+                            </div>
+                            <div className="grid gap-3">
+                              <div className="rounded-2xl border border-border/60 bg-background/78 px-3 py-3">
+                                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                                  Stage 1 prompt
+                                </div>
+                                <div className="mt-1 truncate text-sm font-medium text-foreground" title={promptModelLabel}>
+                                  {promptModelLabel}
+                                </div>
+                              </div>
+                              <div className="rounded-2xl border border-border/60 bg-background/78 px-3 py-3">
+                                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                                  Stage 2 image
+                                </div>
+                                <div className="mt-1 truncate text-sm font-medium text-foreground" title={imageModelLabel}>
+                                  {imageModelLabel}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
                           <div className="rounded-[1.75rem] border border-border/70 bg-background/82 p-4">
                             <div className="mb-3 flex items-center justify-between gap-3">
                               <div className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
@@ -784,11 +923,50 @@ export default function Home() {
                               ))}
                             </div>
                           </div>
+
+                          <div className="rounded-[1.75rem] border border-border/70 bg-background/82 p-4">
+                            <button
+                              type="button"
+                              onClick={() => setRunControlsOpen((value) => !value)}
+                              className="flex w-full items-center justify-between gap-3 text-left"
+                            >
+                              <div className="flex items-center gap-2">
+                                <SlidersHorizontal className="h-4 w-4 text-primary" />
+                                <span className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                                  Run controls
+                                </span>
+                              </div>
+                              {runControlsOpen ? (
+                                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                              ) : (
+                                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                              )}
+                            </button>
+
+                            <AnimatePresence initial={false}>
+                              {runControlsOpen && (
+                                <motion.div
+                                  initial={{ height: 0, opacity: 0 }}
+                                  animate={{ height: "auto", opacity: 1 }}
+                                  exit={{ height: 0, opacity: 0 }}
+                                  className="overflow-hidden"
+                                >
+                                  <div className="mt-4">
+                                    <AdvancedControls
+                                      seed={seed}
+                                      onSeedChange={setSeed}
+                                      onConfigChange={handleRuntimeConfigChange}
+                                    />
+                                  </div>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </div>
                         </div>
                       </div>
                     </div>
 
-                    <div className="ambient-panel rounded-[2rem] border border-border/80 p-5">
+                    <div className="ambient-panel order-first rounded-[2rem] border border-border/80 p-5 lg:sticky lg:top-4 lg:col-start-2 lg:row-start-1 lg:order-none">
                       <div className="mb-4 flex items-center justify-between gap-4">
                         <div>
                           <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
@@ -802,6 +980,15 @@ export default function Home() {
                           <span className="status-pill capitalize">{currentBackend}</span>
                           <span className="status-pill">{currentPluginCount} plugins</span>
                           {isSmokeBackend ? <span className="status-pill">smoke-test quality</span> : null}
+                        </div>
+                      </div>
+
+                      <div className="mb-4 rounded-2xl border border-border/60 bg-background/78 px-4 py-3">
+                        <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                          Image location
+                        </div>
+                        <div className="mt-2 break-all font-mono text-xs leading-5 text-foreground">
+                          {currentImage?.image_path ?? "The saved image path appears here after generation."}
                         </div>
                       </div>
 
@@ -1043,17 +1230,6 @@ export default function Home() {
             </motion.div>
           )}
 
-          {activeTab === "playground" && (
-            <motion.div
-              key="playground"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              className="h-full"
-            >
-              <iframe src="/playground" className="h-full w-full border-0" title="Advanced playground" />
-            </motion.div>
-          )}
         </AnimatePresence>
       </main>
 
@@ -1070,6 +1246,13 @@ export default function Home() {
         </div>
       </footer>
       </div>
+
+      <MetaPromptModal
+        isOpen={showMetaPromptModal}
+        onClose={() => setShowMetaPromptModal(false)}
+        metaPrompt={metaPrompt}
+        onSave={setMetaPrompt}
+      />
     </div>
   );
 }

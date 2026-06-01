@@ -56,6 +56,7 @@ cp .env.example .env
 # - OLLAMA_IMAGE_MODEL is optional and only used for IMAGE_BACKEND=ollama
 # - HF_TOKEN is optional for small/turbo/smoke public models
 # - IMAGE_BACKEND=qwen enables the NF4 Qwen-Image backend for text-heavy posters and signage
+# - IMAGE_BACKEND=ernie enables ERNIE-Image-Turbo for prompt-enhanced multilingual text rendering
 # - IMAGE_BACKEND=auto uses FLUX if cached, otherwise the small public fallback
 
 # Generate from the CLI
@@ -110,6 +111,13 @@ For Qwen-Image typography generation:
 - set `QWEN_IMAGE_MODEL=Qwen/Qwen-Image` only on machines with enough memory for the full model
 - enable `QWEN_IMAGE_LIGHTNING=true` only if you also want the optional Lightning LoRA few-step path
 
+For ERNIE-Image-Turbo generation:
+
+- use **Settings → Models** to download `baidu/ERNIE-Image-Turbo`
+- switch the active backend to `ERNIE-Image`
+- keep the prompt enhancer on for richer image prompts, or turn it off for stricter prompt following
+- use prompts with visible English, Chinese, or Japanese text when you want to stress its text-in-image behavior
+
 ## 🔑 Why Choose This?
 
 - **🏠 100% Local**: No cloud APIs, no usage limits, complete privacy
@@ -140,6 +148,9 @@ uv run dreamgen generate --backend zimage
 
 # Force Qwen-Image for text-rich posters and signs
 uv run dreamgen generate --backend qwen
+
+# Force ERNIE-Image-Turbo for prompt-enhanced multilingual text rendering
+uv run dreamgen generate --backend ernie
 
 # List prompt plugins
 uv run dreamgen plugins list

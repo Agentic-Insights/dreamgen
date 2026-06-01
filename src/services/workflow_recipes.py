@@ -247,17 +247,14 @@ def apply_config_overrides(config: Config, overrides: dict[str, Any] | None) -> 
         return
 
     image_values = {key: getattr(config.image, key) for key in CONFIG_IMAGE_KEYS}
-    model_values = {
+    model_values: dict[str, str] = {
         "image_backend": config.model.image_backend,
         "ollama_image_model": config.model.ollama_image_model,
     }
-    lora_values = {
-        "enabled_loras": list(config.model.lora.enabled_loras),
-        "application_probability": config.model.lora.application_probability,
-    }
-    plugin_values = {
-        name: {"enabled": info.enabled, "order": info.order}
-        for name, info in plugin_manager.plugins.items()
+    lora_enabled_loras = list(config.model.lora.enabled_loras)
+    lora_application_probability = config.model.lora.application_probability
+    plugin_values: dict[str, tuple[bool, int]] = {
+        name: (info.enabled, info.order) for name, info in plugin_manager.plugins.items()
     }
 
     try:
@@ -290,9 +287,9 @@ def apply_config_overrides(config: Config, overrides: dict[str, Any] | None) -> 
 
         plugin_overrides = overrides.get("plugins") or {}
         if "enabled" in plugin_overrides:
-            enabled = {str(item).strip() for item in plugin_overrides["enabled"]}
+            enabled_plugin_names = {str(item).strip() for item in plugin_overrides["enabled"]}
             for name, info in plugin_manager.plugins.items():
-                info.enabled = name in enabled
+                info.enabled = name in enabled_plugin_names
 
         yield
     finally:
@@ -300,12 +297,12 @@ def apply_config_overrides(config: Config, overrides: dict[str, Any] | None) -> 
             setattr(config.image, key, value)
         config.model.image_backend = model_values["image_backend"]
         config.model.ollama_image_model = model_values["ollama_image_model"]
-        config.model.lora.enabled_loras = lora_values["enabled_loras"]
-        config.model.lora.application_probability = lora_values["application_probability"]
-        for name, values in plugin_values.items():
+        config.model.lora.enabled_loras = lora_enabled_loras
+        config.model.lora.application_probability = lora_application_probability
+        for name, (plugin_enabled, order) in plugin_values.items():
             if name in plugin_manager.plugins:
-                plugin_manager.plugins[name].enabled = values["enabled"]
-                plugin_manager.plugins[name].order = values["order"]
+                plugin_manager.plugins[name].enabled = plugin_enabled
+                plugin_manager.plugins[name].order = order
 
 
 def _object_payload(payload: dict[str, Any], key: str, recipe_id: str) -> dict[str, Any]:

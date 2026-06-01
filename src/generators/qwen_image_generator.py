@@ -88,6 +88,13 @@ class QwenImageGenerator:
         normalized = self.device_map.strip().lower()
         if normalized in {"", "none", "false", "off"}:
             return None
+        if normalized in {"cuda", "gpu"}:
+            logger.warning(
+                "Qwen-Image device_map=%s is not supported by Diffusers; using direct %s placement.",
+                normalized,
+                self.device,
+            )
+            return None
         return normalized
 
     def _hf_token(self) -> str | None:

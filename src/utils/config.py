@@ -37,6 +37,8 @@ class ModelConfig:
     qwen_lightning: bool
     qwen_lightning_lora: str
     qwen_lightning_weight: str
+    ernie_image_model: str
+    ernie_prompt_enhancer: bool
     ollama_model: str
     ollama_image_model: str
     ollama_temperature: float
@@ -136,7 +138,7 @@ class Config:
             image_backend = "mock"
         elif configured_backend:
             image_backend = configured_backend
-        elif legacy_image_model in {"flux", "ollama", "zimage", "qwen"}:
+        elif legacy_image_model in {"flux", "ollama", "zimage", "qwen", "ernie"}:
             image_backend = legacy_image_model
         else:
             image_backend = "auto"
@@ -178,6 +180,13 @@ class Config:
             "QWEN_IMAGE_LIGHTNING_WEIGHT",
             "Qwen-Image-Lightning-8steps-V1.0.safetensors",
         )
+        ernie_image_model = os.getenv("ERNIE_IMAGE_MODEL", "baidu/ERNIE-Image-Turbo")
+        ernie_prompt_enhancer = os.getenv("ERNIE_IMAGE_PROMPT_ENHANCER", "true").lower() in (
+            "true",
+            "1",
+            "yes",
+            "on",
+        )
 
         legacy_tiny_model = os.getenv("TINY_SD_MODEL")
         if legacy_tiny_model and not os.getenv("SMOKE_TEST_MODEL"):
@@ -215,6 +224,8 @@ class Config:
             qwen_lightning=qwen_lightning,
             qwen_lightning_lora=qwen_lightning_lora,
             qwen_lightning_weight=qwen_lightning_weight,
+            ernie_image_model=ernie_image_model,
+            ernie_prompt_enhancer=ernie_prompt_enhancer,
             ollama_model=ollama_model,
             ollama_image_model=ollama_image_model,
             ollama_temperature=float(ollama_temp),
@@ -341,6 +352,7 @@ class Config:
             "ollama",
             "zimage",
             "qwen",
+            "ernie",
             "small",
             "turbo",
             "smoke",
@@ -348,7 +360,7 @@ class Config:
         }:
             errors.append(
                 f"Invalid image backend: {self.model.image_backend} "
-                "(must be one of auto, flux, ollama, zimage, qwen, small, turbo, smoke, mock)"
+                "(must be one of auto, flux, ollama, zimage, qwen, ernie, small, turbo, smoke, mock)"
             )
         if not (1 <= self.image.num_inference_steps <= 150):
             errors.append(

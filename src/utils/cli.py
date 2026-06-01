@@ -145,12 +145,23 @@ def _free_cache_gb(model_name: str) -> float:
 def validate_generation_config(config: Config, resolved_backend: str) -> list[str]:
     """Validate config that can fail before submitting long generation work."""
     errors = config.validate()
-    valid_backends = {"auto", "flux", "ollama", "zimage", "qwen", "small", "turbo", "smoke", "mock"}
+    valid_backends = {
+        "auto",
+        "flux",
+        "ollama",
+        "zimage",
+        "qwen",
+        "ernie",
+        "small",
+        "turbo",
+        "smoke",
+        "mock",
+    }
 
     if resolved_backend not in valid_backends:
         errors.append(
             f"Invalid image backend: {resolved_backend} "
-            "(must be one of auto, flux, ollama, zimage, qwen, small, turbo, smoke, mock)"
+            "(must be one of auto, flux, ollama, zimage, qwen, ernie, small, turbo, smoke, mock)"
         )
 
     if (
@@ -186,6 +197,22 @@ def validate_generation_config(config: Config, resolved_backend: str) -> list[st
                 f"Qwen-Image is not fully cached and the Hugging Face cache filesystem has "
                 f"only {free_gb:.1f} GB free. Free at least {required_gb} GB or move "
                 "HF_HOME/HF_HUB_CACHE to a larger disk before using --backend qwen."
+            )
+
+    if resolved_backend == "ernie":
+        incomplete = incomplete_model_downloads(config.model.ernie_image_model)
+        free_gb = _free_cache_gb(config.model.ernie_image_model)
+        if incomplete:
+            errors.append(
+                f"ERNIE-Image cache has {len(incomplete)} incomplete download(s). "
+                "Complete the model download or delete the incomplete cache files before generation."
+            )
+        required_gb = required_model_cache_gb(config.model.ernie_image_model)
+        if not is_model_cached(config.model.ernie_image_model) and free_gb < required_gb:
+            errors.append(
+                f"ERNIE-Image is not fully cached and the Hugging Face cache filesystem has "
+                f"only {free_gb:.1f} GB free. Free at least {required_gb} GB or move "
+                "HF_HOME/HF_HUB_CACHE to a larger disk before using --backend ernie."
             )
 
     return errors
@@ -392,7 +419,7 @@ def generate(
         None,
         "--backend",
         "--model",
-        help="Override the image backend for this run (flux, ollama, zimage, qwen, small, turbo, smoke, mock)",
+        help="Override the image backend for this run (flux, ollama, zimage, qwen, ernie, small, turbo, smoke, mock)",
     ),
     recipe: Optional[str] = typer.Option(
         None,
@@ -724,7 +751,7 @@ def loop(
         None,
         "--backend",
         "--model",
-        help="Override the image backend for this run (flux, ollama, zimage, qwen, small, turbo, smoke, mock)",
+        help="Override the image backend for this run (flux, ollama, zimage, qwen, ernie, small, turbo, smoke, mock)",
     ),
     mock: bool = typer.Option(
         False,
