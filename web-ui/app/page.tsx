@@ -10,6 +10,9 @@ import {
   Play,
   RotateCcw,
   Settings as SettingsIcon,
+  ChevronDown,
+  ChevronRight,
+  SlidersHorizontal,
   Sparkles,
   Square,
   Wand2,
@@ -18,6 +21,8 @@ import { AnimatePresence, motion } from "framer-motion";
 
 import Gallery from "@/components/Gallery";
 import Settings from "@/components/Settings";
+import AdvancedControls from "@/components/AdvancedControls";
+import MetaPromptModal from "@/components/MetaPromptModal";
 import TaskProgress from "@/components/TaskProgress";
 import {
   API_BASE,
@@ -33,12 +38,13 @@ import {
   getFallbackProgress,
   getTaskProgressUpdate,
   INITIAL_IMAGE_PROGRESS,
+  INITIAL_PROMPT_PROGRESS,
   type ProgressSnapshot,
 } from "@/lib/task-progress";
 import { cn } from "@/lib/utils";
 import galleryCache from "@/lib/cache";
 
-type TabId = "generate" | "gallery" | "settings" | "playground";
+type TabId = "generate" | "gallery" | "settings";
 
 type CadenceOption = {
   label: string;
@@ -126,6 +132,14 @@ const describeGenerationEvent = (event: GenerationEvent) => {
 export default function Home() {
   const [activeTab, setActiveTab] = useState<TabId>("generate");
   const [promptSeed, setPromptSeed] = useState("");
+  const [metaPrompt, setMetaPrompt] = useState("");
+  const [promptError, setPromptError] = useState<string | null>(null);
+  const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
+  const [promptProgress, setPromptProgress] = useState<ProgressSnapshot | null>(null);
+  const [showMetaPromptModal, setShowMetaPromptModal] = useState(false);
+  const [promptBuilderOpen, setPromptBuilderOpen] = useState(true);
+  const [runControlsOpen, setRunControlsOpen] = useState(false);
+  const [seed, setSeed] = useState<number | null>(null);
   const [cadenceMinutes, setCadenceMinutes] = useState(60);
   const [loopEnabled, setLoopEnabled] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -148,7 +162,9 @@ export default function Home() {
   const runGenerationRef = useRef<(source: "manual" | "loop") => Promise<void>>(
     async () => {}
   );
+  const promptRequestIdRef = useRef<string | null>(null);
   const generationRequestIdRef = useRef<string | null>(null);
+  const promptResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const generationResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const currentBackend =
@@ -259,6 +275,7 @@ export default function Home() {
       const response = await api.generate({
         prompt: promptSeedRef.current.trim() || undefined,
         enable_plugins: true,
+        seed: seed ?? undefined,
         client_request_id: clientRequestId,
       });
 
@@ -335,6 +352,17 @@ export default function Home() {
     loadGenerationEvents();
 
     const unsubscribe = api.subscribeWebSocket((data) => {
+      const nextPromptProgress = getTaskProgressUpdate(
+        data,
+        "prompt_generation",
+        promptRequestIdRef.current
+      );
+      if (nextPromptProgress) {
+        setPromptProgress((prev) =>
+          prev && prev.progress > nextPromptProgress.progress ? prev : nextPromptProgress
+        );
+      }
+
       const nextProgress = getTaskProgressUpdate(
         data,
         "image_generation",
@@ -362,6 +390,9 @@ export default function Home() {
 
     return () => {
       unsubscribe();
+      if (promptResetTimeoutRef.current) {
+        clearTimeout(promptResetTimeoutRef.current);
+      }
       if (generationResetTimeoutRef.current) {
         clearTimeout(generationResetTimeoutRef.current);
       }
@@ -379,6 +410,18 @@ export default function Home() {
 
     return () => clearTimeout(timeoutId);
   }, [generationProgress, isGenerating]);
+
+  useEffect(() => {
+    if (!isGeneratingPrompt || !promptProgress || promptProgress.progress >= 96) return;
+
+    const timeoutId = setTimeout(() => {
+      setPromptProgress((prev) =>
+        prev ? getFallbackProgress("prompt_generation", prev) : prev
+      );
+    }, 1800);
+
+    return () => clearTimeout(timeoutId);
+  }, [isGeneratingPrompt, promptProgress]);
 
   useEffect(() => {
     if (!loopEnabled) {
@@ -410,8 +453,45 @@ export default function Home() {
     { id: "generate" as const, label: "Create", icon: Sparkles },
     { id: "gallery" as const, label: "Gallery", icon: ImageIcon },
     { id: "settings" as const, label: "Settings", icon: SettingsIcon },
-    { id: "playground" as const, label: "Advanced", icon: Wand2 },
   ];
+
+  const generatePromptDraft = async () => {
+    const clientRequestId = createClientRequestId("prompt");
+    promptRequestIdRef.current = clientRequestId;
+    if (promptResetTimeoutRef.current) {
+      clearTimeout(promptResetTimeoutRef.current);
+    }
+    setIsGeneratingPrompt(true);
+    setPromptError(null);
+    setPromptProgress(INITIAL_PROMPT_PROGRESS);
+
+    try {
+      const response = await api.generatePrompt(metaPrompt || undefined, clientRequestId);
+      setPromptSeed(response.prompt);
+      promptSeedRef.current = response.prompt;
+      addLog("Prompt draft generated.");
+      setPromptProgress({
+        progress: 100,
+        title: "Prompt ready",
+        detail: "The draft prompt is ready to edit or run.",
+      });
+      promptResetTimeoutRef.current = setTimeout(() => {
+        setPromptProgress(null);
+      }, 900);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to generate prompt";
+      setPromptError(message);
+      addLog(`Prompt generation failed: ${message}`, "error");
+      setPromptProgress(null);
+    } finally {
+      promptRequestIdRef.current = null;
+      setIsGeneratingPrompt(false);
+    }
+  };
+
+  const handleRuntimeConfigChange = (updates: Partial<GenerationConfig>) => {
+    setGenerationConfig((current) => (current ? { ...current, ...updates } : current));
+  };
 
   const togglePlugin = async (pluginName: string) => {
     try {
@@ -667,37 +747,106 @@ export default function Home() {
 
                       <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.9fr)]">
                         <div className="grid content-start gap-4">
-                          <div>
-                            <label className="mb-2 block text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                              Prompt seed
-                            </label>
-                            <textarea
-                              value={promptSeed}
-                              onChange={(event) => setPromptSeed(event.target.value)}
-                              rows={5}
-                              placeholder="Optional: brutalist greenhouse, paper diorama city, weathered arcade shrine..."
-                              className="w-full rounded-[1.75rem] border border-input/85 bg-background/95 px-4 py-4 text-sm leading-6 text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
-                            />
+                          <div className="rounded-[1.75rem] border border-border/70 bg-background/82 p-4">
+                            <button
+                              type="button"
+                              onClick={() => setPromptBuilderOpen((value) => !value)}
+                              className="flex w-full items-center justify-between gap-3 text-left"
+                            >
+                              <div className="flex items-center gap-2">
+                                <Wand2 className="h-4 w-4 text-primary" />
+                                <span className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                                  Prompt builder
+                                </span>
+                              </div>
+                              {promptBuilderOpen ? (
+                                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                              ) : (
+                                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                              )}
+                            </button>
+
+                            <AnimatePresence initial={false}>
+                              {promptBuilderOpen && (
+                                <motion.div
+                                  initial={{ height: 0, opacity: 0 }}
+                                  animate={{ height: "auto", opacity: 1 }}
+                                  exit={{ height: 0, opacity: 0 }}
+                                  className="overflow-hidden"
+                                >
+                                  <div className="mt-4 grid gap-3">
+                                    <div className="flex flex-wrap gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => setShowMetaPromptModal(true)}
+                                        className="inline-flex items-center gap-2 rounded-full border border-border/70 px-4 py-2 text-sm text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
+                                      >
+                                        <SettingsIcon className="h-3.5 w-3.5" />
+                                        Meta prompt
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => void generatePromptDraft()}
+                                        disabled={isGeneratingPrompt}
+                                        className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-95 disabled:opacity-60"
+                                      >
+                                        {isGeneratingPrompt ? (
+                                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                        ) : (
+                                          <Sparkles className="h-3.5 w-3.5" />
+                                        )}
+                                        Draft prompt
+                                      </button>
+                                    </div>
+
+                                    {isGeneratingPrompt && promptProgress && (
+                                      <TaskProgress progress={promptProgress} compact />
+                                    )}
+
+                                    {promptError && (
+                                      <div className="rounded-2xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                                        {promptError}
+                                      </div>
+                                    )}
+
+                                    <div>
+                                      <label className="mb-2 block text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                                        Final prompt
+                                      </label>
+                                      <textarea
+                                        value={promptSeed}
+                                        onChange={(event) => setPromptSeed(event.target.value)}
+                                        rows={6}
+                                        placeholder="Optional: brutalist greenhouse, paper diorama city, weathered arcade shrine..."
+                                        className="w-full rounded-[1.25rem] border border-input/85 bg-background/95 px-4 py-4 text-sm leading-6 text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                                      />
+                                    </div>
+
+                                    <div className="flex flex-wrap items-center justify-between gap-3">
+                                      <span className="text-xs leading-6 text-muted-foreground">
+                                        {promptSeed.trim()
+                                          ? "Ready to run as written."
+                                          : "Leave empty to generate from plugins at run time."}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => setPromptSeed("")}
+                                        className="rounded-full border border-border/70 px-4 py-2 text-sm text-muted-foreground transition hover:border-primary/30 hover:text-foreground"
+                                      >
+                                        Clear
+                                      </button>
+                                    </div>
+                                  </div>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
                           </div>
 
                           <div className="rounded-[1.75rem] border border-border/70 bg-background/80 px-4 py-4">
-                            <div className="text-sm text-foreground">
-                              {promptSeed.trim()
-                                ? "The one-off action will use this prompt seed."
-                                : "The one-off action will request a generated prompt."}
+                            <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                              Last activity
                             </div>
-                            <div className="mt-2 text-xs leading-6 text-muted-foreground">
-                              Last activity: {lastActivity}
-                            </div>
-                          </div>
-
-                          <div className="flex flex-wrap gap-2">
-                            <button
-                              onClick={() => setPromptSeed("")}
-                              className="rounded-full border border-border/70 px-4 py-3 text-sm text-muted-foreground transition hover:border-primary/30 hover:text-foreground"
-                            >
-                              Clear prompt
-                            </button>
+                            <div className="mt-2 text-sm leading-6 text-foreground">{lastActivity}</div>
                           </div>
                         </div>
 
@@ -749,6 +898,45 @@ export default function Home() {
                                 </button>
                               ))}
                             </div>
+                          </div>
+
+                          <div className="rounded-[1.75rem] border border-border/70 bg-background/82 p-4">
+                            <button
+                              type="button"
+                              onClick={() => setRunControlsOpen((value) => !value)}
+                              className="flex w-full items-center justify-between gap-3 text-left"
+                            >
+                              <div className="flex items-center gap-2">
+                                <SlidersHorizontal className="h-4 w-4 text-primary" />
+                                <span className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                                  Run controls
+                                </span>
+                              </div>
+                              {runControlsOpen ? (
+                                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                              ) : (
+                                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                              )}
+                            </button>
+
+                            <AnimatePresence initial={false}>
+                              {runControlsOpen && (
+                                <motion.div
+                                  initial={{ height: 0, opacity: 0 }}
+                                  animate={{ height: "auto", opacity: 1 }}
+                                  exit={{ height: 0, opacity: 0 }}
+                                  className="overflow-hidden"
+                                >
+                                  <div className="mt-4">
+                                    <AdvancedControls
+                                      seed={seed}
+                                      onSeedChange={setSeed}
+                                      onConfigChange={handleRuntimeConfigChange}
+                                    />
+                                  </div>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
                           </div>
                         </div>
                       </div>
@@ -1001,17 +1189,6 @@ export default function Home() {
             </motion.div>
           )}
 
-          {activeTab === "playground" && (
-            <motion.div
-              key="playground"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              className="h-full"
-            >
-              <iframe src="/playground" className="h-full w-full border-0" title="Advanced playground" />
-            </motion.div>
-          )}
         </AnimatePresence>
       </main>
 
@@ -1028,6 +1205,13 @@ export default function Home() {
         </div>
       </footer>
       </div>
+
+      <MetaPromptModal
+        isOpen={showMetaPromptModal}
+        onClose={() => setShowMetaPromptModal(false)}
+        metaPrompt={metaPrompt}
+        onSave={setMetaPrompt}
+      />
     </div>
   );
 }
