@@ -185,8 +185,6 @@ export default function Home() {
       ? generationConfig?.ollama_image_model || "Ollama image model"
       : generationConfig?.image_model ?? selectedBackend;
   const lastActivity = logs[logs.length - 1];
-  const selectedCadence =
-    CADENCE_OPTIONS.find((option) => option.minutes === cadenceMinutes) ?? CADENCE_OPTIONS[2];
 
   const addLog = (message: string, type: "info" | "error" = "info") => {
     const timestamp = new Date().toLocaleTimeString();
@@ -593,25 +591,14 @@ export default function Home() {
               exit={{ opacity: 0, y: -8 }}
               className="h-full overflow-y-auto"
             >
-              <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
-                <div className="grid gap-4 lg:grid-cols-2">
-                  <div className="ambient-panel rounded-2xl border border-primary/35 bg-primary/10 p-5">
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <div className="text-[11px] uppercase tracking-[0.22em] text-primary">
-                          Ad-hoc
-                        </div>
-                        <h2 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
-                          Generate once
-                        </h2>
-                      </div>
-                      <Sparkles className="h-5 w-5 text-primary" />
-                    </div>
-                    <div className="mt-4 flex flex-wrap items-center gap-3">
+              <div className="mx-auto max-w-[1600px] px-4 py-4 sm:px-6">
+                <div className="ambient-panel rounded-2xl border border-border/80 bg-card/75 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex flex-wrap items-center gap-2">
                       <button
                         onClick={() => void runGenerationRef.current("manual")}
                         disabled={isGenerating}
-                        className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-medium text-primary-foreground transition hover:opacity-95 disabled:opacity-60"
+                        className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition hover:opacity-95 disabled:opacity-60"
                       >
                         {isGenerating ? (
                           <Loader2 className="h-4 w-4 animate-spin" />
@@ -620,58 +607,29 @@ export default function Home() {
                         )}
                         {isGenerating
                           ? `Generating ${generationProgress?.progress ?? INITIAL_IMAGE_PROGRESS.progress}%`
-                          : "Generate once"}
+                          : "Generate"}
                       </button>
-                      <span className="text-xs text-muted-foreground">
-                        {promptSeed.trim() ? "Using prompt seed" : "Using generated prompt"}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div
-                    className={cn(
-                      "ambient-panel rounded-2xl border p-5",
-                      loopEnabled
-                        ? "border-destructive/35 bg-destructive/10"
-                        : "border-border/80 bg-card/70"
-                    )}
-                  >
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <div className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">
-                          Schedule
-                        </div>
-                        <h2 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
-                          Scheduled loop
-                        </h2>
-                        <div className="mt-2 inline-flex rounded-full border border-primary/35 bg-primary/10 px-3 py-1 text-xs font-medium text-foreground">
-                          Cadence: {selectedCadence.label}
-                        </div>
-                      </div>
-                      {loopEnabled ? (
-                        <Square className="h-5 w-5 text-foreground" />
-                      ) : (
-                        <Play className="h-5 w-5 text-foreground" />
-                      )}
-                    </div>
-                    <div className="mt-4 flex flex-wrap items-center gap-3">
                       <button
                         onClick={() => setLoopEnabled((value) => !value)}
                         className={cn(
-                          "inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm font-medium transition",
+                          "inline-flex items-center gap-2 rounded-full border px-4 py-2.5 text-sm font-medium transition",
                           loopEnabled
-                            ? "bg-destructive text-destructive-foreground hover:opacity-95"
-                            : "bg-foreground text-background hover:opacity-95"
+                            ? "border-destructive/40 bg-destructive/12 text-foreground hover:bg-destructive/18"
+                            : "border-border/70 bg-background/75 text-muted-foreground hover:border-primary/30 hover:text-foreground"
                         )}
                       >
                         {loopEnabled ? <Square className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-                        {loopEnabled ? "Stop schedule" : "Start schedule"}
+                        {loopEnabled ? "Stop loop" : "Start loop"}
                       </button>
-                      <span className="text-xs text-muted-foreground">
-                        Next run: {loopEnabled ? formatCountdown(nextRunAt) : "Not scheduled"}
-                      </span>
                     </div>
-                    <div className="mt-4 flex flex-wrap gap-2">
+
+                    <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
+                      <span className="status-pill">
+                        {promptSeed.trim() ? "Prompt locked" : "Prompt from plugins"}
+                      </span>
+                      <span className="status-pill">
+                        Next: {loopEnabled ? formatCountdown(nextRunAt) : "Not scheduled"}
+                      </span>
                       {CADENCE_OPTIONS.map((option) => (
                         <button
                           key={option.minutes}
@@ -680,7 +638,7 @@ export default function Home() {
                           className={cn(
                             "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition",
                             cadenceMinutes === option.minutes
-                              ? "border-primary bg-primary text-primary-foreground shadow-[0_0_0_3px_hsl(var(--primary)/0.16)]"
+                              ? "border-primary bg-primary text-primary-foreground"
                               : "border-border/70 bg-background/70 text-muted-foreground hover:border-primary/30 hover:text-foreground"
                           )}
                         >
@@ -695,8 +653,8 @@ export default function Home() {
                 </div>
 
                 <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
-                  <section className="grid content-start gap-5">
-                    <div className="ambient-panel rounded-[2rem] border border-border/80 p-6">
+                  <section className="grid content-start gap-5 lg:grid-cols-[minmax(380px,460px)_minmax(0,1fr)] lg:items-start">
+                    <div className="ambient-panel rounded-[2rem] border border-border/80 p-6 lg:col-start-1 lg:row-start-1">
                       <div className="flex flex-wrap items-start justify-between gap-4">
                         <div>
                           <div className="text-[11px] uppercase tracking-[0.22em] text-primary">
@@ -745,7 +703,7 @@ export default function Home() {
                         </div>
                       </div>
 
-                      <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.9fr)]">
+                      <div className="mt-5 grid gap-4">
                         <div className="grid content-start gap-4">
                           <div className="rounded-[1.75rem] border border-border/70 bg-background/82 p-4">
                             <button
@@ -942,7 +900,7 @@ export default function Home() {
                       </div>
                     </div>
 
-                    <div className="ambient-panel rounded-[2rem] border border-border/80 p-5">
+                    <div className="ambient-panel order-first rounded-[2rem] border border-border/80 p-5 lg:sticky lg:top-4 lg:col-start-2 lg:row-start-1 lg:order-none">
                       <div className="mb-4 flex items-center justify-between gap-4">
                         <div>
                           <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
@@ -956,6 +914,15 @@ export default function Home() {
                           <span className="status-pill capitalize">{currentBackend}</span>
                           <span className="status-pill">{currentPluginCount} plugins</span>
                           {isSmokeBackend ? <span className="status-pill">smoke-test quality</span> : null}
+                        </div>
+                      </div>
+
+                      <div className="mb-4 rounded-2xl border border-border/60 bg-background/78 px-4 py-3">
+                        <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                          Image location
+                        </div>
+                        <div className="mt-2 break-all font-mono text-xs leading-5 text-foreground">
+                          {currentImage?.image_path ?? "The saved image path appears here after generation."}
                         </div>
                       </div>
 
