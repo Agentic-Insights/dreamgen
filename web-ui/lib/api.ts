@@ -151,6 +151,8 @@ export interface GenerationConfig {
   qwen_prompt_magic?: boolean;
   qwen_device_map?: string;
   qwen_lightning?: boolean;
+  ernie_image_model?: string;
+  ernie_prompt_enhancer?: boolean;
 }
 
 export interface GenerationEvent {

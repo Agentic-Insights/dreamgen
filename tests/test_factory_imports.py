@@ -25,6 +25,8 @@ def make_config(image_backend: str = "small"):
     config.model.qwen_lightning = False
     config.model.qwen_lightning_lora = "lightx2v/Qwen-Image-Lightning"
     config.model.qwen_lightning_weight = "Qwen-Image-Lightning-8steps-V1.0.safetensors"
+    config.model.ernie_image_model = "baidu/ERNIE-Image-Turbo"
+    config.model.ernie_prompt_enhancer = True
     config.image.height = 1024
     config.image.width = 1024
     config.image.num_inference_steps = 4
@@ -106,3 +108,33 @@ def test_factory_imports_qwen_when_requested():
 
     assert generator.backend_name == "qwen"
     assert backend_name == "qwen-image"
+
+
+def test_factory_only_imports_ernie_when_requested(monkeypatch):
+    """The ERNIE backend should be lazily imported like other heavyweight backends."""
+    original_import = builtins.__import__
+
+    def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name.endswith("ernie_image_generator"):
+            raise ImportError("ernie backend intentionally unavailable in this test")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+    sys.modules.pop("src.generators.factory", None)
+    sys.modules.pop("src.generators.ernie_image_generator", None)
+
+    factory = importlib.import_module("src.generators.factory")
+    generator, backend_name = factory.create_image_generator(make_config("small"))
+
+    assert generator.backend_name == "small"
+    assert backend_name == "small-sd"
+
+
+def test_factory_imports_ernie_when_requested():
+    """ERNIE backend selection should construct the dedicated generator."""
+    from src.generators.factory import create_image_generator
+
+    generator, backend_name = create_image_generator(make_config("ernie"))
+
+    assert generator.backend_name == "ernie"
+    assert backend_name == "ernie-image"

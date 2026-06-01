@@ -44,6 +44,7 @@ const IMAGE_BACKEND_OPTIONS = [
   { id: "auto", label: "Auto", description: "Use the best ready local backend." },
   { id: "zimage", label: "Z-Image", description: "Use the Z-Image stack and local LoRAs." },
   { id: "qwen", label: "Qwen-Image", description: "Use Qwen-Image for text-rich posters, signs, and bilingual typography." },
+  { id: "ernie", label: "ERNIE-Image", description: "Use ERNIE-Image-Turbo for 8-step prompt-enhanced multilingual text rendering." },
   { id: "ollama", label: "Ollama Image", description: "Use an image-capable Ollama model over the local Ollama host API." },
   { id: "flux", label: "FLUX", description: "Prefer the FLUX transformer path." },
   { id: "small", label: "Small SD", description: "Use the lightweight public fallback." },
@@ -608,6 +609,44 @@ export default function Settings({ systemStatus }: SettingsProps) {
                             No image-capable Ollama model is currently available.
                           </span>
                         )}
+                      </div>
+                    )}
+
+                    {selectedBackend === "ernie" && (
+                      <div className="mt-4 grid gap-3 rounded-md bg-muted/50 p-3 text-sm">
+                        <div className="text-muted-foreground">
+                          ERNIE-Image-Turbo runs locally through Diffusers with an optional prompt enhancer before rendering.
+                        </div>
+                        <label className="grid gap-1">
+                          <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                            ERNIE model
+                          </span>
+                          <input
+                            value={generationConfig?.ernie_image_model ?? "baidu/ERNIE-Image-Turbo"}
+                            onChange={(event) =>
+                              updateGenerationConfig({ ernie_image_model: event.target.value })
+                            }
+                            className="rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary"
+                          />
+                        </label>
+                        <label className="flex items-center justify-between gap-3 rounded-md border border-border bg-background/75 px-3 py-2">
+                          <span>
+                            <span className="block text-sm font-medium text-foreground">
+                              Prompt enhancer
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                              Improves visual quality, but may soften strict instruction following.
+                            </span>
+                          </span>
+                          <input
+                            type="checkbox"
+                            checked={generationConfig?.ernie_prompt_enhancer !== false}
+                            onChange={(event) =>
+                              updateGenerationConfig({ ernie_prompt_enhancer: event.target.checked })
+                            }
+                            className="h-4 w-4 accent-primary"
+                          />
+                        </label>
                       </div>
                     )}
                   </div>

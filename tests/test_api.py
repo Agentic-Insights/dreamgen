@@ -76,6 +76,7 @@ def test_status_endpoint(client):
         "flux-schnell",
         "flux-dev",
         "qwen-image",
+        "ernie-image",
     ]
 
 
@@ -203,6 +204,8 @@ def test_generation_config_endpoint(client):
     assert data["qwen_image_model"] == "diffusers/qwen-image-nf4"
     assert data["qwen_prompt_magic"] is True
     assert data["qwen_device_map"] == "balanced"
+    assert data["ernie_image_model"] == "baidu/ERNIE-Image-Turbo"
+    assert data["ernie_prompt_enhancer"] is True
 
 
 def test_set_generation_config_updates_backend_and_loras(client):
@@ -212,6 +215,8 @@ def test_set_generation_config_updates_backend_and_loras(client):
     original_ollama_image_model = api_config.model.ollama_image_model
     original_qwen_prompt_magic = api_config.model.qwen_prompt_magic
     original_qwen_device_map = api_config.model.qwen_device_map
+    original_ernie_image_model = api_config.model.ernie_image_model
+    original_ernie_prompt_enhancer = api_config.model.ernie_prompt_enhancer
     original_enabled_loras = list(api_config.model.lora.enabled_loras)
     original_probability = api_config.model.lora.application_probability
 
@@ -224,6 +229,8 @@ def test_set_generation_config_updates_backend_and_loras(client):
                 "ollama_image_model": "x/z-image-turbo:latest",
                 "qwen_prompt_magic": False,
                 "qwen_device_map": "none",
+                "ernie_image_model": "baidu/ERNIE-Image",
+                "ernie_prompt_enhancer": False,
                 "enabled_loras": ["pixel-art", "comic"],
                 "lora_application_probability": 0.25,
             },
@@ -240,6 +247,8 @@ def test_set_generation_config_updates_backend_and_loras(client):
         assert data["ollama_image_model"] == "x/z-image-turbo:latest"
         assert data["qwen_prompt_magic"] is False
         assert data["qwen_device_map"] == "none"
+        assert data["ernie_image_model"] == "baidu/ERNIE-Image"
+        assert data["ernie_prompt_enhancer"] is False
         assert data["enabled_loras"] == ["pixel-art", "comic"]
         assert data["lora_application_probability"] == 0.25
         assert api_config.model.image_backend == "small"
@@ -247,6 +256,8 @@ def test_set_generation_config_updates_backend_and_loras(client):
         assert api_config.model.ollama_image_model == "x/z-image-turbo:latest"
         assert api_config.model.qwen_prompt_magic is False
         assert api_config.model.qwen_device_map == "none"
+        assert api_config.model.ernie_image_model == "baidu/ERNIE-Image"
+        assert api_config.model.ernie_prompt_enhancer is False
         assert api_config.model.lora.enabled_loras == ["pixel-art", "comic"]
         assert api_config.model.lora.application_probability == 0.25
     finally:
@@ -255,6 +266,8 @@ def test_set_generation_config_updates_backend_and_loras(client):
         api_config.model.ollama_image_model = original_ollama_image_model
         api_config.model.qwen_prompt_magic = original_qwen_prompt_magic
         api_config.model.qwen_device_map = original_qwen_device_map
+        api_config.model.ernie_image_model = original_ernie_image_model
+        api_config.model.ernie_prompt_enhancer = original_ernie_prompt_enhancer
         api_config.model.lora.enabled_loras = original_enabled_loras
         api_config.model.lora.application_probability = original_probability
 

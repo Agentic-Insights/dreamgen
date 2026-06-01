@@ -55,6 +55,7 @@ ALLOWED_IMAGE_BACKENDS = {
     "ollama",
     "zimage",
     "qwen",
+    "ernie",
     "small",
     "turbo",
     "smoke",
@@ -156,6 +157,7 @@ def generation_config_payload() -> Dict[str, Any]:
         "ollama": config.model.ollama_image_model,
         "zimage": str(config.model.zimage_model_path),
         "qwen": config.model.qwen_image_model,
+        "ernie": config.model.ernie_image_model,
         "small": config.model.small_sd_model,
         "turbo": config.model.turbo_model,
         "smoke": config.model.smoke_test_model,
@@ -195,6 +197,8 @@ def generation_config_payload() -> Dict[str, Any]:
         "qwen_prompt_magic": config.model.qwen_prompt_magic,
         "qwen_device_map": config.model.qwen_device_map,
         "qwen_lightning": config.model.qwen_lightning,
+        "ernie_image_model": config.model.ernie_image_model,
+        "ernie_prompt_enhancer": config.model.ernie_prompt_enhancer,
     }
 
 
@@ -604,6 +608,12 @@ async def get_model_status():
             "downloadable": True,
         },
         {
+            "id": config.model.ernie_image_model,
+            "name": "ERNIE-Image",
+            "type": "text-to-image",
+            "downloadable": True,
+        },
+        {
             "id": "Qwen/Qwen-Image-Edit",
             "name": "Qwen-Image-Edit",
             "type": "image-to-image",
@@ -978,6 +988,12 @@ async def set_generation_config(data: dict):
             config.model.qwen_device_map = str(data["qwen_device_map"]).strip() or "balanced"
         if "qwen_lightning" in data:
             config.model.qwen_lightning = parse_bool_config(data["qwen_lightning"])
+        if "ernie_image_model" in data:
+            config.model.ernie_image_model = (
+                str(data["ernie_image_model"]).strip() or "baidu/ERNIE-Image-Turbo"
+            )
+        if "ernie_prompt_enhancer" in data:
+            config.model.ernie_prompt_enhancer = parse_bool_config(data["ernie_prompt_enhancer"])
         if "enabled_loras" in data:
             enabled_loras = data["enabled_loras"]
             if not isinstance(enabled_loras, list):

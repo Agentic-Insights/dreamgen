@@ -123,6 +123,8 @@ class TestConfigWorkingEnv:
 OLLAMA_MODEL=llama3.2:3b
 OLLAMA_TEMPERATURE=0.8
 FLUX_MODEL=black-forest-labs/FLUX.1-dev
+ERNIE_IMAGE_MODEL=baidu/ERNIE-Image-Turbo
+ERNIE_IMAGE_PROMPT_ENHANCER=false
 MAX_SEQUENCE_LENGTH=256
 
 # Image Generation Settings
@@ -165,6 +167,8 @@ MPS_USE_FP16=true
             assert config.model.qwen_prompt_magic is True
             assert config.model.qwen_device_map == "balanced"
             assert config.model.qwen_lightning is False
+            assert config.model.ernie_image_model == "baidu/ERNIE-Image-Turbo"
+            assert config.model.ernie_prompt_enhancer is False
             assert config.model.max_sequence_length == 256
 
             # Verify image configuration

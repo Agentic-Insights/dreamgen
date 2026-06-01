@@ -70,6 +70,7 @@ const DASHBOARD_BACKEND_OPTIONS = [
   { id: "auto", label: "Auto" },
   { id: "zimage", label: "Z-Image" },
   { id: "qwen", label: "Qwen" },
+  { id: "ernie", label: "ERNIE" },
   { id: "ollama", label: "Ollama" },
   { id: "small", label: "Small SD" },
   { id: "turbo", label: "Turbo" },
@@ -699,6 +700,8 @@ export default function Home() {
                             ? `LoRA path armed: ${enabledLoras.slice(0, 3).join(", ")}${enabledLoras.length > 3 ? "..." : ""}.`
                             : selectedBackend === "ollama"
                               ? `Ollama image backend${generationConfig?.ollama_image_model ? ` using ${generationConfig.ollama_image_model}` : " using auto model selection"}.`
+                              : selectedBackend === "ernie"
+                                ? `ERNIE-Image${generationConfig?.ernie_prompt_enhancer === false ? "" : " prompt enhancer"} using ${generationConfig?.ernie_image_model ?? "baidu/ERNIE-Image-Turbo"}.`
                               : "Use Settings for downloads, auth, and deeper model configuration."}
                         </div>
                       </div>

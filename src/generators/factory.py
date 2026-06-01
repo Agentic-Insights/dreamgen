@@ -54,6 +54,8 @@ def required_model_cache_gb(model_id: str) -> int:
         return 60
     if "qwen-image" in normalized:
         return 30
+    if "ernie-image" in normalized:
+        return 35
     return 25
 
 
@@ -88,6 +90,8 @@ def backend_label(config: Config, backend: str) -> str:
         return "z-image"
     if backend == "qwen":
         return "qwen-image"
+    if backend == "ernie":
+        return "ernie-image"
 
     flux_model = config.model.flux_model.lower()
     if "schnell" in flux_model:
@@ -141,6 +145,10 @@ def create_image_generator(config: Config) -> Tuple[object, str]:
         from .qwen_image_generator import QwenImageGenerator
 
         return QwenImageGenerator(config), backend_label(config, backend)
+    if backend == "ernie":
+        from .ernie_image_generator import ErnieImageGenerator
+
+        return ErnieImageGenerator(config), backend_label(config, backend)
     if backend == "flux":
         from .image_generator import ImageGenerator
 
