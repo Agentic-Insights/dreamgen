@@ -47,7 +47,7 @@ def test_prompt_magic_uses_chinese_suffix_for_chinese_text(tmp_path):
     assert prompt.endswith("超清，4K，电影级构图.")
 
 
-async def test_generate_image_uses_diffusers_pipeline(monkeypatch, tmp_path):
+def test_legacy_cuda_device_map_uses_direct_placement(monkeypatch, tmp_path):
     config = make_config(tmp_path)
     config.system.cpu_only = False
     monkeypatch.setattr(qwen_image_generator.torch.cuda, "is_available", lambda: True)
@@ -57,6 +57,13 @@ async def test_generate_image_uses_diffusers_pipeline(monkeypatch, tmp_path):
         lambda: "Test CUDA GPU",
     )
     monkeypatch.setattr(qwen_image_generator.torch.cuda, "set_device", lambda _id: None)
+    generator = QwenImageGenerator(config)
+
+    assert generator._device_map() is None
+
+
+async def test_generate_image_uses_diffusers_pipeline(monkeypatch, tmp_path):
+    config = make_config(tmp_path)
     generator = QwenImageGenerator(config)
     output_path = tmp_path / "qwen.png"
     image = Image.new("RGB", (32, 32), "white")
@@ -84,5 +91,5 @@ async def test_generate_image_uses_diffusers_pipeline(monkeypatch, tmp_path):
     assert generator.last_generation_metadata["steps"] == 4
     pipe.assert_called_once()
     assert "device_map" not in pipeline_cls.from_pretrained.call_args.kwargs
-    pipe.to.assert_called_once_with("cuda")
+    pipe.to.assert_called_once_with("cpu")
     assert pipe.call_args.kwargs["true_cfg_scale"] == 4.0
