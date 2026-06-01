@@ -14,7 +14,16 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import aiofiles
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import (
+    BackgroundTasks,
+    FastAPI,
+    File,
+    HTTPException,
+    Query,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
@@ -24,7 +33,16 @@ from src.generators.factory import backend_label, is_model_cached, resolve_image
 from src.generators.prompt_generator import PromptGenerator
 from src.plugins import plugin_manager, register_lora_plugin
 from src.plugins.lora import get_available_loras
-from src.services import GenerationProgressEvent, GenerationServiceRequest, ImageGenService
+from src.services import (
+    GenerationJobCreate,
+    GenerationProgressEvent,
+    ImageGenService,
+    SQLiteGenerationJobStore,
+    apply_config_overrides,
+    get_workflow_recipe,
+    list_workflow_recipes,
+    resolve_workflow_recipe,
+)
 from src.utils.config import Config
 from src.utils.gallery_publisher import DEFAULT_BUCKET, build_publish_status
 from src.utils.ollama import (
@@ -323,6 +341,7 @@ class GenerateRequest(BaseModel):
     prompt: Optional[str] = Field(None, description="Optional custom prompt")
     enable_plugins: bool = Field(True, description="Enable plugin enhancements")
     seed: Optional[int] = Field(None, description="Random seed for reproducibility")
+    recipe_id: Optional[str] = Field(None, description="Optional workflow recipe ID")
     client_request_id: Optional[str] = Field(
         None, description="Client-provided request ID used to correlate progress events"
     )
@@ -336,6 +355,20 @@ class GenerateResponse(BaseModel):
     image_path: str = Field(..., description="Path to generated image")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Generation metadata")
     created_at: str = Field(..., description="ISO timestamp")
+
+
+class JobCreateRequest(BaseModel):
+    """Request model for durable image generation jobs."""
+
+    prompt: Optional[str] = Field(None, description="Optional custom prompt")
+    meta_prompt: Optional[str] = Field(None, description="Optional prompt-generation steering text")
+    seed: Optional[int] = Field(None, description="Random seed for reproducibility")
+    recipe_id: Optional[str] = Field(None, description="Optional workflow recipe ID")
+    publication_state: str = Field("draft", description="Initial publication state")
+    client_request_id: Optional[str] = Field(
+        None, description="Client-provided request ID used to correlate progress events"
+    )
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Extra job metadata")
 
 
 class PublicationUpdateRequest(BaseModel):
@@ -398,6 +431,18 @@ class PromptResponse(BaseModel):
     prompt: str = Field(..., description="Generated prompt text")
 
 
+class RecipeResolveRequest(BaseModel):
+    """Request model for resolving a workflow recipe into a job payload."""
+
+    prompt: Optional[str] = Field(None, description="Optional prompt override")
+    meta_prompt: Optional[str] = Field(None, description="Optional meta-prompt override")
+    seed: Optional[int] = Field(None, description="Optional seed override")
+    client_request_id: Optional[str] = Field(
+        None, description="Client-provided request ID used to correlate progress events"
+    )
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Extra request metadata")
+
+
 class SystemStatus(BaseModel):
     """System status model"""
 
@@ -436,6 +481,8 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 recent_generation_events: deque[Dict[str, Any]] = deque(maxlen=MAX_RECENT_GENERATION_EVENTS)
+generation_job_store = SQLiteGenerationJobStore(OUTPUT_DIR / ".generation_jobs.sqlite3")
+generation_worker_lock = asyncio.Lock()
 
 
 def record_generation_event(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -472,6 +519,185 @@ async def broadcast_task_progress(
     await manager.broadcast(json.dumps(payload))
 
 
+async def emit_generation_service_event(
+    *,
+    job_id: str,
+    client_request_id: Optional[str],
+    event: GenerationProgressEvent,
+) -> None:
+    """Persist and broadcast a service lifecycle event for a durable job."""
+    generation_job_store.record_event(job_id, event)
+    record_generation_event(
+        {
+            "type": "generation_lifecycle",
+            "name": event.name,
+            "id": job_id,
+            "client_request_id": client_request_id,
+            "progress": event.progress,
+            "label": event.label,
+            "detail": event.detail,
+            "payload": event.payload,
+        }
+    )
+    if event.progress is not None:
+        await broadcast_task_progress(
+            task="image_generation",
+            task_id=job_id,
+            client_request_id=client_request_id,
+            progress=event.progress,
+            label=event.label or event.name,
+            detail=event.detail or "",
+        )
+
+    if event.name == "prompt_generated":
+        await manager.broadcast(
+            json.dumps(
+                {
+                    "type": "prompt_generated",
+                    "id": job_id,
+                    "client_request_id": client_request_id,
+                    "prompt": event.payload.get("prompt", ""),
+                }
+            )
+        )
+    elif event.name == "model_loading":
+        await manager.broadcast(
+            json.dumps(
+                {
+                    "type": "model_loading",
+                    "id": job_id,
+                    "client_request_id": client_request_id,
+                    "message": event.payload.get("message", event.detail or ""),
+                }
+            )
+        )
+    elif event.name == "generation_completed":
+        await manager.broadcast(
+            json.dumps(
+                {
+                    "type": "generation_completed",
+                    "id": job_id,
+                    "client_request_id": client_request_id,
+                    "image_path": event.payload.get("image_path", ""),
+                    "prompt": event.payload.get("prompt", ""),
+                }
+            )
+        )
+
+
+async def run_generation_job(job_id: str):
+    """Run one queued generation job through the shared service boundary."""
+    job_payload = generation_job_store.request_for_job(job_id)
+    if job_payload is None:
+        raise KeyError(f"Unknown generation job: {job_id}")
+
+    async with generation_worker_lock:
+        current = generation_job_store.get_job(job_id)
+        if current is None:
+            raise KeyError(f"Unknown generation job: {job_id}")
+        if current["status"] in {"succeeded", "failed", "cancelled"}:
+            return None
+
+        generation_job_store.start_job(job_id)
+        await manager.broadcast(
+            json.dumps(
+                record_generation_event(
+                    {
+                        "type": "generation_started",
+                        "id": job_id,
+                        "client_request_id": job_payload.client_request_id,
+                    }
+                )
+            )
+        )
+
+        async def emit(event: GenerationProgressEvent) -> None:
+            await emit_generation_service_event(
+                job_id=job_id,
+                client_request_id=job_payload.client_request_id,
+                event=event,
+            )
+
+        try:
+            service = ImageGenService(config, output_dir=OUTPUT_DIR)
+            with apply_config_overrides(config, job_payload.config_overrides):
+                result = await service.generate(
+                    job_payload.to_service_request(job_id),
+                    callback=emit,
+                )
+            generation_job_store.complete_job(
+                job_id,
+                prompt=result.prompt,
+                image_path=result.image_path,
+                relative_image_path=result.relative_image_path,
+                backend=result.backend,
+                model_name=result.model_name,
+                generation_time=result.generation_time,
+                metadata=result.metadata,
+            )
+            return result
+        except Exception as exc:
+            error_msg = (
+                "Insufficient memory to load the configured image backend."
+                if isinstance(exc, MemoryError)
+                else str(exc)
+            )
+            generation_job_store.fail_job(job_id, error_msg)
+            await manager.broadcast(
+                json.dumps(
+                    record_generation_event(
+                        {
+                            "type": "generation_error",
+                            "id": job_id,
+                            "client_request_id": job_payload.client_request_id,
+                            "error": error_msg,
+                        }
+                    )
+                )
+            )
+            raise
+
+
+async def run_generation_job_safely(job_id: str) -> None:
+    """Background-task wrapper that records failures without crashing the server."""
+    try:
+        await run_generation_job(job_id)
+    except Exception as exc:
+        logger.error("Generation job %s failed: %s", job_id, exc)
+
+
+def generation_job_from_request(
+    *,
+    prompt: Optional[str],
+    meta_prompt: Optional[str],
+    seed: Optional[int],
+    publication_state: str,
+    client_request_id: Optional[str],
+    metadata: Dict[str, Any] | None = None,
+    recipe_id: Optional[str] = None,
+) -> GenerationJobCreate:
+    """Build a job creation payload, resolving a workflow recipe when requested."""
+    if not recipe_id:
+        return GenerationJobCreate(
+            prompt=prompt,
+            meta_prompt=meta_prompt,
+            seed=seed,
+            publication_state=publication_state,
+            client_request_id=client_request_id,
+            metadata=metadata or {},
+        )
+
+    resolution = resolve_workflow_recipe(
+        recipe_id,
+        prompt=prompt,
+        meta_prompt=meta_prompt,
+        seed=seed,
+        metadata=metadata,
+    )
+    payload = resolution.to_job_payload(client_request_id=client_request_id)
+    return GenerationJobCreate(**payload)
+
+
 async def prefetch_default_fallback_model() -> None:
     """Fetch the default public fallback model in the background when needed."""
     if resolve_image_backend(config) != "small":
@@ -492,6 +718,7 @@ async def prefetch_default_fallback_model() -> None:
 
 @app.on_event("startup")
 async def startup_event() -> None:
+    generation_job_store.initialize()
     asyncio.create_task(prefetch_default_fallback_model())
 
 
@@ -1017,6 +1244,43 @@ async def set_generation_config(data: dict):
         raise HTTPException(status_code=500, detail=f"Failed to update configuration: {str(e)}")
 
 
+@app.get("/api/recipes")
+async def get_workflow_recipes():
+    """List built-in workflow recipes."""
+    return {"recipes": [recipe.summary() for recipe in list_workflow_recipes()]}
+
+
+@app.get("/api/recipes/{recipe_id}")
+async def get_workflow_recipe_detail(recipe_id: str):
+    """Return a built-in workflow recipe definition."""
+    try:
+        return get_workflow_recipe(recipe_id).to_dict()
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/api/recipes/{recipe_id}/resolve")
+async def resolve_workflow_recipe_endpoint(recipe_id: str, request: RecipeResolveRequest):
+    """Resolve a workflow recipe into a generation job payload."""
+    try:
+        resolution = resolve_workflow_recipe(
+            recipe_id,
+            prompt=request.prompt,
+            meta_prompt=request.meta_prompt,
+            seed=request.seed,
+            metadata=request.metadata,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {
+        "recipe": resolution.recipe.to_dict(),
+        "job_request": resolution.to_job_payload(client_request_id=request.client_request_id),
+    }
+
+
 @app.post("/api/prompt", response_model=PromptResponse)
 async def generate_prompt(request: PromptRequest):
     """Generate a prompt without creating an image."""
@@ -1057,83 +1321,27 @@ async def generate_prompt(request: PromptRequest):
 @app.post("/api/generate", response_model=GenerateResponse)
 async def generate_image(request: GenerateRequest):
     """Generate a single image"""
-    generation_id = str(uuid.uuid4())
-
-    async def emit_generation_event(event: GenerationProgressEvent) -> None:
-        record_generation_event(
-            {
-                "type": "generation_lifecycle",
-                "name": event.name,
-                "id": generation_id,
-                "client_request_id": request.client_request_id,
-                "progress": event.progress,
-                "label": event.label,
-                "detail": event.detail,
-                "payload": event.payload,
-            }
-        )
-        if event.progress is not None:
-            await broadcast_task_progress(
-                task="image_generation",
-                task_id=generation_id,
-                client_request_id=request.client_request_id,
-                progress=event.progress,
-                label=event.label or event.name,
-                detail=event.detail or "",
-            )
-
-        if event.name == "prompt_generated":
-            await manager.broadcast(
-                json.dumps(
-                    {
-                        "type": "prompt_generated",
-                        "id": generation_id,
-                        "client_request_id": request.client_request_id,
-                        "prompt": event.payload.get("prompt", ""),
-                    }
-                )
-            )
-        elif event.name == "model_loading":
-            await manager.broadcast(
-                json.dumps(
-                    {
-                        "type": "model_loading",
-                        "id": generation_id,
-                        "client_request_id": request.client_request_id,
-                        "message": event.payload.get("message", event.detail or ""),
-                    }
-                )
-            )
-        elif event.name == "generation_completed":
-            await manager.broadcast(
-                json.dumps(
-                    {
-                        "type": "generation_completed",
-                        "id": generation_id,
-                        "client_request_id": request.client_request_id,
-                        "image_path": event.payload.get("image_path", ""),
-                        "prompt": event.payload.get("prompt", ""),
-                    }
-                )
-            )
-
     try:
-        await manager.broadcast(
-            json.dumps(
-                record_generation_event(
-                    {
-                        "type": "generation_started",
-                        "id": generation_id,
-                        "client_request_id": request.client_request_id,
-                    }
-                )
+        job = generation_job_store.create_job(
+            generation_job_from_request(
+                prompt=request.prompt,
+                meta_prompt=None,
+                seed=request.seed,
+                publication_state="draft",
+                client_request_id=request.client_request_id,
+                recipe_id=request.recipe_id,
             )
         )
-        service = ImageGenService(config, output_dir=OUTPUT_DIR)
-        result = await service.generate(
-            GenerationServiceRequest(prompt=request.prompt, seed=request.seed),
-            callback=emit_generation_event,
-        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    generation_id = job["id"]
+    try:
+        result = await run_generation_job(generation_id)
+        if result is None:
+            raise RuntimeError(f"Generation job {generation_id} did not produce a result")
 
         return GenerateResponse(
             id=generation_id,
@@ -1146,37 +1354,65 @@ async def generate_image(request: GenerateRequest):
     except MemoryError as e:
         error_msg = "Insufficient memory to load the configured image backend."
         logger.error(f"Memory error loading image backend: {str(e)}")
-        await manager.broadcast(
-            json.dumps(
-                record_generation_event(
-                    {
-                        "type": "generation_error",
-                        "id": generation_id,
-                        "client_request_id": request.client_request_id,
-                        "error": error_msg,
-                    }
-                )
-            )
-        )
         raise HTTPException(status_code=507, detail=error_msg)
     except Exception as e:
         logger.error(f"Generation failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-        # Broadcast error event
-        await manager.broadcast(
-            json.dumps(
-                record_generation_event(
-                    {
-                        "type": "generation_error",
-                        "id": generation_id,
-                        "client_request_id": request.client_request_id,
-                        "error": str(e),
-                    }
-                )
+
+@app.post("/api/jobs")
+async def create_generation_job(request: JobCreateRequest, background_tasks: BackgroundTasks):
+    """Create a durable generation job and schedule it on the local worker."""
+    try:
+        job = generation_job_store.create_job(
+            generation_job_from_request(
+                prompt=request.prompt,
+                meta_prompt=request.meta_prompt,
+                seed=request.seed,
+                publication_state=request.publication_state,
+                client_request_id=request.client_request_id,
+                metadata=request.metadata,
+                recipe_id=request.recipe_id,
             )
         )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        raise HTTPException(status_code=500, detail=str(e))
+    background_tasks.add_task(run_generation_job_safely, job["id"])
+    return job
+
+
+@app.get("/api/jobs")
+async def list_generation_jobs(
+    status: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+):
+    """List recent durable generation jobs."""
+    return {
+        "jobs": generation_job_store.list_jobs(status=status, limit=limit, offset=offset),
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@app.get("/api/jobs/{job_id}")
+async def get_generation_job(job_id: str):
+    """Return one durable generation job with its progress events."""
+    job = generation_job_store.get_job(job_id, include_events=True)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Generation job not found")
+    return job
+
+
+@app.get("/api/jobs/{job_id}/events")
+async def get_generation_job_events(job_id: str):
+    """Return persisted lifecycle events for one generation job."""
+    if generation_job_store.get_job(job_id) is None:
+        raise HTTPException(status_code=404, detail="Generation job not found")
+    return {"events": generation_job_store.get_events(job_id)}
 
 
 @app.get("/api/generation/events")

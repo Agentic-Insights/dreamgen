@@ -2,6 +2,30 @@
 
 <!-- version list -->
 
+## v1.7.0 (2026-05-31)
+
+### Features
+
+- Add generation queue history UI ([#58](https://github.com/Agentic-Insights/dreamgen/pull/58),
+  [`121dcb5`](https://github.com/Agentic-Insights/dreamgen/commit/121dcb5a4cd359f7d11ebcdb43ea9ddce4b1a74b))
+
+
+## v1.6.0 (2026-05-31)
+
+### Features
+
+- Add workflow recipes ([#56](https://github.com/Agentic-Insights/dreamgen/pull/56),
+  [`6c4adf9`](https://github.com/Agentic-Insights/dreamgen/commit/6c4adf9c805ffee478853ddf278e2886e1eb8211))
+
+
+## v1.5.0 (2026-05-31)
+
+### Features
+
+- Add durable generation jobs ([#55](https://github.com/Agentic-Insights/dreamgen/pull/55),
+  [`4d1f0f6`](https://github.com/Agentic-Insights/dreamgen/commit/4d1f0f659e4ef78c0ea05cabf3a7da1352945fd1))
+
+
 ## v1.4.1 (2026-05-30)
 
 ### Bug Fixes

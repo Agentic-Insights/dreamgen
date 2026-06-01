@@ -1,0 +1,23 @@
+{
+  "id": "publish-candidate",
+  "version": 1,
+  "name": "Publish Candidate",
+  "description": "Generate a review-ready candidate with default backend settings and draft publication state.",
+  "mode": "text2img",
+  "backend_preference": "auto",
+  "prompt_strategy": {
+    "type": "generated",
+    "meta_prompt": "Create a polished, publication-ready image prompt with strong composition and clear subject detail."
+  },
+  "image": {},
+  "plugins": {},
+  "lora": {},
+  "publication": {
+    "state": "draft"
+  },
+  "post_processing": [
+    {
+      "type": "catalog-review"
+    }
+  ]
+}
