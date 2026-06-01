@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.8.0 (2026-06-01)
+
+### Features
+
+- Add ERNIE image backend
+  ([`0ac67e3`](https://github.com/Agentic-Insights/dreamgen/commit/0ac67e395dbeaa7cb1ce605f3fe422249690f8f3))
+
+
 ## v1.7.0 (2026-05-31)
 
 ### Features
