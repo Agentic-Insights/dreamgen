@@ -1,0 +1,602 @@
+{
+  "C:\\Users\\vaski\\projects\\dreamgen\\cloudflare-gallery\\.wrangler\\tmp\\bundle-MnkkRO\\middleware-insertion-facade.js": {
+    "mtime": 1777174642.4043648,
+    "ast_hash": "daa5e96932ea8dac7e6869eb0e037630",
+    "semantic_hash": "daa5e96932ea8dac7e6869eb0e037630"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\cloudflare-gallery\\.wrangler\\tmp\\bundle-MnkkRO\\middleware-loader.entry.ts": {
+    "mtime": 1777174642.4199443,
+    "ast_hash": "02f68ac010a79e16d1ad4412ff171da8",
+    "semantic_hash": "02f68ac010a79e16d1ad4412ff171da8"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\cloudflare-gallery\\.wrangler\\tmp\\bundle-hWlJgp\\middleware-insertion-facade.js": {
+    "mtime": 1777174896.9435585,
+    "ast_hash": "662197f39642638aaabe86a460532577",
+    "semantic_hash": "662197f39642638aaabe86a460532577"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\cloudflare-gallery\\.wrangler\\tmp\\bundle-hWlJgp\\middleware-loader.entry.ts": {
+    "mtime": 1777174896.9440687,
+    "ast_hash": "1e1dfed95b65ee852ed9416bb2ca3d7e",
+    "semantic_hash": "1e1dfed95b65ee852ed9416bb2ca3d7e"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\cloudflare-gallery\\.wrangler\\tmp\\dev-eE9zJG\\functionsWorker-0.494810817921151.js": {
+    "mtime": 1777174897.0139813,
+    "ast_hash": "76fc2c3f17e4d0ca67e0b1214649b08e",
+    "semantic_hash": "76fc2c3f17e4d0ca67e0b1214649b08e"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\cloudflare-gallery\\.wrangler\\tmp\\pages-MF6Juv\\functionsRoutes-0.585420096062679.mjs": {
+    "mtime": 1777174896.9430494,
+    "ast_hash": "5c5acce7ebad7df0f6a120a40283db01",
+    "semantic_hash": "5c5acce7ebad7df0f6a120a40283db01"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\cloudflare-gallery\\.wrangler\\tmp\\pages-MF6Juv\\functionsWorker-0.494810817921151.mjs": {
+    "mtime": 1777174896.963767,
+    "ast_hash": "0024233875395d4a8556fa473c1630f3",
+    "semantic_hash": "0024233875395d4a8556fa473c1630f3"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\cloudflare-gallery\\functions\\api\\images\\[[path]].js": {
+    "mtime": 1777174896.858533,
+    "ast_hash": "4c8068bfd6bc2da279f41c7b9d9b6194",
+    "semantic_hash": "4c8068bfd6bc2da279f41c7b9d9b6194"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\data\\art_styles.json": {
+    "mtime": 1756736145.7922337,
+    "ast_hash": "8c12154335a671810087c55968cc891c",
+    "semantic_hash": "8c12154335a671810087c55968cc891c"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\data\\holidays.json": {
+    "mtime": 1756736145.7922337,
+    "ast_hash": "fea5946f3683bdb2c84e82ca26f78a08",
+    "semantic_hash": "fea5946f3683bdb2c84e82ca26f78a08"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\docker-dev-up.ps1": {
+    "mtime": 1774447643.515915,
+    "ast_hash": "d9693ce62b5674239a457634e5b5d2e4",
+    "semantic_hash": "d9693ce62b5674239a457634e5b5d2e4"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\docker-entrypoint.sh": {
+    "mtime": 1756739967.7753396,
+    "ast_hash": "ade656e3bbe799e7f6126c5e7e22bcfe",
+    "semantic_hash": "ade656e3bbe799e7f6126c5e7e22bcfe"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\host-image\\package.json": {
+    "mtime": 1777171433.8241615,
+    "ast_hash": "499e8e99f1f564e012575f2c2e2b6878",
+    "semantic_hash": "499e8e99f1f564e012575f2c2e2b6878"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\host-image\\src\\index.ts": {
+    "mtime": 1777171433.8241615,
+    "ast_hash": "38c8b403428765e0eadd55b2cb647e92",
+    "semantic_hash": "38c8b403428765e0eadd55b2cb647e92"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\host-image\\test\\index.spec.ts": {
+    "mtime": 1777171433.8241615,
+    "ast_hash": "1f64e09925b9f6775f8d07f3f681dedb",
+    "semantic_hash": "1f64e09925b9f6775f8d07f3f681dedb"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\host-image\\test\\tsconfig.json": {
+    "mtime": 1756736145.7997375,
+    "ast_hash": "c876c83236a6fc74a7fc246b44d9174e",
+    "semantic_hash": "c876c83236a6fc74a7fc246b44d9174e"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\host-image\\tsconfig.json": {
+    "mtime": 1777171433.8241615,
+    "ast_hash": "fc61b48d0cfe6892f0c8a526341c9302",
+    "semantic_hash": "fc61b48d0cfe6892f0c8a526341c9302"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\host-image\\worker-configuration.d.ts": {
+    "mtime": 1777171433.8297324,
+    "ast_hash": "3b617c3ac487cdaeeab31e6cb46c543f",
+    "semantic_hash": "3b617c3ac487cdaeeab31e6cb46c543f"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\sanity-check.sh": {
+    "mtime": 1774447643.5214443,
+    "ast_hash": "c3e4fc28a8de1b46776eb23c218393bd",
+    "semantic_hash": "c3e4fc28a8de1b46776eb23c218393bd"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\scripts\\benchmark_models.py": {
+    "mtime": 1774447650.779883,
+    "ast_hash": "44efc15a5eec4d4e894dc8503427bc92",
+    "semantic_hash": "44efc15a5eec4d4e894dc8503427bc92"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\scripts\\install_cuda_pytorch.py": {
+    "mtime": 1774447643.5219462,
+    "ast_hash": "5e9b80b8cea338ec4a792b68d4b3e5d0",
+    "semantic_hash": "5e9b80b8cea338ec4a792b68d4b3e5d0"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\scripts\\publish_gallery.py": {
+    "mtime": 1777174377.507741,
+    "ast_hash": "337f1ec78297904188665ae76c58560e",
+    "semantic_hash": "337f1ec78297904188665ae76c58560e"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\setup-rclone-r2.sh": {
+    "mtime": 1774447643.5219462,
+    "ast_hash": "0df259c31a78aa69b59d6b3f86bcc7df",
+    "semantic_hash": "0df259c31a78aa69b59d6b3f86bcc7df"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\src\\__init__.py": {
+    "mtime": 1777037706.3796651,
+    "ast_hash": "f46119e85833c1564de082f90b03dee6",
+    "semantic_hash": "f46119e85833c1564de082f90b03dee6"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\src\\api\\__init__.py": {
+    "mtime": 1756739967.7753396,
+    "ast_hash": "1d92fbe0d84f67dfc4e7beb9689d7081",
+    "semantic_hash": "1d92fbe0d84f67dfc4e7beb9689d7081"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\src\\api\\server.py": {
+    "mtime": 1780409799.8039331,
+    "ast_hash": "72d80b6ee002e6161c737ac8c0d9841d",
+    "semantic_hash": "72d80b6ee002e6161c737ac8c0d9841d"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\src\\generators\\__init__.py": {
+    "mtime": 1756736145.8022914,
+    "ast_hash": "76a1351ed8737bcd97606731ffa26cbc",
+    "semantic_hash": "76a1351ed8737bcd97606731ffa26cbc"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\src\\generators\\base_generator.py": {
+    "mtime": 1774448376.1515665,
+    "ast_hash": "caacb18fdf880138172de07dc2340e68",
+    "semantic_hash": "caacb18fdf880138172de07dc2340e68"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\src\\generators\\factory.py": {
+    "mtime": 1780409244.1050234,
+    "ast_hash": "769e4cc37fc66abea17da11ee6dc8e1d",
+    "semantic_hash": "769e4cc37fc66abea17da11ee6dc8e1d"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\src\\generators\\hf_inference_image_generator.py": {
+    "mtime": 1780409271.9541316,
+    "ast_hash": "1815ade4df304667aac5dcfb2b43645f",
+    "semantic_hash": "1815ade4df304667aac5dcfb2b43645f"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\src\\generators\\image_editor.py": {
+    "mtime": 1774447643.5229483,
+    "ast_hash": "58ccaf477c681b1865e912e46cf27347",
+    "semantic_hash": "58ccaf477c681b1865e912e46cf27347"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\src\\generators\\image_generator.py": {
+    "mtime": 1780409279.0760844,
+    "ast_hash": "fbf0d47da26a7e3f9e0629fb8ccb2c55",
+    "semantic_hash": "fbf0d47da26a7e3f9e0629fb8ccb2c55"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\src\\generators\\mock_image_generator.py": {
+    "mtime": 1777037706.380665,
+    "ast_hash": "67c9cb2f6127d60c301fdd7ec60f1445",
+    "semantic_hash": "67c9cb2f6127d60c301fdd7ec60f1445"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\src\\generators\\ollama_image_generator.py": {
+    "mtime": 1777125371.3349364,
+    "ast_hash": "4a59123d72b0caee70177c2ad939f509",
+    "semantic_hash": "4a59123d72b0caee70177c2ad939f509"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\src\\generators\\prompt_generator.py": {
+    "mtime": 1780409325.9971306,
+    "ast_hash": "31a183715418c73c585687e965e88e44",
+    "semantic_hash": "31a183715418c73c585687e965e88e44"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\src\\generators\\stable_diffusion_image_generator.py": {
+    "mtime": 1774447643.5249481,
+    "ast_hash": "2e4ba3769115834bbb69c429e0d88581",
+    "semantic_hash": "2e4ba3769115834bbb69c429e0d88581"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\src\\generators\\turbo_image_generator.py": {
+    "mtime": 1774447643.5249481,
+    "ast_hash": "51c66d0290bf7bb71b601dff26c9b47b",
+    "semantic_hash": "51c66d0290bf7bb71b601dff26c9b47b"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\src\\generators\\zimage_generator.py": {
+    "mtime": 1780085588.8728898,
+    "ast_hash": "615303c19f6c78d8d2f5783bf0139164",
+    "semantic_hash": "615303c19f6c78d8d2f5783bf0139164"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\src\\main.py": {
+    "mtime": 1777130514.1302764,
+    "ast_hash": "271de43b2364b8683bfcd3a3a28d5b3d",
+    "semantic_hash": "271de43b2364b8683bfcd3a3a28d5b3d"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\src\\plugins\\__init__.py": {
+    "mtime": 1777125371.335936,
+    "ast_hash": "9c1cc92c518568e04f6a556b8b05a354",
+    "semantic_hash": "9c1cc92c518568e04f6a556b8b05a354"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\src\\plugins\\art_style.py": {
+    "mtime": 1756739967.7769067,
+    "ast_hash": "b376699b6bdd794cf6b512ac943bfbad",
+    "semantic_hash": "b376699b6bdd794cf6b512ac943bfbad"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\src\\plugins\\holiday_fact.py": {
+    "mtime": 1756739967.7779107,
+    "ast_hash": "f8b96916db0870b263471afcf9b3d982",
+    "semantic_hash": "f8b96916db0870b263471afcf9b3d982"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\src\\plugins\\lora.py": {
+    "mtime": 1756739967.7779107,
+    "ast_hash": "c68f1a02a4d29435d1bf29cb0ef48922",
+    "semantic_hash": "c68f1a02a4d29435d1bf29cb0ef48922"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\src\\plugins\\nearest_holiday.py": {
+    "mtime": 1756739967.7779107,
+    "ast_hash": "ef6f776339fc68cdcd9ae773507870c0",
+    "semantic_hash": "ef6f776339fc68cdcd9ae773507870c0"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\src\\plugins\\time_of_day.py": {
+    "mtime": 1756739967.7779107,
+    "ast_hash": "e8f497eb642853c1439183e52a321b1e",
+    "semantic_hash": "e8f497eb642853c1439183e52a321b1e"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\src\\utils\\__init__.py": {
+    "mtime": 1756736145.8042915,
+    "ast_hash": "8ffef38749c1fb0462365c8c73741f1f",
+    "semantic_hash": "8ffef38749c1fb0462365c8c73741f1f"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\src\\utils\\cli.py": {
+    "mtime": 1780409235.7563925,
+    "ast_hash": "78cc29c2d1bc2d4433b379affd8b9e13",
+    "semantic_hash": "78cc29c2d1bc2d4433b379affd8b9e13"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\src\\utils\\config.py": {
+    "mtime": 1780409223.3009331,
+    "ast_hash": "a880d398e0ffc7e6c2b79cb5372abcf9",
+    "semantic_hash": "a880d398e0ffc7e6c2b79cb5372abcf9"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\src\\utils\\error_handler.py": {
+    "mtime": 1774447643.527524,
+    "ast_hash": "cbce8fcce1a8e4254ea1019b974c191d",
+    "semantic_hash": "cbce8fcce1a8e4254ea1019b974c191d"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\src\\utils\\gallery_publisher.py": {
+    "mtime": 1777174377.507741,
+    "ast_hash": "0a0bb57b66cdb12cf4e7fe412bdf8dfd",
+    "semantic_hash": "0a0bb57b66cdb12cf4e7fe412bdf8dfd"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\src\\utils\\logging_config.py": {
+    "mtime": 1756736145.8052907,
+    "ast_hash": "6e66062e9b38c70e51539032394388df",
+    "semantic_hash": "6e66062e9b38c70e51539032394388df"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\src\\utils\\memory_manager.py": {
+    "mtime": 1774447643.527524,
+    "ast_hash": "f9b3a65f2f7f564e63d5f1d45983de73",
+    "semantic_hash": "f9b3a65f2f7f564e63d5f1d45983de73"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\src\\utils\\metrics.py": {
+    "mtime": 1756739967.7799108,
+    "ast_hash": "594f6d394f7d58cdea252b0226ddc1df",
+    "semantic_hash": "594f6d394f7d58cdea252b0226ddc1df"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\src\\utils\\ollama.py": {
+    "mtime": 1777125371.3378391,
+    "ast_hash": "cc4dbbc8dc176160f467811419dd6c0c",
+    "semantic_hash": "cc4dbbc8dc176160f467811419dd6c0c"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\src\\utils\\plugin_manager.py": {
+    "mtime": 1774447643.527524,
+    "ast_hash": "57b084d82e496bc07a75f29618c5f661",
+    "semantic_hash": "57b084d82e496bc07a75f29618c5f661"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\src\\utils\\publication_catalog.py": {
+    "mtime": 1777173848.7594326,
+    "ast_hash": "bd1d957b63990ae52cc19e3a80c3fe9e",
+    "semantic_hash": "bd1d957b63990ae52cc19e3a80c3fe9e"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\src\\utils\\storage.py": {
+    "mtime": 1777037706.382168,
+    "ast_hash": "9261f20bb451af66dfcf793fd3f9dad2",
+    "semantic_hash": "9261f20bb451af66dfcf793fd3f9dad2"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\src\\utils\\troubleshoot.py": {
+    "mtime": 1774447650.7839015,
+    "ast_hash": "e4e3f38d33d312e4075a5de386296255",
+    "semantic_hash": "e4e3f38d33d312e4075a5de386296255"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\sync-to-cloudflare.sh": {
+    "mtime": 1774447643.5290258,
+    "ast_hash": "a2c25640db2536bd9df37d68575f6b9c",
+    "semantic_hash": "a2c25640db2536bd9df37d68575f6b9c"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\tests\\conftest.py": {
+    "mtime": 1777037706.382168,
+    "ast_hash": "f2f521a7e4bfac1ef266ce37337b2666",
+    "semantic_hash": "f2f521a7e4bfac1ef266ce37337b2666"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\tests\\test_api.py": {
+    "mtime": 1780409847.086105,
+    "ast_hash": "5f70cf9f4974039f554b17d94cf687ea",
+    "semantic_hash": "5f70cf9f4974039f554b17d94cf687ea"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\tests\\test_art_style_plugin.py": {
+    "mtime": 1774447643.5295334,
+    "ast_hash": "fcb54ac5521848432a45ca2f5fb74719",
+    "semantic_hash": "fcb54ac5521848432a45ca2f5fb74719"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\tests\\test_cli_generation_progress.py": {
+    "mtime": 1777130514.1302764,
+    "ast_hash": "f13de5be99f1c78565fa1160a4d0f9fd",
+    "semantic_hash": "f13de5be99f1c78565fa1160a4d0f9fd"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\tests\\test_config_env.py": {
+    "mtime": 1774447650.7849057,
+    "ast_hash": "f68dc478c5fa39831ac09e79fc647bfc",
+    "semantic_hash": "f68dc478c5fa39831ac09e79fc647bfc"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\tests\\test_factory_imports.py": {
+    "mtime": 1777037706.383172,
+    "ast_hash": "edc13be45407bd6e5a7118eea1d64528",
+    "semantic_hash": "edc13be45407bd6e5a7118eea1d64528"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\tests\\test_mock_generator.py": {
+    "mtime": 1756739967.7809105,
+    "ast_hash": "2b090a3e9816e93ca51e5543e227ce22",
+    "semantic_hash": "2b090a3e9816e93ca51e5543e227ce22"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\tests\\test_new_plugins.py": {
+    "mtime": 1774447643.5305362,
+    "ast_hash": "24587606eb6d2ef6ea15f543abd00275",
+    "semantic_hash": "24587606eb6d2ef6ea15f543abd00275"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\tests\\test_ollama_integration.py": {
+    "mtime": 1777125371.3388388,
+    "ast_hash": "593f4c759fc39fc6a8a6c26cbcb25a3c",
+    "semantic_hash": "593f4c759fc39fc6a8a6c26cbcb25a3c"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\tests\\test_plugin_cli.py": {
+    "mtime": 1777125371.3388388,
+    "ast_hash": "9dec28c7d6263df40d0922b32f531251",
+    "semantic_hash": "9dec28c7d6263df40d0922b32f531251"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\tests\\test_publish_gallery.py": {
+    "mtime": 1777174377.507741,
+    "ast_hash": "1c71781f5aa310a136411daa817fe7aa",
+    "semantic_hash": "1c71781f5aa310a136411daa817fe7aa"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\tests\\test_zimage_generator.py": {
+    "mtime": 1780085588.8769853,
+    "ast_hash": "5f2fb5e11da4b7c0e1356e4155d56657",
+    "semantic_hash": "5f2fb5e11da4b7c0e1356e4155d56657"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\tests\\test_zimage_plugin_integration.py": {
+    "mtime": 1774447650.7860012,
+    "ast_hash": "b9bd88190d7f8b9d661409b8c2402c44",
+    "semantic_hash": "b9bd88190d7f8b9d661409b8c2402c44"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\web-ui\\app\\layout.tsx": {
+    "mtime": 1774447650.7860012,
+    "ast_hash": "8516cf00e6533230a25a668c9d15b741",
+    "semantic_hash": "8516cf00e6533230a25a668c9d15b741"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\web-ui\\app\\page.tsx": {
+    "mtime": 1780369558.6560378,
+    "ast_hash": "2c11bf44d813fb7843c91f7ec5dcf332",
+    "semantic_hash": "2c11bf44d813fb7843c91f7ec5dcf332"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\web-ui\\app\\playground\\page.tsx": {
+    "mtime": 1780369558.6570415,
+    "ast_hash": "9532c7b31a857be07cf3bd1b9b4f23db",
+    "semantic_hash": "9532c7b31a857be07cf3bd1b9b4f23db"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\web-ui\\components.json": {
+    "mtime": 1756739967.782911,
+    "ast_hash": "37a29c9df34954b404ce3681cbfc941b",
+    "semantic_hash": "37a29c9df34954b404ce3681cbfc941b"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\web-ui\\components\\AdvancedControls.tsx": {
+    "mtime": 1780369558.6580431,
+    "ast_hash": "00288c855deb5a8a420a6b0f0e527eb4",
+    "semantic_hash": "00288c855deb5a8a420a6b0f0e527eb4"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\web-ui\\components\\Gallery.tsx": {
+    "mtime": 1780369558.6580431,
+    "ast_hash": "9e75a042ae462a19357399bdf55d7096",
+    "semantic_hash": "9e75a042ae462a19357399bdf55d7096"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\web-ui\\components\\MetaPromptModal.tsx": {
+    "mtime": 1780369354.558581,
+    "ast_hash": "4247328834d5c29caa63f03c465856ac",
+    "semantic_hash": "4247328834d5c29caa63f03c465856ac"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\web-ui\\components\\Settings.tsx": {
+    "mtime": 1780409903.4919846,
+    "ast_hash": "987b920973a72ef3ad9eb85bc47e3418",
+    "semantic_hash": "987b920973a72ef3ad9eb85bc47e3418"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\web-ui\\components\\TaskProgress.tsx": {
+    "mtime": 1780369138.5850804,
+    "ast_hash": "a2c9ac4b975da0e206563c0b0fc0855b",
+    "semantic_hash": "a2c9ac4b975da0e206563c0b0fc0855b"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\web-ui\\eslint.config.mjs": {
+    "mtime": 1756736145.8127966,
+    "ast_hash": "58a81380da978ff8030d2ed7a5e1f42b",
+    "semantic_hash": "58a81380da978ff8030d2ed7a5e1f42b"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\web-ui\\lib\\api.ts": {
+    "mtime": 1780409506.2592435,
+    "ast_hash": "6a63463e89c849520aab77e60db1ca83",
+    "semantic_hash": "6a63463e89c849520aab77e60db1ca83"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\web-ui\\lib\\cache.ts": {
+    "mtime": 1777125371.3474634,
+    "ast_hash": "3a5a4a11b407975d400ae5c4fd25d68b",
+    "semantic_hash": "3a5a4a11b407975d400ae5c4fd25d68b"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\web-ui\\lib\\task-progress.ts": {
+    "mtime": 1777125371.3484623,
+    "ast_hash": "c3e2eab851d195cc5b12c14968186bc7",
+    "semantic_hash": "c3e2eab851d195cc5b12c14968186bc7"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\web-ui\\lib\\utils.ts": {
+    "mtime": 1756739967.7844136,
+    "ast_hash": "6e7a2d4f1fa6b69ad722be7d66f8d57f",
+    "semantic_hash": "6e7a2d4f1fa6b69ad722be7d66f8d57f"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\web-ui\\next-env.d.ts": {
+    "mtime": 1759583112.929703,
+    "ast_hash": "a64595e6014adce3002d3bf762d2dbeb",
+    "semantic_hash": "a64595e6014adce3002d3bf762d2dbeb"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\web-ui\\next.config.ts": {
+    "mtime": 1774447643.539467,
+    "ast_hash": "5d98eea9cdaa080ca7e1d7892ab46920",
+    "semantic_hash": "5d98eea9cdaa080ca7e1d7892ab46920"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\web-ui\\package.json": {
+    "mtime": 1774447643.5399742,
+    "ast_hash": "c34f09b0a7f769426aefbfbfd5ab3d49",
+    "semantic_hash": "c34f09b0a7f769426aefbfbfd5ab3d49"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\web-ui\\postcss.config.mjs": {
+    "mtime": 1756736145.8147967,
+    "ast_hash": "d1283e7566e136247b268494a6a545eb",
+    "semantic_hash": "d1283e7566e136247b268494a6a545eb"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\web-ui\\tailwind.config.ts": {
+    "mtime": 1774447643.5399742,
+    "ast_hash": "5bbbca11a5c8e126f099d00f6b27e8c7",
+    "semantic_hash": "5bbbca11a5c8e126f099d00f6b27e8c7"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\web-ui\\tsconfig.json": {
+    "mtime": 1756736145.8157966,
+    "ast_hash": "cea808f0d72982d6e3082afdd6ec885b",
+    "semantic_hash": "cea808f0d72982d6e3082afdd6ec885b"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\.github\\workflows\\ci.yml": {
+    "mtime": 1777208354.6278622,
+    "ast_hash": "58ce8454a02520fd9b61b01632037ce7",
+    "semantic_hash": "58ce8454a02520fd9b61b01632037ce7"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\.github\\workflows\\cloudflare-deploy.yml": {
+    "mtime": 1777171433.8241615,
+    "ast_hash": "d2444bfa0a505083d37872660334778e",
+    "semantic_hash": "d2444bfa0a505083d37872660334778e"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\.github\\workflows\\release.yml": {
+    "mtime": 1774448376.1505668,
+    "ast_hash": "a14f628f3facd7294530ca21efb2bd49",
+    "semantic_hash": "a14f628f3facd7294530ca21efb2bd49"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\.pre-commit-config.yaml": {
+    "mtime": 1774447643.5022485,
+    "ast_hash": "79442072269556e4093c9ffc76335fb0",
+    "semantic_hash": "79442072269556e4093c9ffc76335fb0"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\AGENTS.md": {
+    "mtime": 1780418603.7719915,
+    "ast_hash": "03d6e5124a19ab7d8493da914d94e51d",
+    "semantic_hash": "03d6e5124a19ab7d8493da914d94e51d"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\CHANGELOG.md": {
+    "mtime": 1777037706.3786645,
+    "ast_hash": "8c55bcc89ee72629a1ae5fc1c1d1e8e2",
+    "semantic_hash": "8c55bcc89ee72629a1ae5fc1c1d1e8e2"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\CLAUDE.md": {
+    "mtime": 1774447643.5032492,
+    "ast_hash": "cb6ca0ca168ee533f571f0af0b96d2ce",
+    "semantic_hash": "cb6ca0ca168ee533f571f0af0b96d2ce"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\README.md": {
+    "mtime": 1777208489.196807,
+    "ast_hash": "48771bb545e364ff7ffc300fa5b0b533",
+    "semantic_hash": "48771bb545e364ff7ffc300fa5b0b533"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\cloudflare-gallery\\public\\index.html": {
+    "mtime": 1777174896.858533,
+    "ast_hash": "e08ac798c4e1f16ed94f20f060ff8995",
+    "semantic_hash": "e08ac798c4e1f16ed94f20f060ff8995"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\docker-compose.dev.yml": {
+    "mtime": 1777171433.8241615,
+    "ast_hash": "82a04ae706e4165caf853e81e6138ef4",
+    "semantic_hash": "82a04ae706e4165caf853e81e6138ef4"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\docker-compose.yml": {
+    "mtime": 1780417531.3891807,
+    "ast_hash": "bdc48bb38455fb4a37f062fbe20826ee",
+    "semantic_hash": "bdc48bb38455fb4a37f062fbe20826ee"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\docs\\CLOUDFLARE_SYNC.md": {
+    "mtime": 1777174377.507741,
+    "ast_hash": "389eab8ef8cf1e1d6bc9932bf0c8c2d5",
+    "semantic_hash": "389eab8ef8cf1e1d6bc9932bf0c8c2d5"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\docs\\CODE_QUALITY.md": {
+    "mtime": 1774447643.5164244,
+    "ast_hash": "8bbd1528f04735a768863b199634c9d6",
+    "semantic_hash": "8bbd1528f04735a768863b199634c9d6"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\docs\\CONTRIBUTING.md": {
+    "mtime": 1774447643.5164244,
+    "ast_hash": "f7e41d91824a5a9dba1a450bc35e0510",
+    "semantic_hash": "f7e41d91824a5a9dba1a450bc35e0510"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\docs\\DOCKER.md": {
+    "mtime": 1777125371.3313742,
+    "ast_hash": "d7cdc2f8104dc22e8fd7bcebb29d7931",
+    "semantic_hash": "d7cdc2f8104dc22e8fd7bcebb29d7931"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\docs\\PRESENTATION_PLAN.md": {
+    "mtime": 1774447643.5174286,
+    "ast_hash": "37296d00bcf368d257d8f9712be66b10",
+    "semantic_hash": "37296d00bcf368d257d8f9712be66b10"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\docs\\QUALITY_SETUP_SUMMARY.md": {
+    "mtime": 1774447643.5184288,
+    "ast_hash": "08fdb92bed8e4072c3754e544fa11c99",
+    "semantic_hash": "08fdb92bed8e4072c3754e544fa11c99"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\docs\\ROADMAP.md": {
+    "mtime": 1774447643.5189323,
+    "ast_hash": "d91fef610ed8f13a9a3486a9c455c708",
+    "semantic_hash": "d91fef610ed8f13a9a3486a9c455c708"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\docs\\WINDOWS_NOTES.md": {
+    "mtime": 1774447643.5189323,
+    "ast_hash": "4078bd4638f5a8eb6d878e843f9bd97f",
+    "semantic_hash": "4078bd4638f5a8eb6d878e843f9bd97f"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\docs\\Z_IMAGE_INTEGRATION_PLAN.md": {
+    "mtime": 1774447643.519441,
+    "ast_hash": "1c1f60b4303f150fb97c9f90c5e0eda8",
+    "semantic_hash": "1c1f60b4303f150fb97c9f90c5e0eda8"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\web-ui\\README.md": {
+    "mtime": 1774447650.7860012,
+    "ast_hash": "bc62056f704247e147160a906b46aac4",
+    "semantic_hash": "bc62056f704247e147160a906b46aac4"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\assets\\agentic-insights-logo.png": {
+    "mtime": 1756736145.7811706,
+    "ast_hash": "0ea203587ee68a249036c281f7115fbc",
+    "semantic_hash": "0ea203587ee68a249036c281f7115fbc"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\assets\\logo_mark.png": {
+    "mtime": 1756736145.7821703,
+    "ast_hash": "078c73b6afd522c5d3ac1065f9082645",
+    "semantic_hash": "078c73b6afd522c5d3ac1065f9082645"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\web-ui\\public\\file.svg": {
+    "mtime": 1756739967.7844136,
+    "ast_hash": "7f5fe2a0a69865856099b41ff935f927",
+    "semantic_hash": "7f5fe2a0a69865856099b41ff935f927"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\web-ui\\public\\globe.svg": {
+    "mtime": 1756739967.7844136,
+    "ast_hash": "5a299c17f01b393d73168f3f72170075",
+    "semantic_hash": "5a299c17f01b393d73168f3f72170075"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\web-ui\\public\\next.svg": {
+    "mtime": 1756739967.7844136,
+    "ast_hash": "61d4a9ed607f8eb52d47d1b0caa8d492",
+    "semantic_hash": "61d4a9ed607f8eb52d47d1b0caa8d492"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\web-ui\\public\\vercel.svg": {
+    "mtime": 1756739967.7844136,
+    "ast_hash": "b1810e5957093855d7e4532c09efcc39",
+    "semantic_hash": "b1810e5957093855d7e4532c09efcc39"
+  },
+  "C:\\Users\\vaski\\projects\\dreamgen\\web-ui\\public\\window.svg": {
+    "mtime": 1756739967.7854173,
+    "ast_hash": "cf277266add33ba3fbd04e5906665054",
+    "semantic_hash": "cf277266add33ba3fbd04e5906665054"
+  }
+}
