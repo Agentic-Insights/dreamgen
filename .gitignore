@@ -33,6 +33,7 @@ output/
 output_quarantine/
 ckpts/
 loras/
+ref-repos/
 
 # Test artifacts
 test_output.png
