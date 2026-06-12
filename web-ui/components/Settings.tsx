@@ -53,6 +53,17 @@ const IMAGE_BACKEND_OPTIONS = [
   { id: "mock", label: "Mock", description: "Generate placeholders without loading a model." },
 ] as const;
 
+const IMAGE_MODEL_BACKEND_BY_ID: Record<string, (typeof IMAGE_BACKEND_OPTIONS)[number]["id"]> = {
+  "local:zimage": "zimage",
+  "hf-internal-testing/tiny-stable-diffusion-torch": "smoke",
+  "segmind/tiny-sd": "small",
+  "stabilityai/sd-turbo": "turbo",
+  "diffusers/qwen-image-nf4": "qwen",
+  "baidu/ERNIE-Image-Turbo": "ernie",
+  "black-forest-labs/FLUX.1-schnell": "flux",
+  "black-forest-labs/FLUX.1-dev": "flux",
+};
+
 export default function Settings({ systemStatus }: SettingsProps) {
   const [activeSection, setActiveSection] = useState("models");
   const [modelStatus, setModelStatus] = useState<ModelStatus | null>(null);
@@ -346,6 +357,7 @@ export default function Settings({ systemStatus }: SettingsProps) {
   const loraProbability = generationConfig?.lora_application_probability ?? 0;
   const promptCapableModels = ollamaModels?.models.filter((model) => model.can_prompt) ?? [];
   const imageCapableModels = ollamaModels?.models.filter((model) => model.can_image) ?? [];
+  const localImageModels = modelStatus?.models.filter((model) => model.type === "text-to-image") ?? [];
   const configuredPromptModel = ollamaModels?.configured_prompt ?? "";
   const activePromptModel = ollamaModels?.current ?? null;
   const configuredImageModel = generationConfig?.ollama_image_model ?? ollamaModels?.configured_image ?? "";
@@ -947,9 +959,103 @@ export default function Settings({ systemStatus }: SettingsProps) {
 
                     <div>
                       <div className="mb-3">
-                        <h4 className="font-medium">Image Models</h4>
+                        <h4 className="font-medium">DreamGen Image Backends</h4>
                         <p className="text-sm text-muted-foreground mt-1">
-                          Image-capable Ollama models used when the backend is set to <code>Ollama Image</code>.
+                          Local renderers DreamGen can use for stage 2 image generation.
+                        </p>
+                      </div>
+
+                      {localImageModels.length > 0 ? (
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          {localImageModels.map((model) => {
+                            const backendId = IMAGE_MODEL_BACKEND_BY_ID[model.id];
+                            const backend = IMAGE_BACKEND_OPTIONS.find((option) => option.id === backendId);
+                            const isActive = backendId === selectedBackend;
+                            const isReady = model.status === "ready";
+
+                            return (
+                              <div
+                                key={`local-image-${model.id}`}
+                                className={cn(
+                                  "rounded-lg border p-4 transition-colors",
+                                  isActive
+                                    ? "border-primary bg-primary/5"
+                                    : "border-border bg-background/70"
+                                )}
+                              >
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <h5 className="font-medium">{model.name}</h5>
+                                      {isActive && (
+                                        <span className="rounded-full bg-primary/20 px-2 py-0.5 text-xs text-primary">
+                                          Active
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                      <span className={getModelStatusColor(model.status)}>
+                                        {model.status.replaceAll("_", " ")}
+                                      </span>
+                                      {model.size > 0 && (
+                                        <>
+                                          <span>•</span>
+                                          <span>{formatFileSize(model.size)}</span>
+                                        </>
+                                      )}
+                                      {backend && (
+                                        <>
+                                          <span>•</span>
+                                          <span>{backend.label}</span>
+                                        </>
+                                      )}
+                                    </div>
+                                  </div>
+                                  {getModelStatusIcon(model)}
+                                </div>
+
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                  {backendId && (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        updateGenerationConfig(
+                                          { image_backend: backendId },
+                                          `Switched image backend to ${backend?.label ?? backendId}`
+                                        )
+                                      }
+                                      className="rounded-md border border-border bg-background px-3 py-1.5 text-xs transition-colors hover:border-primary/50 disabled:cursor-not-allowed disabled:opacity-50"
+                                      disabled={isActive || !isReady}
+                                    >
+                                      {isActive ? "Selected" : isReady ? "Use backend" : "Download first"}
+                                    </button>
+                                  )}
+                                  {!isReady && model.downloadable && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleModelDownload(model.id)}
+                                      className="rounded-md border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs text-primary transition-colors hover:bg-primary/15"
+                                    >
+                                      Download
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
+                          No local DreamGen image backends were reported by the API.
+                        </div>
+                      )}
+                    </div>
+
+                    <div>
+                      <div className="mb-3">
+                        <h4 className="font-medium">Ollama Image Models</h4>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Image-generation models served by Ollama&apos;s image API, used only when the backend is set to <code>Ollama Image</code>.
                         </p>
                       </div>
 
@@ -1006,8 +1112,11 @@ export default function Settings({ systemStatus }: SettingsProps) {
                           })}
                         </div>
                       ) : (
-                        <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
-                          No image-capable Ollama models found. Install one like <code>x/z-image-turbo</code> or <code>x/flux2-klein</code> to use the Ollama image backend.
+                        <div className="rounded-md border border-dashed border-border bg-muted/20 p-4 text-sm text-muted-foreground">
+                          <div className="font-medium text-foreground">No Ollama image-generation models installed.</div>
+                          <div className="mt-1">
+                            Your current image rendering can still use the DreamGen backends above. Install an Ollama image model like <code>x/z-image-turbo</code> or <code>x/flux2-klein</code> only if you want the <code>Ollama Image</code> backend.
+                          </div>
                         </div>
                       )}
                     </div>
