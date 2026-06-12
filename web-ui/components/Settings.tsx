@@ -565,6 +565,162 @@ export default function Settings({ systemStatus }: SettingsProps) {
     );
   };
 
+  const renderHFWorkspacePanel = () => (
+    <div className="border border-border rounded-lg p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex items-start gap-2">
+          <Database className="w-5 h-5 text-primary mt-0.5" />
+          <div>
+            <h4 className="text-lg font-medium">Hugging Face Workspace</h4>
+            <p className="text-sm text-muted-foreground mt-1">
+              Inspect your HF user and org model repos through DreamGen&apos;s experiment lens.
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={loadHFWorkspace}
+          disabled={loadingHFWorkspace}
+          className="inline-flex items-center justify-center gap-2 rounded-md border border-border px-3 py-2 text-sm hover:bg-muted/50 disabled:opacity-50"
+        >
+          {loadingHFWorkspace ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <RefreshCw className="w-4 h-4" />
+          )}
+          Scan HF
+        </button>
+      </div>
+
+      {!hfWorkspace?.configured ? (
+        <div className="mt-4 rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
+          Save a Hugging Face token in Authentication to scan your user and org repos for DreamGen-relevant LoRAs and image models.
+        </div>
+      ) : (
+        <div className="mt-4 space-y-4">
+          {hfWorkspace.connected && hfWorkspace.account ? (
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+              <div className="rounded-md bg-muted/50 p-3">
+                <div className="text-xs text-muted-foreground">Account</div>
+                <div className="mt-1 font-medium break-all">
+                  {hfWorkspace.account.name ?? "Unknown"}
+                </div>
+              </div>
+              <div className="rounded-md bg-muted/50 p-3">
+                <div className="text-xs text-muted-foreground">Namespaces</div>
+                <div className="mt-1 font-medium">{hfWorkspace.namespaces.length}</div>
+              </div>
+              <div className="rounded-md bg-muted/50 p-3">
+                <div className="text-xs text-muted-foreground">DreamGen Matches</div>
+                <div className="mt-1 font-medium">{hfDreamGenRepoCount}</div>
+              </div>
+              <div className="rounded-md bg-muted/50 p-3">
+                <div className="text-xs text-muted-foreground">Local LoRAs</div>
+                <div className="mt-1 font-medium">{hfWorkspace.local_loras.length}</div>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
+              Token is saved, but Hugging Face could not be reached with it.
+            </div>
+          )}
+
+          {hfWorkspace.errors.length > 0 && (
+            <div className="space-y-2">
+              {hfWorkspace.errors.map((error) => (
+                <div
+                  key={error}
+                  className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
+                >
+                  {error}
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="rounded-md bg-muted/50 p-3">
+            <div className="text-xs font-medium text-foreground mb-1">Local LoRA directory</div>
+            <code className="text-xs text-muted-foreground break-all">
+              {hfWorkspace.lora_dir}
+            </code>
+            {hfWorkspace.local_loras.length > 0 ? (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {hfWorkspace.local_loras.map((loraName) => {
+                  const isEnabled = hfWorkspace.enabled_loras.includes(loraName);
+                  return (
+                    <button
+                      key={loraName}
+                      type="button"
+                      onClick={() => toggleEnabledLora(loraName)}
+                      className={cn(
+                        "rounded-full border px-3 py-1 text-xs transition-colors",
+                        isEnabled
+                          ? "border-primary bg-primary text-primary-foreground"
+                          : "border-border bg-background/60 hover:bg-muted/50"
+                      )}
+                    >
+                      {loraName}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="mt-2 text-xs text-muted-foreground">
+                No local LoRAs detected yet. HF LoRA repos are candidates to fetch into this directory.
+              </p>
+            )}
+          </div>
+
+          <div>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h5 className="font-medium">HF LoRA Candidates</h5>
+                <p className="text-sm text-muted-foreground">
+                  Repos tagged or named like adapters for style and subject experiments.
+                </p>
+              </div>
+              <span className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">
+                {hfWorkspace.lora_repos.length}
+              </span>
+            </div>
+            {hfWorkspace.lora_repos.length > 0 ? (
+              <div className="space-y-3">
+                {hfWorkspace.lora_repos.map((repo) => renderHFRepoCard(repo))}
+              </div>
+            ) : (
+              <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
+                No LoRA-like repos found in the scanned namespaces.
+              </div>
+            )}
+          </div>
+
+          <div>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h5 className="font-medium">HF Image Model Candidates</h5>
+                <p className="text-sm text-muted-foreground">
+                  Text-to-image and Diffusers repos that may be useful for backend experiments.
+                </p>
+              </div>
+              <span className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">
+                {hfWorkspace.image_repos.length}
+              </span>
+            </div>
+            {hfWorkspace.image_repos.length > 0 ? (
+              <div className="space-y-3">
+                {hfWorkspace.image_repos.map((repo) => renderHFRepoCard(repo))}
+              </div>
+            ) : (
+              <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
+                No image-model repos found. Tags like <code>diffusers</code>, <code>text-to-image</code>, and <code>lora</code> make matches easier to identify.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
   const sections = [
     { id: "models", label: "Models", icon: Database },
     { id: "plugins", label: "Plugins", icon: SettingsIcon },
@@ -1245,6 +1401,10 @@ export default function Settings({ systemStatus }: SettingsProps) {
                   </div>
                 </div>
 
+                <div className="mb-6">
+                  {renderHFWorkspacePanel()}
+                </div>
+
                 <div className="space-y-4">
                   <div>
                     <h4 className="font-medium">Image model downloads</h4>
@@ -1793,160 +1953,6 @@ export default function Settings({ systemStatus }: SettingsProps) {
                         )}
                       </button>
                     </form>
-                  </div>
-
-                  <div className="border border-border rounded-lg p-4">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                      <div className="flex items-start gap-2">
-                        <Database className="w-5 h-5 text-primary mt-0.5" />
-                        <div>
-                          <h4 className="text-lg font-medium">Hugging Face Workspace</h4>
-                          <p className="text-sm text-muted-foreground mt-1">
-                            Inspect your HF user and org model repos through DreamGen&apos;s experiment lens.
-                          </p>
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={loadHFWorkspace}
-                        disabled={loadingHFWorkspace}
-                        className="inline-flex items-center justify-center gap-2 rounded-md border border-border px-3 py-2 text-sm hover:bg-muted/50 disabled:opacity-50"
-                      >
-                        {loadingHFWorkspace ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <RefreshCw className="w-4 h-4" />
-                        )}
-                        Scan HF
-                      </button>
-                    </div>
-
-                    {!hfWorkspace?.configured ? (
-                      <div className="mt-4 rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
-                        Save a Hugging Face token to scan your user and org repos for DreamGen-relevant LoRAs and image models.
-                      </div>
-                    ) : (
-                      <div className="mt-4 space-y-4">
-                        {hfWorkspace.connected && hfWorkspace.account ? (
-                          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                            <div className="rounded-md bg-muted/50 p-3">
-                              <div className="text-xs text-muted-foreground">Account</div>
-                              <div className="mt-1 font-medium break-all">
-                                {hfWorkspace.account.name ?? "Unknown"}
-                              </div>
-                            </div>
-                            <div className="rounded-md bg-muted/50 p-3">
-                              <div className="text-xs text-muted-foreground">Namespaces</div>
-                              <div className="mt-1 font-medium">{hfWorkspace.namespaces.length}</div>
-                            </div>
-                            <div className="rounded-md bg-muted/50 p-3">
-                              <div className="text-xs text-muted-foreground">DreamGen Matches</div>
-                              <div className="mt-1 font-medium">{hfDreamGenRepoCount}</div>
-                            </div>
-                            <div className="rounded-md bg-muted/50 p-3">
-                              <div className="text-xs text-muted-foreground">Local LoRAs</div>
-                              <div className="mt-1 font-medium">{hfWorkspace.local_loras.length}</div>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
-                            Token is saved, but Hugging Face could not be reached with it.
-                          </div>
-                        )}
-
-                        {hfWorkspace.errors.length > 0 && (
-                          <div className="space-y-2">
-                            {hfWorkspace.errors.map((error) => (
-                              <div
-                                key={error}
-                                className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
-                              >
-                                {error}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-
-                        <div className="rounded-md bg-muted/50 p-3">
-                          <div className="text-xs font-medium text-foreground mb-1">Local LoRA directory</div>
-                          <code className="text-xs text-muted-foreground break-all">
-                            {hfWorkspace.lora_dir}
-                          </code>
-                          {hfWorkspace.local_loras.length > 0 ? (
-                            <div className="mt-3 flex flex-wrap gap-2">
-                              {hfWorkspace.local_loras.map((loraName) => {
-                                const isEnabled = hfWorkspace.enabled_loras.includes(loraName);
-                                return (
-                                  <button
-                                    key={loraName}
-                                    type="button"
-                                    onClick={() => toggleEnabledLora(loraName)}
-                                    className={cn(
-                                      "rounded-full border px-3 py-1 text-xs transition-colors",
-                                      isEnabled
-                                        ? "border-primary bg-primary text-primary-foreground"
-                                        : "border-border bg-background/60 hover:bg-muted/50"
-                                    )}
-                                  >
-                                    {loraName}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          ) : (
-                            <p className="mt-2 text-xs text-muted-foreground">
-                              No local LoRAs detected yet. HF LoRA repos are candidates to fetch into this directory.
-                            </p>
-                          )}
-                        </div>
-
-                        <div>
-                          <div className="mb-3 flex items-center justify-between gap-3">
-                            <div>
-                              <h5 className="font-medium">HF LoRA Candidates</h5>
-                              <p className="text-sm text-muted-foreground">
-                                Repos tagged or named like adapters for style and subject experiments.
-                              </p>
-                            </div>
-                            <span className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">
-                              {hfWorkspace.lora_repos.length}
-                            </span>
-                          </div>
-                          {hfWorkspace.lora_repos.length > 0 ? (
-                            <div className="space-y-3">
-                              {hfWorkspace.lora_repos.map((repo) => renderHFRepoCard(repo))}
-                            </div>
-                          ) : (
-                            <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
-                              No LoRA-like repos found in the scanned namespaces.
-                            </div>
-                          )}
-                        </div>
-
-                        <div>
-                          <div className="mb-3 flex items-center justify-between gap-3">
-                            <div>
-                              <h5 className="font-medium">HF Image Model Candidates</h5>
-                              <p className="text-sm text-muted-foreground">
-                                Text-to-image and Diffusers repos that may be useful for backend experiments.
-                              </p>
-                            </div>
-                            <span className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">
-                              {hfWorkspace.image_repos.length}
-                            </span>
-                          </div>
-                          {hfWorkspace.image_repos.length > 0 ? (
-                            <div className="space-y-3">
-                              {hfWorkspace.image_repos.map((repo) => renderHFRepoCard(repo))}
-                            </div>
-                          ) : (
-                            <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
-                              No image-model repos found. Tags like <code>diffusers</code>, <code>text-to-image</code>, and <code>lora</code> make matches easier to identify.
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
                   </div>
                 </div>
               </div>

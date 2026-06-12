@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Trash2, Download, X, Loader2, Clock, FileText, Copy, Check,
   Calendar, Grid, ChevronLeft, ChevronRight, Folder, Star, Eye, EyeOff, Archive,
-  UploadCloud, ExternalLink, Info
+  UploadCloud, ExternalLink, Info, Square, CheckSquare
 } from "lucide-react";
 import {
   api,
@@ -134,6 +134,9 @@ export default function Gallery() {
   const [catalogFilter, setCatalogFilter] = useState<CatalogFilter>("all");
   const [syncStatus, setSyncStatus] = useState<GallerySyncStatus | null>(null);
   const [copiedPromptPath, setCopiedPromptPath] = useState<string | null>(null);
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
+  const [bulkUpdating, setBulkUpdating] = useState(false);
+  const [bulkPublicationState, setBulkPublicationState] = useState<PublicationState>("hidden");
   const loadRequestRef = useRef(0);
 
   const imagesPerPage = viewMode === "all" ? ALL_PAGE_SIZE : WEEK_PAGE_SIZE;
@@ -173,11 +176,20 @@ export default function Gallery() {
 
     setWeekGroups(sorted);
 
-    // Auto-expand the most recent week
-    if (sorted.length > 0) {
-      const mostRecent = `${sorted[0].year}-${sorted[0].week}`;
-      setExpandedWeeks(new Set([mostRecent]));
-    }
+    setExpandedWeeks((currentExpanded) => {
+      if (sorted.length === 0) return new Set();
+
+      const availableWeeks = new Set(sorted.map((group) => `${group.year}-${group.week}`));
+      const retainedWeeks = new Set(
+        Array.from(currentExpanded).filter((weekKey) => availableWeeks.has(weekKey))
+      );
+
+      if (retainedWeeks.size === 0) {
+        retainedWeeks.add(`${sorted[0].year}-${sorted[0].week}`);
+      }
+
+      return retainedWeeks;
+    });
   }, []);
 
   const loadImages = useCallback(async () => {
@@ -288,9 +300,58 @@ export default function Gallery() {
 
   useEffect(() => {
     setPage(0);
+    setSelectedPaths(new Set());
   }, [catalogFilter, viewMode]);
 
+  useEffect(() => {
+    const visiblePaths = new Set(images.map((image) => image.catalog_path));
+    setSelectedPaths((current) => {
+      const retained = new Set(Array.from(current).filter((path) => visiblePaths.has(path)));
+      return retained.size === current.size ? current : retained;
+    });
+  }, [images]);
+
   const getImageUrl = (imagePath: string) => `${API_BASE}${imagePath}`;
+
+  const imageRelativePath = (imagePath: string) => {
+    const pathParts = imagePath.split("/images/");
+    return pathParts[1] || imagePath.replace(/^\/images\//, "");
+  };
+
+  const visibleImagePaths = images.map((image) => image.catalog_path);
+  const selectedImages = images.filter((image) => selectedPaths.has(image.catalog_path));
+  const allVisibleSelected =
+    visibleImagePaths.length > 0 && visibleImagePaths.every((path) => selectedPaths.has(path));
+
+  const toggleImageSelection = (image: GalleryImage, event: React.MouseEvent) => {
+    event.stopPropagation();
+    setSelectedPaths((current) => {
+      const next = new Set(current);
+      if (next.has(image.catalog_path)) {
+        next.delete(image.catalog_path);
+      } else {
+        next.add(image.catalog_path);
+      }
+      return next;
+    });
+  };
+
+  const selectVisibleImages = () => {
+    setSelectedPaths((current) => {
+      const next = new Set(current);
+      if (allVisibleSelected) {
+        visibleImagePaths.forEach((path) => next.delete(path));
+      } else {
+        visibleImagePaths.forEach((path) => next.add(path));
+      }
+      return next;
+    });
+  };
+
+  const refreshAfterBulkChange = async () => {
+    await withTimeout(galleryCache.clear(), CACHE_TIMEOUT_MS, undefined);
+    await loadImages();
+  };
 
   const selectAdjacentImage = useCallback((direction: -1 | 1) => {
     if (!selectedImage || images.length <= 1) return;
@@ -327,14 +388,15 @@ export default function Gallery() {
 
     setDeleting(imagePath);
     try {
-      const pathParts = imagePath.split("/images/");
-      const relativePath = pathParts[1] || imagePath;
+      const relativePath = imageRelativePath(imagePath);
       await api.deleteImage(relativePath);
 
-      // Clear cache after deletion
-      await withTimeout(galleryCache.clear(), CACHE_TIMEOUT_MS, undefined);
-
-      await loadImages();
+      await refreshAfterBulkChange();
+      setSelectedPaths((current) => {
+        const next = new Set(current);
+        next.delete(relativePath);
+        return next;
+      });
       if (selectedImage?.path === imagePath) {
         setSelectedImage(null);
       }
@@ -343,6 +405,48 @@ export default function Gallery() {
       alert("Failed to delete image");
     } finally {
       setDeleting(null);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedImages.length === 0 || bulkUpdating) return;
+    const count = selectedImages.length;
+    if (!confirm(`Delete ${count} selected image${count === 1 ? "" : "s"}?`)) return;
+
+    setBulkUpdating(true);
+    try {
+      for (const image of selectedImages) {
+        await api.deleteImage(image.catalog_path);
+      }
+      setSelectedImage((currentImage) => (
+        currentImage && selectedPaths.has(currentImage.catalog_path) ? null : currentImage
+      ));
+      setSelectedPaths(new Set());
+      await refreshAfterBulkChange();
+    } catch (err) {
+      console.error("Failed to delete selected images:", err);
+      alert("Failed to delete selected images");
+    } finally {
+      setBulkUpdating(false);
+    }
+  };
+
+  const handleBulkPublicationChange = async () => {
+    if (selectedImages.length === 0 || bulkUpdating) return;
+
+    setBulkUpdating(true);
+    try {
+      for (const image of selectedImages) {
+        await api.updatePublicationState(image.catalog_path, bulkPublicationState);
+      }
+      setSelectedPaths(new Set());
+      await refreshAfterBulkChange();
+    } catch (err) {
+      console.error("Failed to update selected images:", err);
+      const message = err instanceof Error ? err.message : "Failed to update selected images";
+      alert(message);
+    } finally {
+      setBulkUpdating(false);
     }
   };
 
@@ -492,6 +596,68 @@ export default function Gallery() {
 
   const selectedMetadataRows = selectedImage ? getMetadataRows(selectedImage) : [];
 
+  const renderBulkToolbar = () => (
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-3 py-2">
+      <button
+        type="button"
+        onClick={selectVisibleImages}
+        className="inline-flex h-8 items-center gap-2 rounded-md border border-border bg-background px-3 text-sm hover:bg-muted/50"
+      >
+        {allVisibleSelected ? (
+          <CheckSquare className="h-4 w-4 text-primary" />
+        ) : (
+          <Square className="h-4 w-4" />
+        )}
+        {allVisibleSelected ? "Unselect visible" : "Select visible"}
+      </button>
+      <span className="text-sm text-muted-foreground">
+        {selectedPaths.size} selected
+      </span>
+      <select
+        value={bulkPublicationState}
+        onChange={(event) => setBulkPublicationState(event.target.value as PublicationState)}
+        className="h-8 rounded-md border border-border bg-background px-2 text-sm"
+        title="Bulk publication state"
+        disabled={bulkUpdating || selectedPaths.size === 0}
+      >
+        {PUBLICATION_OPTIONS.map((option) => (
+          <option key={option.state} value={option.state}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        onClick={handleBulkPublicationChange}
+        disabled={bulkUpdating || selectedPaths.size === 0}
+        className="inline-flex h-8 items-center gap-2 rounded-md bg-primary px-3 text-sm text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {bulkUpdating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+        Apply
+      </button>
+      <button
+        type="button"
+        onClick={handleBulkDelete}
+        disabled={bulkUpdating || selectedPaths.size === 0}
+        className="inline-flex h-8 items-center gap-2 rounded-md border border-destructive/60 bg-destructive/15 px-3 text-sm font-medium text-destructive hover:bg-destructive/25 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {bulkUpdating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+        Delete
+      </button>
+      {selectedPaths.size > 0 && (
+        <button
+          type="button"
+          onClick={() => setSelectedPaths(new Set())}
+          className="inline-flex h-8 items-center gap-2 rounded-md border border-border bg-background px-3 text-sm hover:bg-muted/50"
+          disabled={bulkUpdating}
+        >
+          <X className="h-4 w-4" />
+          Clear
+        </button>
+      )}
+    </div>
+  );
+
   const renderStateBadge = (state: PublicationState, className?: string) => (
     <span
       className={cn(
@@ -514,6 +680,24 @@ export default function Gallery() {
           className="group relative aspect-square bg-card border border-border rounded-lg overflow-hidden cursor-pointer hover:border-primary transition-colors"
           onClick={() => setSelectedImage(image)}
         >
+          <button
+            type="button"
+            onClick={(event) => toggleImageSelection(image, event)}
+            className={cn(
+              "absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-md border shadow-sm transition",
+              selectedPaths.has(image.catalog_path)
+                ? "border-primary bg-primary text-primary-foreground opacity-100"
+                : "border-white/40 bg-black/55 text-white opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
+            )}
+            title={selectedPaths.has(image.catalog_path) ? "Unselect image" : "Select image"}
+            aria-label={selectedPaths.has(image.catalog_path) ? "Unselect image" : "Select image"}
+          >
+            {selectedPaths.has(image.catalog_path) ? (
+              <CheckSquare className="h-4 w-4" />
+            ) : (
+              <Square className="h-4 w-4" />
+            )}
+          </button>
           <img
             src={getImageUrl(image.path)}
             alt={image.prompt}
@@ -565,7 +749,7 @@ export default function Gallery() {
             </div>
           </div>
 
-          <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="absolute top-10 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
             <div className="bg-black/60 backdrop-blur-sm rounded px-2 py-1">
               <p className="text-xs text-white">{formatSize(image.size)}</p>
             </div>
@@ -693,6 +877,9 @@ export default function Gallery() {
                 )}
               </button>
             </div>
+          </div>
+          <div className="mt-3">
+            {renderBulkToolbar()}
           </div>
         </div>
 
