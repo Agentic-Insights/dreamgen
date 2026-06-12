@@ -29,6 +29,8 @@ import {
   ModelStatus,
   ModelInfo,
   HFTokenStatus,
+  HFWorkspace,
+  HFWorkspaceRepo,
   SystemStatus,
   OllamaModelsResponse,
   PluginInfo,
@@ -70,6 +72,8 @@ export default function Settings({ systemStatus }: SettingsProps) {
   const [generationConfig, setGenerationConfig] = useState<GenerationConfig | null>(null);
   const [loadingGenerationConfig, setLoadingGenerationConfig] = useState(false);
   const [hfTokenStatus, setHFTokenStatus] = useState<HFTokenStatus | null>(null);
+  const [hfWorkspace, setHFWorkspace] = useState<HFWorkspace | null>(null);
+  const [loadingHFWorkspace, setLoadingHFWorkspace] = useState(false);
   const [hfToken, setHFToken] = useState("");
   const [showToken, setShowToken] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -89,6 +93,7 @@ export default function Settings({ systemStatus }: SettingsProps) {
     loadModelStatus();
     loadGenerationConfig();
     loadHFTokenStatus();
+    loadHFWorkspace();
     loadOllamaModels();
     loadPlugins();
   }, []);
@@ -153,6 +158,22 @@ export default function Settings({ systemStatus }: SettingsProps) {
       setHFTokenStatus(status);
     } catch (error) {
       console.error('Failed to load HF token status:', error);
+    }
+  };
+
+  const loadHFWorkspace = async () => {
+    setLoadingHFWorkspace(true);
+    try {
+      const workspace = await api.getHFWorkspace();
+      setHFWorkspace(workspace);
+    } catch (error) {
+      console.error('Failed to inspect HF workspace:', error);
+      setMessage({
+        type: 'error',
+        text: `Failed to inspect Hugging Face workspace: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      });
+    } finally {
+      setLoadingHFWorkspace(false);
     }
   };
 
@@ -299,6 +320,7 @@ export default function Settings({ systemStatus }: SettingsProps) {
 
       setHFToken("");
       await loadHFTokenStatus();
+      await loadHFWorkspace();
     } catch (error) {
       setMessage({
         type: 'error',
@@ -345,6 +367,37 @@ export default function Settings({ systemStatus }: SettingsProps) {
         ? `Enabled LoRA ${loraName}`
         : `Disabled LoRA ${loraName}`
     );
+    setHFWorkspace((current) =>
+      current ? { ...current, enabled_loras: nextEnabledLoras } : current
+    );
+  };
+
+  const copyRepoId = async (repoId: string) => {
+    try {
+      await navigator.clipboard.writeText(repoId);
+      setMessage({ type: 'success', text: `Copied ${repoId}` });
+    } catch (error) {
+      setMessage({
+        type: 'error',
+        text: `Failed to copy repo id: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      });
+    }
+    setTimeout(() => setMessage(null), 4000);
+  };
+
+  const applyHFRepoToBackend = async (repo: HFWorkspaceRepo, backend: "qwen" | "ernie") => {
+    if (backend === "qwen") {
+      await updateGenerationConfig(
+        { qwen_image_model: repo.id, image_backend: "qwen" },
+        `Using ${repo.id} for Qwen experiments`
+      );
+      return;
+    }
+
+    await updateGenerationConfig(
+      { ernie_image_model: repo.id, image_backend: "ernie" },
+      `Using ${repo.id} for ERNIE experiments`
+    );
   };
 
   const formatFileSize = (bytes: number) => {
@@ -363,6 +416,23 @@ export default function Settings({ systemStatus }: SettingsProps) {
       case 'not_downloaded': return 'text-gray-400';
       default: return 'text-gray-400';
     }
+  };
+
+  const formatCount = (value: number | null) =>
+    typeof value === "number" ? value.toLocaleString() : "0";
+
+  const formatRepoDate = (value: string | null) => {
+    if (!value) return "Unknown date";
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return parsed.toLocaleDateString();
+  };
+
+  const repoMatches = (repo: HFWorkspaceRepo, term: string) => {
+    const haystack = [repo.id, repo.pipeline_tag ?? "", repo.library_name ?? "", ...repo.tags]
+      .join(" ")
+      .toLowerCase();
+    return haystack.includes(term);
   };
 
   const getModelStatusIcon = (model: ModelInfo) => {
@@ -400,6 +470,100 @@ export default function Settings({ systemStatus }: SettingsProps) {
   const selectedBackendLabel =
     IMAGE_BACKEND_OPTIONS.find((backend) => backend.id === selectedBackend)?.label ?? selectedBackend;
   const promptModelFallback = generationConfig?.prompt_model ?? configuredPromptModel;
+  const hfDreamGenRepoCount = new Set([
+    ...(hfWorkspace?.lora_repos.map((repo) => repo.id) ?? []),
+    ...(hfWorkspace?.image_repos.map((repo) => repo.id) ?? []),
+  ]).size;
+
+  const renderHFRepoCard = (repo: HFWorkspaceRepo) => {
+    const isQwenCandidate = repoMatches(repo, "qwen");
+    const isErnieCandidate = repoMatches(repo, "ernie");
+
+    return (
+      <div
+        key={repo.id}
+        className="rounded-lg border border-border p-3 text-sm hover:bg-muted/30 transition-colors"
+      >
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <div className="font-medium text-foreground break-all">{repo.id}</div>
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              {repo.pipeline_tag && <span>{repo.pipeline_tag}</span>}
+              {repo.library_name && <span>{repo.library_name}</span>}
+              <span>{formatCount(repo.downloads)} downloads</span>
+              <span>{formatCount(repo.likes)} likes</span>
+              <span>{formatRepoDate(repo.last_modified)}</span>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {repo.private && (
+                <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-700 dark:text-amber-300">
+                  Private
+                </span>
+              )}
+              {repo.gated && (
+                <span className="rounded-full bg-purple-500/10 px-2 py-0.5 text-[11px] text-purple-700 dark:text-purple-300">
+                  Gated
+                </span>
+              )}
+              {repo.relevance.map((label) => (
+                <span
+                  key={label}
+                  className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] text-primary"
+                >
+                  {label}
+                </span>
+              ))}
+              {repo.tags.slice(0, 5).map((tag) => (
+                <span
+                  key={tag}
+                  className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground"
+                >
+                  {tag}
+                </span>
+              ))}
+            </div>
+          </div>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => copyRepoId(repo.id)}
+              className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-muted/50"
+            >
+              Copy ID
+            </button>
+            {repo.url && (
+              <a
+                href={repo.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-muted/50"
+              >
+                Open
+              </a>
+            )}
+            {isQwenCandidate && (
+              <button
+                type="button"
+                onClick={() => applyHFRepoToBackend(repo, "qwen")}
+                className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
+              >
+                Use Qwen
+              </button>
+            )}
+            {isErnieCandidate && (
+              <button
+                type="button"
+                onClick={() => applyHFRepoToBackend(repo, "ernie")}
+                className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
+              >
+                Use ERNIE
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   const sections = [
     { id: "models", label: "Models", icon: Database },
@@ -1565,7 +1729,7 @@ export default function Settings({ systemStatus }: SettingsProps) {
               exit={{ opacity: 0, y: -10 }}
               className="p-4 sm:p-6 lg:p-8"
             >
-              <div className="max-w-2xl">
+              <div className="max-w-5xl">
                 <h3 className="text-xl font-semibold mb-6">Authentication</h3>
 
                 {/* HF Token Section */}
@@ -1629,6 +1793,160 @@ export default function Settings({ systemStatus }: SettingsProps) {
                         )}
                       </button>
                     </form>
+                  </div>
+
+                  <div className="border border-border rounded-lg p-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="flex items-start gap-2">
+                        <Database className="w-5 h-5 text-primary mt-0.5" />
+                        <div>
+                          <h4 className="text-lg font-medium">Hugging Face Workspace</h4>
+                          <p className="text-sm text-muted-foreground mt-1">
+                            Inspect your HF user and org model repos through DreamGen&apos;s experiment lens.
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={loadHFWorkspace}
+                        disabled={loadingHFWorkspace}
+                        className="inline-flex items-center justify-center gap-2 rounded-md border border-border px-3 py-2 text-sm hover:bg-muted/50 disabled:opacity-50"
+                      >
+                        {loadingHFWorkspace ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <RefreshCw className="w-4 h-4" />
+                        )}
+                        Scan HF
+                      </button>
+                    </div>
+
+                    {!hfWorkspace?.configured ? (
+                      <div className="mt-4 rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
+                        Save a Hugging Face token to scan your user and org repos for DreamGen-relevant LoRAs and image models.
+                      </div>
+                    ) : (
+                      <div className="mt-4 space-y-4">
+                        {hfWorkspace.connected && hfWorkspace.account ? (
+                          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                            <div className="rounded-md bg-muted/50 p-3">
+                              <div className="text-xs text-muted-foreground">Account</div>
+                              <div className="mt-1 font-medium break-all">
+                                {hfWorkspace.account.name ?? "Unknown"}
+                              </div>
+                            </div>
+                            <div className="rounded-md bg-muted/50 p-3">
+                              <div className="text-xs text-muted-foreground">Namespaces</div>
+                              <div className="mt-1 font-medium">{hfWorkspace.namespaces.length}</div>
+                            </div>
+                            <div className="rounded-md bg-muted/50 p-3">
+                              <div className="text-xs text-muted-foreground">DreamGen Matches</div>
+                              <div className="mt-1 font-medium">{hfDreamGenRepoCount}</div>
+                            </div>
+                            <div className="rounded-md bg-muted/50 p-3">
+                              <div className="text-xs text-muted-foreground">Local LoRAs</div>
+                              <div className="mt-1 font-medium">{hfWorkspace.local_loras.length}</div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
+                            Token is saved, but Hugging Face could not be reached with it.
+                          </div>
+                        )}
+
+                        {hfWorkspace.errors.length > 0 && (
+                          <div className="space-y-2">
+                            {hfWorkspace.errors.map((error) => (
+                              <div
+                                key={error}
+                                className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
+                              >
+                                {error}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        <div className="rounded-md bg-muted/50 p-3">
+                          <div className="text-xs font-medium text-foreground mb-1">Local LoRA directory</div>
+                          <code className="text-xs text-muted-foreground break-all">
+                            {hfWorkspace.lora_dir}
+                          </code>
+                          {hfWorkspace.local_loras.length > 0 ? (
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {hfWorkspace.local_loras.map((loraName) => {
+                                const isEnabled = hfWorkspace.enabled_loras.includes(loraName);
+                                return (
+                                  <button
+                                    key={loraName}
+                                    type="button"
+                                    onClick={() => toggleEnabledLora(loraName)}
+                                    className={cn(
+                                      "rounded-full border px-3 py-1 text-xs transition-colors",
+                                      isEnabled
+                                        ? "border-primary bg-primary text-primary-foreground"
+                                        : "border-border bg-background/60 hover:bg-muted/50"
+                                    )}
+                                  >
+                                    {loraName}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <p className="mt-2 text-xs text-muted-foreground">
+                              No local LoRAs detected yet. HF LoRA repos are candidates to fetch into this directory.
+                            </p>
+                          )}
+                        </div>
+
+                        <div>
+                          <div className="mb-3 flex items-center justify-between gap-3">
+                            <div>
+                              <h5 className="font-medium">HF LoRA Candidates</h5>
+                              <p className="text-sm text-muted-foreground">
+                                Repos tagged or named like adapters for style and subject experiments.
+                              </p>
+                            </div>
+                            <span className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">
+                              {hfWorkspace.lora_repos.length}
+                            </span>
+                          </div>
+                          {hfWorkspace.lora_repos.length > 0 ? (
+                            <div className="space-y-3">
+                              {hfWorkspace.lora_repos.map((repo) => renderHFRepoCard(repo))}
+                            </div>
+                          ) : (
+                            <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
+                              No LoRA-like repos found in the scanned namespaces.
+                            </div>
+                          )}
+                        </div>
+
+                        <div>
+                          <div className="mb-3 flex items-center justify-between gap-3">
+                            <div>
+                              <h5 className="font-medium">HF Image Model Candidates</h5>
+                              <p className="text-sm text-muted-foreground">
+                                Text-to-image and Diffusers repos that may be useful for backend experiments.
+                              </p>
+                            </div>
+                            <span className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">
+                              {hfWorkspace.image_repos.length}
+                            </span>
+                          </div>
+                          {hfWorkspace.image_repos.length > 0 ? (
+                            <div className="space-y-3">
+                              {hfWorkspace.image_repos.map((repo) => renderHFRepoCard(repo))}
+                            </div>
+                          ) : (
+                            <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
+                              No image-model repos found. Tags like <code>diffusers</code>, <code>text-to-image</code>, and <code>lora</code> make matches easier to identify.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

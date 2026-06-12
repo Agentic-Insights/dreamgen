@@ -17,6 +17,11 @@ import aiofiles
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+
+try:
+    from huggingface_hub import HfApi
+except ImportError:  # pragma: no cover - dependency is installed in normal app environments
+    HfApi = None
 from pydantic import BaseModel, Field
 
 from src.generators.factory import backend_label, is_model_cached, resolve_image_backend
@@ -217,6 +222,202 @@ def parse_bool_config(value: Any) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in ("true", "1", "yes", "on")
     return bool(value)
+
+
+def hf_token_file() -> Path:
+    """Return the Hugging Face token file path for the current runtime."""
+    return Path(os.getenv("HF_HOME", os.path.expanduser("~/.cache/huggingface"))) / "token"
+
+
+def read_hf_token() -> tuple[Optional[str], Optional[str]]:
+    """Return a configured HF token and its source without exposing placeholder values."""
+    env_token = os.getenv("HF_TOKEN", "").strip()
+    if env_token and env_token != "your_hugging_face_token_here":
+        return env_token, "environment"
+
+    token_path = hf_token_file()
+    if token_path.exists():
+        token = token_path.read_text(encoding="utf-8").strip()
+        if token and token != "your_hugging_face_token_here":
+            return token, "file"
+
+    return None, None
+
+
+def iso_datetime(value: Any) -> Optional[str]:
+    """Serialize datetime-like values from Hugging Face model metadata."""
+    if value is None:
+        return None
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
+def hf_card_data_value(card_data: Any, key: str) -> Any:
+    """Read a field from Hugging Face card data whether it is a dict or object."""
+    if isinstance(card_data, dict):
+        return card_data.get(key)
+    return getattr(card_data, key, None)
+
+
+def classify_hf_repo(repo: Any) -> Dict[str, Any]:
+    """Classify a Hugging Face model repo by DreamGen relevance."""
+    repo_id = getattr(repo, "modelId", None) or getattr(repo, "id", "")
+    tags = [str(tag) for tag in (getattr(repo, "tags", None) or [])]
+    pipeline_tag = getattr(repo, "pipeline_tag", None)
+    card_data = getattr(repo, "card_data", None) or getattr(repo, "cardData", None)
+    library_name = getattr(repo, "library_name", None) or hf_card_data_value(
+        card_data, "library_name"
+    )
+
+    haystack = " ".join(
+        [
+            str(repo_id),
+            str(pipeline_tag or ""),
+            str(library_name or ""),
+            *tags,
+        ]
+    ).lower()
+
+    lora_terms = ("lora", "loras", "adapter", "peft", "lycoris", "dreambooth")
+    image_terms = (
+        "diffusers",
+        "text-to-image",
+        "image-to-image",
+        "unconditional-image-generation",
+        "stable-diffusion",
+        "stable diffusion",
+        "sdxl",
+        "flux",
+        "qwen-image",
+        "qwen image",
+        "ernie-image",
+        "ernie image",
+        "z-image",
+        "zimage",
+        "kolors",
+        "controlnet",
+    )
+
+    is_lora = any(term in haystack for term in lora_terms)
+    is_image = pipeline_tag in {
+        "text-to-image",
+        "image-to-image",
+        "unconditional-image-generation",
+    } or any(term in haystack for term in image_terms)
+
+    relevance: List[str] = []
+    if is_lora:
+        relevance.append("lora")
+    if is_image:
+        relevance.append("image-model")
+
+    return {
+        "id": repo_id,
+        "author": getattr(repo, "author", None) or repo_id.split("/")[0],
+        "private": bool(getattr(repo, "private", False)),
+        "gated": getattr(repo, "gated", None),
+        "downloads": getattr(repo, "downloads", None),
+        "likes": getattr(repo, "likes", None),
+        "last_modified": iso_datetime(
+            getattr(repo, "last_modified", None) or getattr(repo, "lastModified", None)
+        ),
+        "pipeline_tag": pipeline_tag,
+        "library_name": library_name,
+        "tags": tags[:16],
+        "relevance": relevance,
+        "kind": "lora" if is_lora else "image-model" if is_image else "other",
+        "url": f"https://huggingface.co/{repo_id}" if repo_id else None,
+    }
+
+
+def build_hf_workspace_payload() -> Dict[str, Any]:
+    """Build a DreamGen-focused Hugging Face workspace view."""
+    token, source = read_hf_token()
+    local_loras = get_available_loras(config.model.lora.lora_dir)
+    base_payload: Dict[str, Any] = {
+        "configured": bool(token),
+        "source": source,
+        "connected": False,
+        "account": None,
+        "namespaces": [],
+        "repos": [],
+        "lora_repos": [],
+        "image_repos": [],
+        "local_loras": local_loras,
+        "enabled_loras": config.model.lora.enabled_loras,
+        "lora_dir": str(config.model.lora.lora_dir),
+        "errors": [],
+    }
+
+    if not token:
+        return base_payload
+
+    if HfApi is None:
+        base_payload["errors"].append("huggingface_hub is not installed in this backend runtime")
+        return base_payload
+
+    api = HfApi(token=token)
+
+    try:
+        account = api.whoami(token=token)
+    except Exception as exc:
+        logger.warning("Failed to inspect Hugging Face account: %s", exc)
+        base_payload["errors"].append(
+            f"Could not connect to Hugging Face with the saved token: {exc}"
+        )
+        return base_payload
+
+    account_name = account.get("name") or account.get("fullname") or account.get("email")
+    orgs = [
+        org.get("name") or org.get("displayName") or org.get("id")
+        for org in account.get("orgs", [])
+        if org.get("name") or org.get("displayName") or org.get("id")
+    ]
+    namespaces = [namespace for namespace in [account_name, *orgs] if namespace]
+    deduped_namespaces = list(dict.fromkeys(namespaces))
+    base_payload.update(
+        {
+            "connected": True,
+            "account": {
+                "name": account_name,
+                "type": account.get("type"),
+                "orgs": orgs,
+            },
+            "namespaces": deduped_namespaces,
+        }
+    )
+
+    repo_by_id: Dict[str, Dict[str, Any]] = {}
+    for namespace in deduped_namespaces:
+        try:
+            namespace_repos = api.list_models(
+                author=namespace,
+                limit=100,
+                full=True,
+                cardData=True,
+                token=token,
+            )
+            for repo in namespace_repos:
+                classified = classify_hf_repo(repo)
+                if classified["id"]:
+                    repo_by_id[classified["id"]] = classified
+        except Exception as exc:
+            logger.warning("Failed to list Hugging Face models for %s: %s", namespace, exc)
+            base_payload["errors"].append(f"Could not list models for {namespace}: {exc}")
+
+    repos = sorted(
+        repo_by_id.values(),
+        key=lambda item: item.get("last_modified") or "",
+        reverse=True,
+    )
+    repos = sorted(repos, key=lambda item: 0 if item["relevance"] else 1)
+    base_payload["repos"] = repos[:150]
+    base_payload["lora_repos"] = [repo for repo in repos if "lora" in repo["relevance"]][:50]
+    base_payload["image_repos"] = [repo for repo in repos if "image-model" in repo["relevance"]][
+        :50
+    ]
+    return base_payload
 
 
 # Output directory setup
@@ -1034,18 +1235,20 @@ async def set_hf_token(token_data: dict):
 @app.get("/api/config/hf-token-status")
 async def get_hf_token_status():
     """Check if HF token is configured"""
-    # Check environment variable first
-    if os.getenv("HF_TOKEN"):
-        return {"configured": True, "source": "environment"}
+    token, source = read_hf_token()
+    return {"configured": bool(token), "source": source}
 
-    # Check token file using configured HF_HOME
-    hf_cache_dir = Path(os.getenv("HF_HOME", os.path.expanduser("~/.cache/huggingface")))
-    token_file = hf_cache_dir / "token"
 
-    if token_file.exists():
-        return {"configured": True, "source": "file"}
-
-    return {"configured": False, "source": None}
+@app.get("/api/huggingface/workspace")
+async def get_huggingface_workspace():
+    """Return a DreamGen-focused view of the configured Hugging Face account."""
+    try:
+        return await asyncio.to_thread(build_hf_workspace_payload)
+    except Exception as e:
+        logger.error(f"Failed to build Hugging Face workspace: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to inspect Hugging Face workspace: {e}"
+        )
 
 
 @app.post("/api/plugins/{plugin_name}/toggle")

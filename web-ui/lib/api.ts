@@ -75,6 +75,43 @@ export interface HFTokenStatus {
   source?: 'environment' | 'file';
 }
 
+export interface HFWorkspaceAccount {
+  name: string | null;
+  type?: string | null;
+  orgs: string[];
+}
+
+export interface HFWorkspaceRepo {
+  id: string;
+  author: string;
+  private: boolean;
+  gated: boolean | string | null;
+  downloads: number | null;
+  likes: number | null;
+  last_modified: string | null;
+  pipeline_tag: string | null;
+  library_name: string | null;
+  tags: string[];
+  relevance: string[];
+  kind: 'lora' | 'image-model' | 'other';
+  url: string | null;
+}
+
+export interface HFWorkspace {
+  configured: boolean;
+  source?: 'environment' | 'file' | null;
+  connected: boolean;
+  account: HFWorkspaceAccount | null;
+  namespaces: string[];
+  repos: HFWorkspaceRepo[];
+  lora_repos: HFWorkspaceRepo[];
+  image_repos: HFWorkspaceRepo[];
+  local_loras: string[];
+  enabled_loras: string[];
+  lora_dir: string;
+  errors: string[];
+}
+
 export interface PromptResponse {
   prompt: string;
 }
@@ -625,6 +662,12 @@ export class ImageGenAPI {
   async getHFTokenStatus(): Promise<HFTokenStatus> {
     const response = await fetch(`${this.baseUrl}/api/config/hf-token-status`);
     if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to get HF token status'));
+    return response.json();
+  }
+
+  async getHFWorkspace(): Promise<HFWorkspace> {
+    const response = await fetch(`${this.baseUrl}/api/huggingface/workspace`);
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to inspect Hugging Face workspace'));
     return response.json();
   }
 

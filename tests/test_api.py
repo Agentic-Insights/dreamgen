@@ -6,7 +6,9 @@ import atexit
 import os
 import shutil
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -43,6 +45,7 @@ os.environ["CACHE_DIR"] = "./.cache"
 os.environ["CPU_ONLY"] = "false"
 os.environ["MPS_USE_FP16"] = "false"
 
+from src.api import server as api_server
 from src.api.server import app
 from src.api.server import config as api_config
 
@@ -310,6 +313,84 @@ def test_generation_config_endpoint(client):
     assert data["qwen_device_map"] == "balanced"
     assert data["ernie_image_model"] == "baidu/ERNIE-Image-Turbo"
     assert data["ernie_prompt_enhancer"] is True
+
+
+def test_huggingface_workspace_without_token(client, monkeypatch, tmp_path):
+    """The HF workspace endpoint should still report local experiment context without a token."""
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.setenv("HF_HOME", str(tmp_path))
+
+    response = client.get("/api/huggingface/workspace")
+    assert response.status_code == 200
+
+    data = response.json()
+    assert data["configured"] is False
+    assert data["connected"] is False
+    assert data["account"] is None
+    assert isinstance(data["local_loras"], list)
+    assert data["lora_dir"] == str(api_config.model.lora.lora_dir)
+
+
+def test_huggingface_workspace_classifies_dreamgen_repos(client, monkeypatch, tmp_path):
+    """Saved HF tokens should expose DreamGen-relevant user and org model repos."""
+    monkeypatch.setenv("HF_TOKEN", "hf_test_token")
+    monkeypatch.setenv("HF_HOME", str(tmp_path))
+
+    class FakeHfApi:
+        def __init__(self, token=None):
+            self.token = token
+
+        def whoami(self, token=None):
+            return {"name": "alice", "type": "user", "orgs": [{"name": "dream-lab"}]}
+
+        def list_models(self, author=None, **kwargs):
+            if author == "alice":
+                return [
+                    SimpleNamespace(
+                        modelId="alice/neon-lora",
+                        author="alice",
+                        private=True,
+                        gated=False,
+                        downloads=12,
+                        likes=3,
+                        last_modified=datetime(2026, 6, 12, tzinfo=timezone.utc),
+                        pipeline_tag="text-to-image",
+                        tags=["diffusers", "lora", "stable-diffusion-xl"],
+                        library_name="diffusers",
+                    )
+                ]
+            if author == "dream-lab":
+                return [
+                    SimpleNamespace(
+                        modelId="dream-lab/qwen-experiment",
+                        author="dream-lab",
+                        private=False,
+                        gated="auto",
+                        downloads=7,
+                        likes=2,
+                        last_modified=datetime(2026, 6, 11, tzinfo=timezone.utc),
+                        pipeline_tag="text-to-image",
+                        tags=["diffusers", "qwen-image"],
+                        library_name="diffusers",
+                    )
+                ]
+            return []
+
+    monkeypatch.setattr(api_server, "HfApi", FakeHfApi)
+
+    response = client.get("/api/huggingface/workspace")
+    assert response.status_code == 200
+
+    data = response.json()
+    assert data["configured"] is True
+    assert data["connected"] is True
+    assert data["account"]["name"] == "alice"
+    assert data["namespaces"] == ["alice", "dream-lab"]
+    assert {repo["id"] for repo in data["lora_repos"]} == {"alice/neon-lora"}
+    assert {repo["id"] for repo in data["image_repos"]} == {
+        "alice/neon-lora",
+        "dream-lab/qwen-experiment",
+    }
 
 
 def test_set_generation_config_updates_backend_and_loras(client):
