@@ -8,6 +8,12 @@ change.
 Treat DreamGen as an instrument for probing models, not just a button that makes
 nice pictures.
 
+It is also a perpetual local dream machine: a workstation-scale system that can
+keep generating, recording, comparing, and reviewing model behavior over long
+runs without depending on hosted generation services. Always-on operation is
+valuable only when it preserves evidence, operator control, and clear boundaries
+between private experiments and deliberate publication.
+
 ## Use This Lens
 
 When changing or extending DreamGen, prefer work that helps answer questions like:
@@ -42,6 +48,12 @@ surfacing:
 Do not hide fallback, mock, or smoke behavior behind successful-looking output.
 Diagnostic images are useful only when they are clearly labeled as diagnostic.
 
+Because DreamGen may run perpetually, local deploy and testing workflows should
+make the currently edited worktree visible quickly. Prefer mounted Docker
+hot-reload for daily development, and full Docker rebuilds only when validating
+production-image parity. A running local UI is not proof that the latest code is
+deployed; verify the API shape and frontend health before handing work back.
+
 ## What Good Work Looks Like
 
 Good changes make model behavior easier to observe, compare, reproduce, or
@@ -57,6 +69,8 @@ Examples:
   publication state, or quality flags
 - safer publication controls so exploratory artifacts do not become public by
   accident
+- local hot-reload and mounted-container workflows that keep the dream machine
+  running while making current code reviewable
 - small backend improvements that preserve comparability across models
 
 ## Keep Out

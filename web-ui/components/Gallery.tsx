@@ -440,6 +440,13 @@ export default function Gallery() {
     return String(value);
   };
 
+  const experimentValue = (image: GalleryImage, key: "fingerprint" | "prompt_sha256") => {
+    const experiment = image.metadata.experiment;
+    if (!experiment || typeof experiment !== "object") return null;
+    const value = (experiment as Record<string, unknown>)[key];
+    return typeof value === "string" && value.trim() ? value : null;
+  };
+
   const getMetadataRows = (image: GalleryImage) => {
     const preferredKeys = [
       "backend",
@@ -455,13 +462,32 @@ export default function Gallery() {
       "true_cfg_scale",
     ];
 
-    return preferredKeys
+    const rows = preferredKeys
       .filter((key) => Object.prototype.hasOwnProperty.call(image.metadata, key))
       .map((key) => ({
         key,
         label: key.replaceAll("_", " "),
         value: formatMetadataValue(image.metadata[key]),
       }));
+
+    const fingerprint = experimentValue(image, "fingerprint");
+    const promptHash = experimentValue(image, "prompt_sha256");
+    if (fingerprint) {
+      rows.push({
+        key: "experiment_fingerprint",
+        label: "experiment fingerprint",
+        value: fingerprint,
+      });
+    }
+    if (promptHash) {
+      rows.push({
+        key: "prompt_sha256",
+        label: "prompt hash",
+        value: promptHash,
+      });
+    }
+
+    return rows;
   };
 
   const selectedMetadataRows = selectedImage ? getMetadataRows(selectedImage) : [];
@@ -980,7 +1006,7 @@ export default function Gallery() {
                     </button>
                     <button
                       onClick={(event) => handleDelete(selectedImage.path, event)}
-                      className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-destructive text-sm text-destructive-foreground transition hover:opacity-90"
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-destructive/50 bg-destructive/10 text-sm font-medium text-red-100 transition hover:border-destructive/70 hover:bg-destructive/20 disabled:cursor-not-allowed disabled:opacity-60"
                       disabled={deleting === selectedImage.path}
                     >
                       {deleting === selectedImage.path ? (

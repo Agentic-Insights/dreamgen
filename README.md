@@ -2,7 +2,11 @@
 
 Generate unlimited AI images locally with no subscriptions, no cloud APIs, and complete privacy. Your machine dreams with you! ✨
 
-![Do androids dream of electric sheep?](https://host-image.agentic.workers.dev/)
+![DreamGen local dream machine hero](assets/dreamgen-hero.png)
+
+DreamGen is a local-first dream machine for probing image models over time: run
+prompts, compare backends, preserve metadata, review artifacts, and publish only
+what you deliberately approve.
 
 ## ✨ Modern Web Interface
 
@@ -62,18 +66,34 @@ cp .env.example .env
 # Generate from the CLI
 uv run dreamgen generate
 
-# Start the API (terminal 1)
-uv run uvicorn src.api.server:app --host 127.0.0.1 --port 25800
-
-# Start the web UI (terminal 2)
-cd web-ui
-npm install
-npm run dev
+# Start the local review stack with Docker hot reload
+just dev-docker-hot
 ```
 
-The local dev UI runs at `http://localhost:3000` and talks to the API at `http://localhost:25800`.
+The local dev UI should run at `http://127.0.0.1:7860` and talk to the API at `http://127.0.0.1:25800`.
 
 Source checkouts use `uv run dreamgen ...`. PyPI installs use `dreamgen ...`.
+
+### Fast local testing and deployment
+
+For source checkouts, use the standard review ports so the API and UI match the Docker stack:
+
+```powershell
+# Default always-on runtime: Docker containers with mounted source hot reload
+just dev-docker-hot
+
+# Full production-style Docker rebuild for parity checks
+just deploy-local-docker
+
+# Prove the currently served app matches the expected API/UI surface
+just verify-live
+```
+
+`just dev-docker-hot` starts backend and frontend in Docker with source mounts
+and hot reload. A running `localhost:7860` may still be an older container or
+host process; use `just verify-live` before review handoff.
+
+More detail: [Local Testing And Deployment](docs/LOCAL_TESTING_DEPLOYMENT.md).
 
 ### Option 3: Run with Docker Compose
 
@@ -81,7 +101,7 @@ For a production-style local run with the shipped ports and wiring:
 
 ```bash
 cp .env.docker.example .env.docker
-docker compose --env-file .env.docker up --build
+docker compose --env-file .env.docker up --build -d
 ```
 
 That exposes:
@@ -170,6 +190,7 @@ uv run dreamgen --help
 
 For detailed setup, Docker usage, and development workflow:
 
+- [docs/LOCAL_TESTING_DEPLOYMENT.md](docs/LOCAL_TESTING_DEPLOYMENT.md)
 - [docs/DOCKER.md](docs/DOCKER.md)
 - [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)
 

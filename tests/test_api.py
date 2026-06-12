@@ -182,6 +182,63 @@ def test_generate_endpoint_records_durable_job(client):
     assert any(event["name"] == "generation_completed" for event in job["events"])
 
 
+def test_compare_endpoint_runs_same_prompt_seed_across_backend_overrides(client, monkeypatch):
+    """Backend comparison should create traceable jobs for the same prompt and seed."""
+    from src.generators.mock_image_generator import MockImageGenerator
+
+    def fake_create_image_generator(active_config):
+        backend = active_config.model.image_backend
+        return MockImageGenerator(active_config), f"fake-{backend}"
+
+    monkeypatch.setattr(
+        "src.services.image_generation.create_image_generator",
+        fake_create_image_generator,
+    )
+
+    response = client.post(
+        "/api/compare",
+        json={
+            "prompt": "same prompt across backends",
+            "seed": 101,
+            "backends": ["mock", "small"],
+            "client_request_id": "req-compare-1",
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "succeeded"
+    assert data["prompt"] == "same prompt across backends"
+    assert data["seed"] == 101
+    assert data["backends"] == ["mock", "small"]
+    assert len(data["results"]) == 2
+
+    fingerprints = set()
+    prompt_hashes = set()
+    for item in data["results"]:
+        assert item["status"] == "succeeded"
+        assert item["metadata"]["seed"] == 101
+        assert item["metadata"]["comparison"]["id"] == data["comparison_id"]
+        assert item["metadata"]["comparison"]["backend"] == item["backend"]
+        assert item["metadata"]["experiment"]["runtime"]["seed"] == 101
+        fingerprints.add(item["metadata"]["experiment"]["fingerprint"])
+        prompt_hashes.add(item["metadata"]["experiment"]["prompt_sha256"])
+
+        job_response = client.get(f"/api/jobs/{item['job_id']}")
+        assert job_response.status_code == 200
+        job = job_response.json()
+        assert job["request"]["config_overrides"]["model"]["image_backend"] == item["backend"]
+
+    assert len(fingerprints) == 2
+    assert len(prompt_hashes) == 1
+
+
+def test_generic_batch_and_upload_edit_routes_are_not_registered(client):
+    """Generic automation/editing routes should stay out of the model-probing API."""
+    assert client.post("/api/batch").status_code == 404
+    assert client.post("/api/edit").status_code == 404
+
+
 def test_jobs_endpoint_creates_and_lists_generation_job(client):
     """Durable job endpoints should create, run, fetch, and list jobs."""
     response = client.post(

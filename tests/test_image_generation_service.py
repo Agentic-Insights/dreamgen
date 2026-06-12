@@ -18,8 +18,14 @@ def mock_service_config(tmp_path):
     config.model.image_backend = "mock"
     config.model.flux_model = "black-forest-labs/FLUX.1-schnell"
     config.model.small_sd_model = "segmind/tiny-sd"
+    config.model.ollama_model = "llama3.2:3b"
+    config.model.lora.enabled_loras = []
+    config.model.lora.application_probability = 0.0
     config.image.width = 64
     config.image.height = 64
+    config.image.num_inference_steps = 4
+    config.image.guidance_scale = 0.0
+    config.image.true_cfg_scale = 1.0
     config.system.output_dir = tmp_path
     config.system.cpu_only = True
     return config
@@ -70,6 +76,13 @@ async def test_service_generates_image_metadata_and_catalog_entry(mock_service_c
     assert metadata["backend"] == "mock"
     assert metadata["configured_backend"] == "mock"
     assert metadata["seed"] == 123
+    assert metadata["experiment"]["schema_version"] == 1
+    assert metadata["experiment"]["runtime"]["resolved_backend"] == "mock"
+    assert metadata["experiment"]["runtime"]["seed"] == 123
+    assert metadata["experiment"]["runtime"]["width"] == 64
+    assert len(metadata["experiment"]["prompt_sha256"]) == 64
+    assert len(metadata["experiment"]["fingerprint"]) == 64
+    assert result.metadata["experiment"]["fingerprint"] == metadata["experiment"]["fingerprint"]
 
     catalog = load_catalog(tmp_path)
     relative_key = result.image_path.relative_to(tmp_path).as_posix()

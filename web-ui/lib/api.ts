@@ -33,6 +33,7 @@ export interface GenerateResponse {
     lora_backend?: string | null;
     using_diffsynth?: boolean;
     selected_lora?: string | null;
+    experiment?: ExperimentManifest;
   };
   created_at: string;
 }
@@ -74,25 +75,16 @@ export interface HFTokenStatus {
   source?: 'environment' | 'file';
 }
 
-export interface EditRequest {
-  prompt: string;
-  strength?: number;
-}
-
-export interface EditResponse {
-  id: string;
-  prompt: string;
-  original_path: string;
-  edited_path: string;
-  metadata: {
-    model: string;
-    strength: number;
-  };
-  created_at: string;
-}
-
 export interface PromptResponse {
   prompt: string;
+}
+
+export interface ExperimentManifest {
+  schema_version: number;
+  prompt_sha256: string;
+  fingerprint: string;
+  runtime: Record<string, unknown>;
+  backend_metadata: Record<string, unknown>;
 }
 
 type WebSocketSubscriber = (data: unknown) => void;
@@ -224,6 +216,34 @@ export interface CreateGenerationJobRequest {
   publication_state?: string;
   client_request_id?: string;
   metadata?: Record<string, unknown>;
+}
+
+export interface CompareBackendsRequest {
+  prompt?: string;
+  meta_prompt?: string;
+  seed?: number;
+  backends: string[];
+  publication_state?: string;
+  client_request_id?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface CompareBackendsResponse {
+  comparison_id: string;
+  prompt: string;
+  seed?: number | null;
+  backends: string[];
+  status: 'succeeded' | 'partial';
+  results: Array<{
+    backend: string;
+    job_id: string;
+    status: 'succeeded' | 'failed';
+    image_path?: string;
+    metadata?: Record<string, unknown>;
+    generation_time?: number;
+    model_name?: string;
+    error?: string;
+  }>;
 }
 
 export type PublicationState = 'draft' | 'published' | 'hidden' | 'featured' | 'rejected';
@@ -375,6 +395,18 @@ export class ImageGenAPI {
       body: JSON.stringify(request),
     });
     if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to create generation job'));
+    return response.json();
+  }
+
+  async compareBackends(request: CompareBackendsRequest): Promise<CompareBackendsResponse> {
+    const response = await fetch(`${this.baseUrl}/api/compare`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(request),
+    });
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to compare backends'));
     return response.json();
   }
 
@@ -593,22 +625,6 @@ export class ImageGenAPI {
   async getHFTokenStatus(): Promise<HFTokenStatus> {
     const response = await fetch(`${this.baseUrl}/api/config/hf-token-status`);
     if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to get HF token status'));
-    return response.json();
-  }
-
-  async editImage(file: File, request: EditRequest): Promise<EditResponse> {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('prompt', request.prompt);
-    if (request.strength !== undefined) {
-      formData.append('strength', request.strength.toString());
-    }
-
-    const response = await fetch(`${this.baseUrl}/api/edit`, {
-      method: 'POST',
-      body: formData,
-    });
-    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to edit image'));
     return response.json();
   }
 

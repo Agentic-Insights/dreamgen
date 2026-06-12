@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import inspect
+import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -77,6 +79,34 @@ class GenerationServiceResult:
 ProgressCallback = Callable[[GenerationProgressEvent], Awaitable[None] | None]
 
 
+def _config_value(root: Any, path: str, default: Any = None) -> Any:
+    """Return a nested config value without assuming every test double is complete."""
+    current = root
+    for part in path.split("."):
+        current = getattr(current, part, default)
+        if current is default:
+            return default
+    return current
+
+
+def _jsonable(value: Any) -> Any:
+    """Convert common runtime values into stable JSON-compatible metadata."""
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, dict):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_jsonable(item) for item in value]
+    return str(value)
+
+
+def _stable_hash(payload: dict[str, Any]) -> str:
+    encoded = json.dumps(_jsonable(payload), sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
 def loading_message_for_backend(backend_name: str) -> str:
     """Return a user-facing lifecycle message for a backend label."""
     return {
@@ -96,6 +126,47 @@ class ImageGenService:
     def __init__(self, config: Config, output_dir: Path | None = None):
         self.config = config
         self.output_dir = output_dir or config.system.output_dir
+
+    def _experiment_manifest(
+        self,
+        *,
+        prompt: str,
+        backend_name: str,
+        model_name: str,
+        seed: int | None,
+        generation_metadata: dict[str, Any],
+    ) -> dict[str, Any]:
+        active_plugins = [
+            {"name": name, "order": info.order}
+            for name, info in sorted(plugin_manager.plugins.items(), key=lambda item: item[1].order)
+            if info.enabled
+        ]
+        runtime = {
+            "configured_backend": _config_value(self.config, "model.image_backend"),
+            "resolved_backend": backend_name,
+            "model_name": model_name,
+            "prompt_model": _config_value(self.config, "model.ollama_model"),
+            "width": _config_value(self.config, "image.width"),
+            "height": _config_value(self.config, "image.height"),
+            "num_inference_steps": _config_value(self.config, "image.num_inference_steps"),
+            "guidance_scale": _config_value(self.config, "image.guidance_scale"),
+            "true_cfg_scale": _config_value(self.config, "image.true_cfg_scale"),
+            "seed": seed,
+            "enabled_loras": _config_value(self.config, "model.lora.enabled_loras", []),
+            "lora_application_probability": _config_value(
+                self.config,
+                "model.lora.application_probability",
+            ),
+            "plugins": active_plugins,
+        }
+        manifest = {
+            "schema_version": 1,
+            "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+            "runtime": runtime,
+            "backend_metadata": _jsonable(generation_metadata),
+        }
+        manifest["fingerprint"] = _stable_hash(manifest)
+        return manifest
 
     async def _emit(
         self,
@@ -243,6 +314,13 @@ class ImageGenService:
             "generated_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
             "seed": resolved_seed,
         }
+        saved_metadata["experiment"] = self._experiment_manifest(
+            prompt=final_prompt,
+            backend_name=backend_name,
+            model_name=model_name,
+            seed=resolved_seed,
+            generation_metadata=generation_metadata,
+        )
         write_image_metadata(image_path, saved_metadata)
         publication_entry = register_image(
             image_path,
@@ -265,6 +343,7 @@ class ImageGenService:
             },
             "plugins_used": active_plugins,
             "seed": resolved_seed,
+            "experiment": saved_metadata["experiment"],
         }
         created_at = datetime.now().isoformat()
 

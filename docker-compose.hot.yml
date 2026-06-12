@@ -1,0 +1,50 @@
+# Hot-reload Docker override for local review on the standard DreamGen ports.
+# Usage:
+#   docker compose --env-file .env.docker -f docker-compose.yml -f docker-compose.hot.yml up --build -d
+
+services:
+  backend:
+    restart: "no"
+    entrypoint: ["/opt/venv/bin/python", "-m", "uvicorn"]
+    command:
+      [
+        "src.api.server:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--reload",
+        "--reload-dir",
+        "/app/src",
+        "--reload-dir",
+        "/app/data",
+      ]
+    volumes:
+      - ./src:/app/src
+      - ./data:/app/data
+      - ./scripts:/app/scripts
+      - ./pyproject.toml:/app/pyproject.toml:ro
+      - ./uv.lock:/app/uv.lock:ro
+      - ${AI_CACHE_DIR:-./.cache}/huggingface:/app/models
+      - ${AI_CACHE_DIR:-./.cache}/torch:/app/.cache/torch
+      - ${OUTPUT_HOST_DIR:-./output}:/app/output
+      - ./logs:/app/logs
+      - ./ckpts:/app/ckpts
+      - ./loras:/app/loras
+      - ./ref-repos:/app/ref-repos
+
+  frontend:
+    restart: "no"
+    build:
+      context: ./web-ui
+      dockerfile: ../Dockerfile.frontend.dev
+    environment:
+      - NODE_ENV=development
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:${BACKEND_PORT:-25800}}
+      - NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL:-http://localhost:${FRONTEND_PORT:-7860}}
+      - PORT=7860
+      - HOSTNAME=0.0.0.0
+    command: npm run dev -- --hostname 0.0.0.0 --port 7860
+    volumes:
+      - ./web-ui:/app
+      - /app/node_modules

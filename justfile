@@ -125,50 +125,44 @@ upd:
 
 # Stop services
 down:
-    docker-compose down
+    docker compose --env-file .env.docker down
 
 # Rebuild containers
 rebuild:
-    docker-compose build
+    docker compose --env-file .env.docker build
 
 # View logs (optional service name)
 logs service="":
     #!/usr/bin/env bash
     if [ -z "{{service}}" ]; then
-        docker-compose logs -f
+        docker compose --env-file .env.docker logs -f
     else
-        docker-compose logs -f {{service}}
+        docker compose --env-file .env.docker logs -f {{service}}
     fi
 
 # =============================================================================
-# Development Mode
+# Local Development Runtime
 # =============================================================================
 
-# Start local backend with hot reload (GPU enabled)
-dev-backend:
-    uv run uvicorn src.api.server:app --host 0.0.0.0 --port 8000 --reload
+# Verify the currently served UI/API matches the expected route shape
+verify-live:
+    #!pwsh.exe
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-live.ps1
 
-# Start frontend container pointing to local backend
-dev-frontend:
-    docker-compose -f docker-compose.yml -f docker-compose.dev.yml up --no-deps frontend
+# Default local runtime: hot-reload backend and frontend inside Docker with source mounts
+dev-docker-hot:
+    #!pwsh.exe
+    docker compose --env-file .env.docker -f docker-compose.yml -f docker-compose.hot.yml up --build -d
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-live.ps1
 
-# Start dev frontend in background
-dev-frontend-d:
-    docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --no-deps frontend
+# Alias for the standard local development runtime
+dev: dev-docker-hot
 
-# Full dev mode: local backend + containerized frontend
-dev:
-    @echo "Starting development environment..."
-    @echo "  Backend: http://localhost:8000 (local, GPU enabled)"
-    @echo "  Frontend: http://localhost:7860 (containerized)"
-    @echo ""
-    @echo "Run in separate terminals:"
-    @echo "  just dev-backend   # Terminal 1"
-    @echo "  just dev-frontend  # Terminal 2"
-
-# Stop dev frontend
-dev-down:
-    docker-compose -f docker-compose.yml -f docker-compose.dev.yml down
+# Full local Docker parity deploy with rebuilt production-style images
+deploy-local-docker:
+    #!pwsh.exe
+    docker compose --env-file .env.docker up --build -d
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-live.ps1
 
 # =============================================================================
 # Cloudflare R2 Sync (using rclone)
@@ -186,6 +180,14 @@ sync:
 # Publish approved, non-placeholder local output to the gallery bucket
 publish-gallery *args:
     uv run python scripts/publish_gallery.py {{args}}
+
+# Preview approved gallery publication without writing to R2
+publish-dry:
+    just -- publish-gallery --dry-run
+
+# Publish approved gallery assets to R2
+publish-approved:
+    just -- publish-gallery --execute
 
 # Validate remote R2 object write/delete access before publishing
 publish-gallery-smoke:
@@ -313,7 +315,7 @@ clean:
 
 # Clean Docker
 clean-docker:
-    docker-compose down -v
+    docker compose --env-file .env.docker down -v
     docker system prune -f
 
 # =============================================================================

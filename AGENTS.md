@@ -38,13 +38,41 @@ uv run pylint src/
 uv sync
 ```
 
+### Quick local deploy / hot-reload review
+After backend, frontend, API, or UX changes, always make the current worktree visible locally before handing off.
+
+The app may already be running on `http://localhost:7860`, but that can be an older Docker image. Verify the running API shape when it matters:
+```bash
+# PowerShell: show selected routes from the running API
+$openapi = Invoke-RestMethod http://localhost:25800/openapi.json
+$openapi.paths.PSObject.Properties.Name | Where-Object { $_ -match '/api/(compare|batch|edit)' }
+```
+
+Default hot-reload path for constant development is Docker with bind-mounted source:
+```bash
+just dev-docker-hot
+```
+
+For Docker parity instead of fastest iteration:
+```bash
+just deploy-local-docker
+```
+
+Before final handoff for UI/API work, verify:
+```bash
+just verify-live
+```
+Then open `http://localhost:7860` in the in-app Browser so the user can see and test the current build.
+
+Use `agent-skills/docker-hot-reload/SKILL.md` when changing local runtime, Docker Compose, or deploy/test workflow. See `docs/LOCAL_TESTING_DEPLOYMENT.md` for the mounted Docker, full Docker parity, and publication lanes.
+
 ### Docker review quickstart
 ```bash
 # 1. Create local Docker env
 cp .env.docker.example .env.docker
 
 # 2. Start the full stack
-docker compose --env-file .env.docker up --build
+docker compose --env-file .env.docker up --build -d
 
 # 3. Verify the running app
 # UI:    http://localhost:7860

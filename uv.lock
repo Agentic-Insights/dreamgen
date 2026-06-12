@@ -610,7 +610,7 @@ dependencies = [
     { name = "diffusers" },
     { name = "fastapi" },
     { name = "hf-xet" },
-    { name = "huggingface-hub", extra = ["inference"] },
+    { name = "huggingface-hub" },
     { name = "loguru" },
     { name = "ollama" },
     { name = "peft" },
@@ -669,7 +669,7 @@ requires-dist = [
     { name = "diffusers", git = "https://github.com/huggingface/diffusers" },
     { name = "fastapi", specifier = ">=0.100.0" },
     { name = "hf-xet", specifier = ">=1.1.0" },
-    { name = "huggingface-hub", extras = ["inference"], specifier = ">=0.20.0" },
+    { name = "huggingface-hub", specifier = ">=0.20.0" },
     { name = "isort", marker = "extra == 'dev'", specifier = ">=5.12.0" },
     { name = "loguru", specifier = ">=0.7.0" },
     { name = "ollama", specifier = ">=0.4.7" },
@@ -969,11 +969,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/45/c9/bdbe19339f76d12985bc03572f330a01a93c04dffecaaea3061bdd7fb892/huggingface_hub-0.34.4.tar.gz", hash = "sha256:a4228daa6fb001be3f4f4bdaf9a0db00e1739235702848df00885c9b5742c85c", size = 459768, upload-time = "2025-08-08T09:14:52.365Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/39/7b/bb06b061991107cd8783f300adff3e7b7f284e330fd82f507f2a1417b11d/huggingface_hub-0.34.4-py3-none-any.whl", hash = "sha256:9b365d781739c93ff90c359844221beef048403f1bc1f1c123c191257c3c890a", size = 561452, upload-time = "2025-08-08T09:14:50.159Z" },
-]
-
-[package.optional-dependencies]
-inference = [
-    { name = "aiohttp" },
 ]
 
 [[package]]

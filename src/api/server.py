@@ -14,19 +14,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import aiofiles
-from fastapi import (
-    BackgroundTasks,
-    FastAPI,
-    File,
-    HTTPException,
-    Query,
-    UploadFile,
-    WebSocket,
-    WebSocketDisconnect,
-)
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from PIL import Image
 from pydantic import BaseModel, Field
 
 from src.generators.factory import backend_label, is_model_cached, resolve_image_backend
@@ -60,7 +50,7 @@ from src.utils.publication_catalog import (
     remove_image,
     set_publication_state,
 )
-from src.utils.storage import StorageManager, metadata_path_for, save_image_and_prompt
+from src.utils.storage import StorageManager, metadata_path_for
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -371,6 +361,22 @@ class JobCreateRequest(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Extra job metadata")
 
 
+class ComparisonRequest(BaseModel):
+    """Request model for repeatable backend comparison runs."""
+
+    prompt: Optional[str] = Field(None, description="Prompt to run against every backend")
+    meta_prompt: Optional[str] = Field(
+        None, description="Optional steering text if prompt is generated"
+    )
+    seed: Optional[int] = Field(None, description="Seed shared by every comparison run")
+    backends: List[str] = Field(..., description="Concrete image backends to compare")
+    publication_state: str = Field("draft", description="Initial publication state for artifacts")
+    client_request_id: Optional[str] = Field(
+        None, description="Client-provided request ID used to correlate progress events"
+    )
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Extra comparison metadata")
+
+
 class PublicationUpdateRequest(BaseModel):
     """Request model for changing gallery publication state."""
 
@@ -379,13 +385,6 @@ class PublicationUpdateRequest(BaseModel):
         False,
         description="Allow publishing mock/test placeholder images when explicitly requested",
     )
-
-
-class EditRequest(BaseModel):
-    """Request model for image editing"""
-
-    prompt: str = Field(..., description="Edit prompt describing desired changes")
-    strength: float = Field(0.8, ge=0.0, le=1.0, description="Edit strength (0.0 to 1.0)")
 
 
 class PromptRequest(BaseModel):
@@ -397,17 +396,6 @@ class PromptRequest(BaseModel):
     client_request_id: Optional[str] = Field(
         None, description="Client-provided request ID used to correlate progress events"
     )
-
-
-class EditResponse(BaseModel):
-    """Response model for image editing"""
-
-    id: str = Field(..., description="Unique edit ID")
-    prompt: str = Field(..., description="Edit prompt used")
-    original_path: str = Field(..., description="Path to original image")
-    edited_path: str = Field(..., description="Path to edited image")
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Edit metadata")
-    created_at: str = Field(..., description="ISO timestamp")
 
 
 class PluginInfo(BaseModel):
@@ -838,12 +826,6 @@ async def get_model_status():
             "id": config.model.ernie_image_model,
             "name": "ERNIE-Image",
             "type": "text-to-image",
-            "downloadable": True,
-        },
-        {
-            "id": "Qwen/Qwen-Image-Edit",
-            "name": "Qwen-Image-Edit",
-            "type": "image-to-image",
             "downloadable": True,
         },
         {
@@ -1360,6 +1342,96 @@ async def generate_image(request: GenerateRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/compare")
+async def compare_backends(request: ComparisonRequest):
+    """Run the same prompt and seed through multiple concrete image backends."""
+    backends = [backend.strip().lower() for backend in request.backends if backend.strip()]
+    if len(backends) < 2:
+        raise HTTPException(status_code=400, detail="Comparison requires at least two backends")
+    if len(backends) > 4:
+        raise HTTPException(
+            status_code=400, detail="Comparison is limited to four backends per request"
+        )
+    if len(set(backends)) != len(backends):
+        raise HTTPException(status_code=400, detail="Comparison backends must be unique")
+    if "auto" in backends:
+        raise HTTPException(
+            status_code=400,
+            detail="Comparison requires concrete backends; use flux, small, turbo, mock, etc.",
+        )
+    invalid_backends = sorted(set(backends) - ALLOWED_IMAGE_BACKENDS)
+    if invalid_backends:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid image backend: {', '.join(invalid_backends)}",
+        )
+
+    comparison_id = str(uuid.uuid4())
+    prompt = request.prompt
+    if prompt is None or not prompt.strip():
+        prompt = await PromptGenerator(config).generate_prompt(meta_prompt=request.meta_prompt)
+    prompt = prompt.strip()
+
+    results = []
+    for index, backend in enumerate(backends, start=1):
+        metadata = {
+            **request.metadata,
+            "comparison": {
+                "id": comparison_id,
+                "index": index,
+                "backend": backend,
+                "requested_backends": backends,
+            },
+        }
+        job = generation_job_store.create_job(
+            GenerationJobCreate(
+                prompt=prompt,
+                seed=request.seed,
+                publication_state=request.publication_state,
+                client_request_id=request.client_request_id,
+                metadata=metadata,
+                config_overrides={"model": {"image_backend": backend}},
+            )
+        )
+        try:
+            result = await run_generation_job(job["id"])
+            if result is None:
+                raise RuntimeError(f"Comparison job {job['id']} did not produce a result")
+            results.append(
+                {
+                    "backend": backend,
+                    "job_id": job["id"],
+                    "status": "succeeded",
+                    "image_path": result.relative_image_path,
+                    "metadata": result.metadata,
+                    "generation_time": result.generation_time,
+                    "model_name": result.model_name,
+                }
+            )
+        except Exception as exc:
+            logger.error("Comparison job %s for backend %s failed: %s", job["id"], backend, exc)
+            failed_job = generation_job_store.get_job(job["id"]) or {}
+            results.append(
+                {
+                    "backend": backend,
+                    "job_id": job["id"],
+                    "status": "failed",
+                    "error": failed_job.get("error") or str(exc),
+                }
+            )
+
+    return {
+        "comparison_id": comparison_id,
+        "prompt": prompt,
+        "seed": request.seed,
+        "backends": backends,
+        "status": (
+            "succeeded" if all(item["status"] == "succeeded" for item in results) else "partial"
+        ),
+        "results": results,
+    }
+
+
 @app.post("/api/jobs")
 async def create_generation_job(request: JobCreateRequest, background_tasks: BackgroundTasks):
     """Create a durable generation job and schedule it on the local worker."""
@@ -1580,123 +1652,6 @@ async def websocket_endpoint(websocket: WebSocket):
 
     except WebSocketDisconnect:
         manager.disconnect(websocket)
-
-
-@app.post("/api/batch")
-async def batch_generate(count: int = 5, delay: int = 0):
-    """Generate multiple images in batch"""
-    batch_id = str(uuid.uuid4())
-    results = []
-
-    for i in range(count):
-        if delay > 0 and i > 0:
-            await asyncio.sleep(delay)
-
-        try:
-            # Generate each image
-            request = GenerateRequest()
-            result = await generate_image(request)
-            results.append(result.dict())
-        except Exception as e:
-            logger.error(f"Batch generation {i+1}/{count} failed: {str(e)}")
-            results.append({"error": str(e)})
-
-    return {"batch_id": batch_id, "count": count, "results": results}
-
-
-@app.post("/api/edit", response_model=EditResponse)
-async def edit_image(request: EditRequest, file: UploadFile = File(...)):
-    """Edit an uploaded image using Qwen-Image-Edit"""
-    edit_id = str(uuid.uuid4())
-
-    try:
-        # Broadcast start event
-        await manager.broadcast(
-            json.dumps(
-                {"type": "edit_started", "id": edit_id, "timestamp": datetime.now().isoformat()}
-            )
-        )
-
-        # Read uploaded file
-        image_bytes = await file.read()
-
-        # Initialize image editor
-        from src.generators.image_editor import ImageEditor
-
-        editor = ImageEditor(config)
-
-        # Broadcast editing event
-        await manager.broadcast(
-            json.dumps({"type": "editing_image", "id": edit_id, "prompt": request.prompt})
-        )
-
-        # Edit the image
-        edited_image = await editor.edit_image(image_bytes, request.prompt, request.strength)
-
-        # Save both original and edited images
-        import io
-
-        original_img = Image.open(io.BytesIO(image_bytes))
-        original_path = save_image_and_prompt(
-            original_img, f"ORIGINAL: {request.prompt}", str(OUTPUT_DIR)
-        )
-        register_image(
-            original_path,
-            OUTPUT_DIR,
-            prompt=f"ORIGINAL: {request.prompt}",
-            metadata={"operation": "edit_original"},
-            publication_state="draft",
-        )
-
-        # Save edited
-        edited_path = save_image_and_prompt(
-            edited_image, f"EDITED: {request.prompt}", str(OUTPUT_DIR)
-        )
-        register_image(
-            edited_path,
-            OUTPUT_DIR,
-            prompt=f"EDITED: {request.prompt}",
-            metadata={"operation": "edit_result"},
-            publication_state="draft",
-        )
-
-        # Create relative paths for API response
-        original_relative = f"/images/{original_path.relative_to(OUTPUT_DIR).as_posix()}"
-        edited_relative = f"/images/{edited_path.relative_to(OUTPUT_DIR).as_posix()}"
-
-        # Broadcast completion event
-        await manager.broadcast(
-            json.dumps(
-                {
-                    "type": "edit_completed",
-                    "id": edit_id,
-                    "original_path": original_relative,
-                    "edited_path": edited_relative,
-                    "prompt": request.prompt,
-                }
-            )
-        )
-
-        return EditResponse(
-            id=edit_id,
-            prompt=request.prompt,
-            original_path=original_relative,
-            edited_path=edited_relative,
-            metadata={
-                "model": "Qwen/Qwen-Image-Edit",
-                "strength": request.strength,
-                "original_filename": file.filename,
-            },
-            created_at=datetime.now().isoformat(),
-        )
-
-    except Exception as e:
-        logger.error(f"Image edit failed: {str(e)}")
-
-        # Broadcast error event
-        await manager.broadcast(json.dumps({"type": "edit_error", "id": edit_id, "error": str(e)}))
-
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":
