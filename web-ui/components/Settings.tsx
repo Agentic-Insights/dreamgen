@@ -77,6 +77,11 @@ export default function Settings({ systemStatus }: SettingsProps) {
   const [downloadingModels, setDownloadingModels] = useState<Set<string>>(new Set());
   const [ollamaModels, setOllamaModels] = useState<OllamaModelsResponse | null>(null);
   const [loadingOllama, setLoadingOllama] = useState(false);
+  const [testingOllama, setTestingOllama] = useState(false);
+  const [ollamaConnection, setOllamaConnection] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [loadingPlugins, setLoadingPlugins] = useState(false);
 
@@ -87,6 +92,12 @@ export default function Settings({ systemStatus }: SettingsProps) {
     loadOllamaModels();
     loadPlugins();
   }, []);
+
+  useEffect(() => {
+    if (activeSection === "ollama") {
+      setActiveSection("models");
+    }
+  }, [activeSection]);
 
   useEffect(() => {
     // Handle WebSocket messages for model download progress
@@ -213,6 +224,26 @@ export default function Settings({ systemStatus }: SettingsProps) {
       `Switched Ollama image model to ${modelName}`
     );
     await loadOllamaModels();
+  };
+
+  const testOllamaConnection = async () => {
+    setTestingOllama(true);
+    setOllamaConnection(null);
+    try {
+      const models = await api.getOllamaModels();
+      setOllamaModels(models);
+      setOllamaConnection({
+        type: "success",
+        text: `Connected to ${models.host}. Version ${models.version || "unknown"}; ${models.models.length} models found.`,
+      });
+    } catch (error) {
+      setOllamaConnection({
+        type: "error",
+        text: `Ollama connection failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+      });
+    } finally {
+      setTestingOllama(false);
+    }
   };
 
   const handlePluginToggle = async (pluginName: string) => {
@@ -373,7 +404,6 @@ export default function Settings({ systemStatus }: SettingsProps) {
   const sections = [
     { id: "models", label: "Models", icon: Database },
     { id: "plugins", label: "Plugins", icon: SettingsIcon },
-    { id: "ollama", label: "Prompt & Ollama", icon: Cpu },
     { id: "auth", label: "Authentication", icon: Key },
     { id: "system", label: "System", icon: Server },
   ];
@@ -457,21 +487,77 @@ export default function Settings({ systemStatus }: SettingsProps) {
                 )}
 
                 <div className="mb-6 space-y-6">
-                  <div className="border border-primary/30 bg-primary/5 rounded-lg p-4">
-                    <div className="mb-4 flex items-start justify-between gap-3">
-                      <div>
-                        <h4 className="font-medium">Two-stage generation pipeline</h4>
-                        <p className="text-sm text-muted-foreground mt-1">
-                          DreamGen first asks Ollama for a final prompt, then sends that prompt to the selected image renderer.
-                        </p>
+                  <div className="border border-border rounded-lg p-4">
+                    <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="flex items-start gap-2">
+                        <Cpu className="mt-0.5 h-4 w-4 text-primary" />
+                        <div>
+                          <h4 className="font-medium">Prompt provider</h4>
+                          <p className="text-sm text-muted-foreground">
+                            Ollama is the active local prompt provider. Future providers like LM Studio should fit here without becoming separate Settings navigation.
+                          </p>
+                        </div>
                       </div>
                       <button
                         type="button"
-                        onClick={() => setActiveSection("ollama")}
-                        className="shrink-0 rounded-md border border-border bg-background px-3 py-1.5 text-xs transition-colors hover:border-primary/50"
+                        onClick={testOllamaConnection}
+                        disabled={testingOllama}
+                        className="inline-flex shrink-0 items-center justify-center gap-2 rounded-md border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs text-primary transition-colors hover:bg-primary/15 disabled:cursor-not-allowed disabled:opacity-60"
                       >
-                        All Ollama models
+                        {testingOllama ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-3.5 w-3.5" />
+                        )}
+                        Test Ollama
                       </button>
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-md bg-muted/50 p-3">
+                        <div className="mb-1 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          <Server className="h-3.5 w-3.5" />
+                          Ollama Host
+                        </div>
+                        <code className="text-xs text-foreground break-all">
+                          {ollamaModels?.host ?? "Not checked yet"}
+                        </code>
+                      </div>
+                      <div className="rounded-md bg-muted/50 p-3">
+                        <div className="mb-1 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          <Cpu className="h-3.5 w-3.5" />
+                          Provider Status
+                        </div>
+                        <div className="text-sm text-foreground">
+                          {ollamaModels
+                            ? `${ollamaModels.models.length} models, version ${ollamaModels.version || "unknown"}`
+                            : "Run a connection test to verify Ollama."}
+                        </div>
+                      </div>
+                    </div>
+
+                    {ollamaConnection && (
+                      <div
+                        className={cn(
+                          "mt-3 rounded-md border px-3 py-2 text-xs",
+                          ollamaConnection.type === "success"
+                            ? "border-primary/30 bg-primary/10 text-primary"
+                            : "border-destructive/40 bg-destructive/10 text-destructive"
+                        )}
+                      >
+                        {ollamaConnection.text}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="border border-primary/30 bg-primary/5 rounded-lg p-4">
+                    <div className="mb-4">
+                      <div>
+                        <h4 className="font-medium">Two-stage generation pipeline</h4>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          DreamGen first asks the active prompt provider for a final prompt, then sends that prompt to the selected image renderer.
+                        </p>
+                      </div>
                     </div>
 
                     <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] lg:items-stretch">
@@ -553,6 +639,247 @@ export default function Settings({ systemStatus }: SettingsProps) {
                         </div>
                       </div>
                     </div>
+                  </div>
+
+                  <div className="border border-border rounded-lg p-4">
+                    <div className="mb-3">
+                      <h4 className="font-medium">Prompt Models</h4>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Completion-capable provider models used for the Generate Prompt action.
+                      </p>
+                    </div>
+
+                    {configuredPromptModel && activePromptModel && configuredPromptModel !== activePromptModel && (
+                      <div className="mb-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+                        Configured prompt model <code>{configuredPromptModel}</code> is not usable on this host. DreamGen is falling back to <code>{activePromptModel}</code>.
+                      </div>
+                    )}
+
+                    {loadingOllama ? (
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Loading prompt models...
+                      </div>
+                    ) : promptCapableModels.length > 0 ? (
+                      <div className="space-y-2">
+                        {promptCapableModels.map((model) => {
+                          const isCurrent = model.name === activePromptModel;
+                          const sizeInGB = (model.size / (1024 * 1024 * 1024)).toFixed(2);
+
+                          return (
+                            <button
+                              key={`prompt-${model.name}`}
+                              onClick={() => handleOllamaModelSelect(model.name)}
+                              className={cn(
+                                "w-full border rounded-lg p-4 transition-all text-left",
+                                "hover:bg-muted/50 hover:border-primary/50",
+                                isCurrent ? "border-primary bg-primary/5" : "border-border"
+                              )}
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <h5 className="font-medium">{model.name}</h5>
+                                    {isCurrent && (
+                                      <span className="text-xs px-2 py-0.5 bg-primary/20 text-primary rounded-full">
+                                        Active Prompt
+                                      </span>
+                                    )}
+                                    <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                                      Ollama
+                                    </span>
+                                    {model.can_vision && (
+                                      <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                                        Vision
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
+                                    <span>{sizeInGB} GB</span>
+                                    {model.format && (
+                                      <>
+                                        <span>•</span>
+                                        <span>{model.format}</span>
+                                      </>
+                                    )}
+                                    <span>•</span>
+                                    <span>{new Date(model.modified).toLocaleDateString()}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
+                        No completion-capable Ollama models found. Test the Ollama connection or install a chat/completion model to use prompt generation.
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="border border-border rounded-lg p-4">
+                    <div className="mb-3">
+                      <h4 className="font-medium">DreamGen Image Backends</h4>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Local renderers DreamGen can use for stage 2 image generation.
+                      </p>
+                    </div>
+
+                    {localImageModels.length > 0 ? (
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        {localImageModels.map((model) => {
+                          const backendId = IMAGE_MODEL_BACKEND_BY_ID[model.id];
+                          const backend = IMAGE_BACKEND_OPTIONS.find((option) => option.id === backendId);
+                          const isActive = backendId === selectedBackend;
+                          const isReady = model.status === "ready";
+
+                          return (
+                            <div
+                              key={`local-image-${model.id}`}
+                              className={cn(
+                                "rounded-lg border p-4 transition-colors",
+                                isActive
+                                  ? "border-primary bg-primary/5"
+                                  : "border-border bg-background/70"
+                              )}
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <h5 className="font-medium">{model.name}</h5>
+                                    {isActive && (
+                                      <span className="rounded-full bg-primary/20 px-2 py-0.5 text-xs text-primary">
+                                        Active
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                    <span className={getModelStatusColor(model.status)}>
+                                      {model.status.replaceAll("_", " ")}
+                                    </span>
+                                    {model.size > 0 && (
+                                      <>
+                                        <span>•</span>
+                                        <span>{formatFileSize(model.size)}</span>
+                                      </>
+                                    )}
+                                    {backend && (
+                                      <>
+                                        <span>•</span>
+                                        <span>{backend.label}</span>
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
+                                {getModelStatusIcon(model)}
+                              </div>
+
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                {backendId && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      updateGenerationConfig(
+                                        { image_backend: backendId },
+                                        `Switched image backend to ${backend?.label ?? backendId}`
+                                      )
+                                    }
+                                    className="rounded-md border border-border bg-background px-3 py-1.5 text-xs transition-colors hover:border-primary/50 disabled:cursor-not-allowed disabled:opacity-50"
+                                    disabled={isActive || !isReady}
+                                  >
+                                    {isActive ? "Selected" : isReady ? "Use backend" : "Download first"}
+                                  </button>
+                                )}
+                                {!isReady && model.downloadable && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleModelDownload(model.id)}
+                                    className="rounded-md border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs text-primary transition-colors hover:bg-primary/15"
+                                  >
+                                    Download
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
+                        No local DreamGen image backends were reported by the API.
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="border border-border rounded-lg p-4">
+                    <div className="mb-3">
+                      <h4 className="font-medium">Ollama Image Models</h4>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Image-generation models served by Ollama&apos;s image API, used only when the backend is set to <code>Ollama Image</code>.
+                      </p>
+                    </div>
+
+                    {configuredImageModel && activeImageModel && configuredImageModel !== activeImageModel && (
+                      <div className="mb-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+                        Configured Ollama image model <code>{configuredImageModel}</code> is not usable on this host. DreamGen is falling back to <code>{activeImageModel}</code>.
+                      </div>
+                    )}
+
+                    {imageCapableModels.length > 0 ? (
+                      <div className="space-y-2">
+                        {imageCapableModels.map((model) => {
+                          const isCurrent = model.name === activeImageModel;
+                          const sizeInGB = (model.size / (1024 * 1024 * 1024)).toFixed(2);
+
+                          return (
+                            <button
+                              key={`image-${model.name}`}
+                              onClick={() => handleOllamaImageModelSelect(model.name)}
+                              className={cn(
+                                "w-full border rounded-lg p-4 transition-all text-left",
+                                "hover:bg-muted/50 hover:border-primary/50",
+                                isCurrent ? "border-primary bg-primary/5" : "border-border"
+                              )}
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <h5 className="font-medium">{model.name}</h5>
+                                    {isCurrent && (
+                                      <span className="text-xs px-2 py-0.5 bg-primary/20 text-primary rounded-full">
+                                        Active Image
+                                      </span>
+                                    )}
+                                    <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                                      {model.family || model.format || "image"}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
+                                    <span>{sizeInGB} GB</span>
+                                    {model.format && (
+                                      <>
+                                        <span>•</span>
+                                        <span>{model.format}</span>
+                                      </>
+                                    )}
+                                    <span>•</span>
+                                    <span>{new Date(model.modified).toLocaleDateString()}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="rounded-md border border-dashed border-border bg-muted/20 p-4 text-sm text-muted-foreground">
+                        <div className="font-medium text-foreground">No Ollama image-generation models installed.</div>
+                        <div className="mt-1">
+                          Your current image rendering can still use the DreamGen backends above. Install an Ollama image model like <code>x/z-image-turbo</code> or <code>x/flux2-klein</code> only if you want the <code>Ollama Image</code> backend.
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div className="border border-border rounded-lg p-4">
