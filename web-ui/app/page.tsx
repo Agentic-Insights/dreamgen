@@ -132,6 +132,17 @@ const describeGenerationEvent = (event: GenerationEvent) => {
   return event.type.replaceAll("_", " ");
 };
 
+const generationEventKey = (event: GenerationEvent, index: number) =>
+  [
+    event.timestamp,
+    event.id ?? "event",
+    event.client_request_id ?? "request",
+    event.type,
+    event.task ?? event.name ?? event.label ?? "status",
+    event.progress ?? "state",
+    index,
+  ].join("-");
+
 export default function Home() {
   const [activeTab, setActiveTab] = useState<TabId>("generate");
   const [promptSeed, setPromptSeed] = useState("");
@@ -1090,7 +1101,7 @@ export default function Home() {
                             <div className="mt-3 space-y-2">
                               {generationEvents.slice(0, 4).map((event, index) => (
                                 <div
-                                  key={`${event.timestamp}-${event.id ?? index}-${event.type}`}
+                                  key={generationEventKey(event, index)}
                                   className="flex items-start justify-between gap-3 text-xs"
                                 >
                                   <span className="min-w-0 capitalize text-foreground">
