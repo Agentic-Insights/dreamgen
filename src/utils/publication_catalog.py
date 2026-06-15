@@ -129,23 +129,26 @@ def build_catalog_entry(
     prompt: str | None = None,
     metadata: dict[str, Any] | None = None,
     publication_state: str = "draft",
-    allow_placeholder_publish: bool = False,
 ) -> dict[str, Any]:
     """Build a normalized catalog entry for an image."""
     key = image_key(image_path, output_dir)
     metadata = metadata or read_image_metadata(image_path)
     placeholder = is_placeholder_artifact(image_path, metadata)
     state = normalize_publication_state(publication_state)
-    if (
-        placeholder
-        and state in (PUBLIC_GALLERY_STATES | {"draft"})
-        and not allow_placeholder_publish
-    ):
+    if placeholder and state in (PUBLIC_GALLERY_STATES | {"draft"}):
         state = "rejected"
 
-    quality_flags = []
+    experiment_metadata = metadata.get("experiment")
+    if not isinstance(experiment_metadata, dict):
+        experiment_metadata = {}
+    metadata_flags = metadata.get("quality_flags") or experiment_metadata.get("quality_flags", [])
+    if isinstance(metadata_flags, str):
+        flag_values = [flag.strip() for flag in metadata_flags.split(",")]
+    else:
+        flag_values = [str(flag).strip() for flag in metadata_flags]
+    quality_flags = sorted({flag for flag in flag_values if flag})
     if placeholder:
-        quality_flags.append("placeholder")
+        quality_flags = sorted({*quality_flags, "placeholder"})
 
     return {
         "id": image_id_for(key),
@@ -155,7 +158,7 @@ def build_catalog_entry(
         "created_at": created_at_for(image_path),
         "updated_at": utc_now(),
         "publication_state": state,
-        "publishable": not placeholder or allow_placeholder_publish,
+        "publishable": not placeholder,
         "quality_flags": quality_flags,
     }
 
@@ -175,7 +178,6 @@ def register_image(
     prompt: str | None = None,
     metadata: dict[str, Any] | None = None,
     publication_state: str = "draft",
-    allow_placeholder_publish: bool = False,
 ) -> dict[str, Any]:
     """Add or refresh an image in the catalog."""
     catalog = load_catalog(output_dir)
@@ -188,7 +190,6 @@ def register_image(
         prompt=prompt,
         metadata=metadata,
         publication_state=state,
-        allow_placeholder_publish=allow_placeholder_publish,
     )
     catalog["assets"][key] = entry
     save_catalog(output_dir, catalog)
@@ -269,8 +270,6 @@ def set_publication_state(
     output_dir: Path,
     key: str,
     publication_state: str,
-    *,
-    allow_placeholder_publish: bool = False,
 ) -> dict[str, Any]:
     """Update the publication state for one catalog entry."""
     state = normalize_publication_state(publication_state)
@@ -286,12 +285,12 @@ def set_publication_state(
 
     metadata = read_image_metadata(image_path)
     placeholder = is_placeholder_artifact(image_path, metadata)
-    if placeholder and state in PUBLIC_GALLERY_STATES and not allow_placeholder_publish:
-        raise PermissionError("Placeholder images cannot be published without override.")
+    if placeholder and state in PUBLIC_GALLERY_STATES:
+        raise PermissionError("Placeholder images cannot be published.")
 
     entry["publication_state"] = state
     entry["updated_at"] = utc_now()
-    entry["publishable"] = not placeholder or allow_placeholder_publish
+    entry["publishable"] = not placeholder
     if placeholder:
         flags = set(entry.get("quality_flags", []))
         flags.add("placeholder")

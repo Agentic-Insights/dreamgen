@@ -80,6 +80,20 @@ def test_status_endpoint(client):
     ]
 
 
+def test_cors_allows_local_review_ports(client):
+    """Local Next.js review servers should not produce browser fetch errors."""
+    response = client.options(
+        "/api/status",
+        headers={
+            "Origin": "http://localhost:7862",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:7862"
+
+
 def test_plugins_endpoint(client):
     """Test the /api/plugins endpoint"""
     response = client.get("/api/plugins")
@@ -111,10 +125,50 @@ def test_generate_endpoint(client):
     metadata = data["metadata"]
     assert "backend" in metadata
     assert "plugins_used" in metadata
+    assert metadata["experiment"]["prompt"]["source"] == "operator"
+    assert metadata["experiment"]["pipeline"]["resolved_backend"] == metadata["backend"]
+    assert metadata["experiment"]["parameters"]["width"] == 1360
+    assert "diagnostic" in metadata["experiment"]["quality_flags"]
 
     # Verify image path format
     assert data["image_path"].startswith("/images/")
     assert data["image_path"].endswith(".png")
+
+
+def test_generate_endpoint_records_experiment_annotations(client):
+    """Generation requests should persist operator-facing experiment annotations."""
+    response = client.post(
+        "/api/generate",
+        json={
+            "prompt": "Typography stress test",
+            "meta_prompt": "Probe text rendering boundaries",
+            "seed": 77,
+            "experiment_label": "text probe",
+            "prompt_family": "typography",
+            "quality_flags": ["text", "layout"],
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+
+    experiment = data["metadata"]["experiment"]
+    assert experiment["label"] == "text probe"
+    assert experiment["prompt_family"] == "typography"
+    assert experiment["prompt"]["meta_prompt"] == "Probe text rendering boundaries"
+    assert experiment["parameters"]["seed"] == 77
+    assert set(experiment["quality_flags"]) >= {"text", "layout", "diagnostic"}
+
+    catalog = load_catalog(Path(_TEST_OUTPUT_DIR))
+    relative_key = data["image_path"].replace("/images/", "")
+    assert (
+        catalog["assets"][relative_key]["metadata"]["experiment"]["prompt_family"] == "typography"
+    )
+    assert set(catalog["assets"][relative_key]["quality_flags"]) >= {
+        "text",
+        "layout",
+        "diagnostic",
+        "placeholder",
+    }
 
 
 def test_prompt_endpoint_accepts_client_request_id(client, monkeypatch):
@@ -233,14 +287,33 @@ def test_generation_events_endpoint_records_recent_lifecycle(client):
     assert all("timestamp" in event for event in matching)
 
 
-def test_generation_config_endpoint(client):
+def test_generation_config_endpoint(client, monkeypatch):
     """The generation config endpoint should expose backend and LoRA settings."""
+    monkeypatch.setattr(
+        "src.api.server.list_ollama_models",
+        lambda: [
+            OllamaModelInfo(
+                name="llama3.2:3b",
+                size=1,
+                modified="2026-06-15T12:00:00-05:00",
+                digest="digest-llama",
+                format="gguf",
+                family="llama",
+                capabilities=["completion"],
+                can_prompt=True,
+                can_vision=False,
+                can_image=False,
+            )
+        ],
+    )
+
     response = client.get("/api/config/generation")
     assert response.status_code == 200
 
     data = response.json()
     assert data["image_backend"] == "mock"
     assert data["prompt_model"] == "llama3.2:3b"
+    assert data["configured_prompt_model"] == "llama3.2:3b"
     assert data["image_model"] == "mock generator"
     assert data["pipeline"]["prompt"]["model"] == "llama3.2:3b"
     assert data["pipeline"]["image"]["backend"] == "mock"
@@ -255,8 +328,26 @@ def test_generation_config_endpoint(client):
     assert data["ernie_prompt_enhancer"] is True
 
 
-def test_set_generation_config_updates_backend_and_loras(client):
+def test_set_generation_config_updates_backend_and_loras(client, monkeypatch):
     """Runtime generation settings should accept backend and LoRA updates."""
+    monkeypatch.setattr(
+        "src.api.server.list_ollama_models",
+        lambda: [
+            OllamaModelInfo(
+                name="qwen3.6:27b",
+                size=1,
+                modified="2026-06-15T12:00:00-05:00",
+                digest="digest-qwen",
+                format="gguf",
+                family="qwen35",
+                capabilities=["completion"],
+                can_prompt=True,
+                can_vision=False,
+                can_image=False,
+            )
+        ],
+    )
+
     original_backend = api_config.model.image_backend
     original_ollama_model = api_config.model.ollama_model
     original_ollama_image_model = api_config.model.ollama_image_model
@@ -288,6 +379,7 @@ def test_set_generation_config_updates_backend_and_loras(client):
         assert data["image_backend"] == "small"
         assert data["ollama_model"] == "qwen3.6:27b"
         assert data["prompt_model"] == "qwen3.6:27b"
+        assert data["configured_prompt_model"] == "qwen3.6:27b"
         assert data["image_model"] == api_config.model.small_sd_model
         assert data["pipeline"]["prompt"]["model"] == "qwen3.6:27b"
         assert data["pipeline"]["image"]["model"] == api_config.model.small_sd_model
@@ -627,8 +719,128 @@ def test_gallery_sync_status_reports_catalog_publish_plan(client):
     assert any(asset["key"].endswith("syncfeed.png") for asset in data["preview_assets"])
 
 
+def test_gallery_catalog_filters_and_facets_use_experiment_metadata(client):
+    """Gallery review should be filterable by backend, model, prompt family, and quality flag."""
+    output_root = Path(_TEST_OUTPUT_DIR)
+    week_dir = output_root / "2099" / "week_06"
+    week_dir.mkdir(parents=True, exist_ok=True)
+
+    image_path = week_dir / "image_20990106_000001_filterbee.png"
+    image = Image.new("RGB", (64, 64), color=(25, 70, 120))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((10, 10, 50, 42), fill=(210, 230, 80))
+    image.save(image_path)
+    image_path.with_suffix(".txt").write_text("filter me")
+    write_image_metadata(
+        image_path,
+        {
+            "backend": "small-sd",
+            "model": "segmind/tiny-sd",
+            "is_placeholder": False,
+            "experiment": {
+                "prompt_family": "layout",
+                "quality_flags": ["composition"],
+            },
+            "quality_flags": ["composition"],
+        },
+    )
+
+    response = client.post("/api/gallery/catalog/backfill?default_state=published")
+    assert response.status_code == 200
+
+    response = client.get(
+        "/api/gallery/catalog?backend=small-sd&model=segmind%2Ftiny-sd"
+        "&prompt_family=layout&quality_flag=composition"
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert any(asset["path"].endswith("filterbee.png") for asset in data["assets"])
+
+    response = client.get("/api/gallery/catalog?prompt_family=typography")
+    assert response.status_code == 200
+    assert not any(asset["path"].endswith("filterbee.png") for asset in response.json()["assets"])
+
+    facets_response = client.get("/api/gallery/facets")
+    assert facets_response.status_code == 200
+    facets = facets_response.json()
+    assert "small-sd" in facets["backends"]
+    assert "segmind/tiny-sd" in facets["models"]
+    assert "layout" in facets["prompt_families"]
+    assert "composition" in facets["quality_flags"]
+
+
+def test_gallery_catalog_displays_resolved_prompt_model(client, monkeypatch):
+    """Old generated-prompt metadata should not display a stale configured Ollama alias."""
+    output_root = Path(_TEST_OUTPUT_DIR)
+    week_dir = output_root / "2099" / "week_07"
+    week_dir.mkdir(parents=True, exist_ok=True)
+
+    image_path = week_dir / "image_20990107_000001_promptmodel.png"
+    image = Image.new("RGB", (64, 64), color=(45, 80, 110))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((8, 8, 42, 42), fill=(230, 170, 90))
+    image.save(image_path)
+    image_path.with_suffix(".txt").write_text("generated prompt model test")
+    write_image_metadata(
+        image_path,
+        {
+            "backend": "small-sd",
+            "model": "segmind/tiny-sd",
+            "is_placeholder": False,
+            "experiment": {
+                "prompt": {
+                    "source": "generated",
+                    "model": "gpt-oss:latest",
+                    "final": "generated prompt model test",
+                },
+                "pipeline": {
+                    "resolved_backend": "small-sd",
+                    "model": "segmind/tiny-sd",
+                    "prompt_model": "gpt-oss:latest",
+                },
+            },
+        },
+    )
+
+    mock_models = [
+        OllamaModelInfo(
+            name="qwen3.5:9b",
+            size=1,
+            modified="2026-06-15T12:00:00-05:00",
+            digest="digest-qwen",
+            format="gguf",
+            family="qwen35",
+            capabilities=["completion"],
+            can_prompt=True,
+            can_vision=False,
+            can_image=False,
+        )
+    ]
+    original_prompt_model = api_config.model.ollama_model
+    monkeypatch.setattr("src.api.server.list_ollama_models", lambda: mock_models)
+    try:
+        api_config.model.ollama_model = "gpt-oss:latest"
+        response = client.post("/api/gallery/catalog/backfill?default_state=published")
+        assert response.status_code == 200
+
+        response = client.get("/api/gallery/catalog?limit=100")
+        assert response.status_code == 200
+        entry = next(
+            asset
+            for asset in response.json()["assets"]
+            if asset["path"].endswith("promptmodel.png")
+        )
+        experiment = entry["metadata"]["experiment"]
+        assert experiment["prompt"]["model"] == "qwen3.5:9b"
+        assert experiment["prompt"]["configured_model"] == "gpt-oss:latest"
+        assert experiment["pipeline"]["prompt_model"] == "qwen3.5:9b"
+        assert experiment["pipeline"]["configured_prompt_model"] == "gpt-oss:latest"
+    finally:
+        api_config.model.ollama_model = original_prompt_model
+
+
 def test_placeholder_cannot_be_published_without_override(client):
-    """Mock placeholders should stay unpublished unless the operator explicitly overrides."""
+    """Mock placeholders should stay unpublished even if a stale client sends an override."""
     output_root = Path(_TEST_OUTPUT_DIR)
     week_dir = output_root / "2099" / "week_04"
     week_dir.mkdir(parents=True, exist_ok=True)
@@ -652,8 +864,7 @@ def test_placeholder_cannot_be_published_without_override(client):
         f"/api/gallery/publication/{relative_path}",
         json={"state": "published", "allow_placeholder_publish": True},
     )
-    assert response.status_code == 200
-    assert response.json()["publication_state"] == "published"
+    assert response.status_code == 409
 
 
 def test_delete_image_removes_metadata_sidecar(client):

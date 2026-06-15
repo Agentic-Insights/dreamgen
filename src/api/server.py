@@ -92,6 +92,7 @@ app = FastAPI(
 
 # Configure CORS for Next.js frontend
 # Get CORS origins from environment variable or use defaults
+local_dev_origin_regex = r"http://(localhost|127\.0\.0\.1):\d+"
 cors_origins_env = os.getenv("CORS_ORIGINS", "")
 if cors_origins_env:
     # Split by comma and strip whitespace
@@ -111,6 +112,7 @@ else:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
+    allow_origin_regex=local_dev_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -166,9 +168,25 @@ def inspect_local_zimage_model(model_path: Path) -> tuple[str, int]:
     return ("partial", size)
 
 
+def resolved_prompt_model_name() -> str:
+    """Return the active completion-capable Ollama model, falling back to configured value."""
+    configured_prompt_model = config.model.ollama_model
+    try:
+        return (
+            resolve_ollama_model(list_ollama_models(), configured_prompt_model, "completion")
+            or configured_prompt_model
+        )
+    except Exception as exc:
+        logger.warning("Could not resolve configured Ollama prompt model: %s", exc)
+        return configured_prompt_model
+
+
 def generation_config_payload() -> Dict[str, Any]:
     """Serialize mutable generation/runtime settings for the frontend."""
     image_backend = config.model.image_backend
+    configured_prompt_model = config.model.ollama_model
+    prompt_model = resolved_prompt_model_name()
+
     image_model_by_backend = {
         "auto": "auto resolver",
         "flux": config.model.flux_model,
@@ -190,15 +208,17 @@ def generation_config_payload() -> Dict[str, Any]:
         "guidance_scale": config.image.guidance_scale,
         "true_cfg_scale": config.image.true_cfg_scale,
         "ollama_temperature": config.model.ollama_temperature,
-        "ollama_model": config.model.ollama_model,
-        "prompt_model": config.model.ollama_model,
+        "ollama_model": configured_prompt_model,
+        "prompt_model": prompt_model,
+        "configured_prompt_model": configured_prompt_model,
         "image_backend": image_backend,
         "image_model": image_model,
         "ollama_image_model": config.model.ollama_image_model,
         "pipeline": {
             "prompt": {
                 "provider": "ollama",
-                "model": config.model.ollama_model,
+                "model": prompt_model,
+                "configured_model": configured_prompt_model,
             },
             "image": {
                 "backend": image_backend,
@@ -248,6 +268,116 @@ def normalize_gallery_key(image_path: str) -> str:
     return normalized
 
 
+def metadata_lookup(metadata: Dict[str, Any], key: str) -> Any:
+    """Read common experiment fields from either legacy or structured metadata."""
+    experiment = metadata.get("experiment") if isinstance(metadata.get("experiment"), dict) else {}
+    pipeline = experiment.get("pipeline") if isinstance(experiment.get("pipeline"), dict) else {}
+    parameters = (
+        experiment.get("parameters") if isinstance(experiment.get("parameters"), dict) else {}
+    )
+
+    if key == "backend":
+        return metadata.get("backend") or pipeline.get("resolved_backend")
+    if key == "model":
+        return metadata.get("model") or pipeline.get("model")
+    if key == "prompt_family":
+        return metadata.get("prompt_family") or experiment.get("prompt_family")
+    if key == "seed":
+        return metadata.get("seed") or parameters.get("seed")
+    return metadata.get(key)
+
+
+def display_metadata_for_catalog(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """Return catalog metadata adjusted for display without mutating sidecars."""
+    experiment = metadata.get("experiment")
+    if not isinstance(experiment, dict):
+        return metadata
+
+    prompt = experiment.get("prompt") if isinstance(experiment.get("prompt"), dict) else {}
+    pipeline = experiment.get("pipeline") if isinstance(experiment.get("pipeline"), dict) else {}
+    if prompt.get("source") != "generated":
+        return metadata
+
+    configured_prompt_model = config.model.ollama_model
+    recorded_prompt_model = pipeline.get("prompt_model") or prompt.get("model")
+    if recorded_prompt_model != configured_prompt_model:
+        return metadata
+
+    resolved_prompt_model = resolved_prompt_model_name()
+    if not resolved_prompt_model or resolved_prompt_model == recorded_prompt_model:
+        return metadata
+
+    display_metadata = dict(metadata)
+    display_experiment = dict(experiment)
+    display_prompt = dict(prompt)
+    display_pipeline = dict(pipeline)
+    display_prompt.setdefault("configured_model", recorded_prompt_model)
+    display_prompt["model"] = resolved_prompt_model
+    display_pipeline.setdefault("configured_prompt_model", recorded_prompt_model)
+    display_pipeline["prompt_model"] = resolved_prompt_model
+    display_experiment["prompt"] = display_prompt
+    display_experiment["pipeline"] = display_pipeline
+    display_experiment["prompt_model_resolution"] = "resolved_from_configured_model"
+    display_metadata["experiment"] = display_experiment
+    return display_metadata
+
+
+def matches_gallery_filters(
+    entry: Dict[str, Any],
+    *,
+    backend: Optional[str] = None,
+    model: Optional[str] = None,
+    prompt_family: Optional[str] = None,
+    quality_flag: Optional[str] = None,
+) -> bool:
+    """Return whether a catalog entry matches operator review filters."""
+    metadata = entry.get("metadata", {})
+    if backend and str(metadata_lookup(metadata, "backend")) != backend:
+        return False
+    if model and str(metadata_lookup(metadata, "model")) != model:
+        return False
+    if prompt_family and str(metadata_lookup(metadata, "prompt_family")) != prompt_family:
+        return False
+    if quality_flag:
+        flags = {str(flag) for flag in entry.get("quality_flags", [])}
+        metadata_flags = metadata.get("quality_flags", [])
+        if isinstance(metadata_flags, str):
+            flags.update(flag.strip() for flag in metadata_flags.split(",") if flag.strip())
+        else:
+            flags.update(str(flag).strip() for flag in metadata_flags if str(flag).strip())
+        if quality_flag not in flags:
+            return False
+    return True
+
+
+def gallery_experiment_facets(entries: List[Dict[str, Any]]) -> Dict[str, List[str]]:
+    """Build distinct review filters from catalog metadata."""
+    facets = {
+        "backends": set(),
+        "models": set(),
+        "prompt_families": set(),
+        "quality_flags": set(),
+        "publication_states": set(),
+    }
+    for entry in entries:
+        metadata = entry.get("metadata", {})
+        for facet_key, metadata_key in (
+            ("backends", "backend"),
+            ("models", "model"),
+            ("prompt_families", "prompt_family"),
+        ):
+            value = metadata_lookup(metadata, metadata_key)
+            if value not in (None, ""):
+                facets[facet_key].add(str(value))
+        if entry.get("publication_state"):
+            facets["publication_states"].add(str(entry["publication_state"]))
+        for flag in entry.get("quality_flags", []):
+            if str(flag).strip():
+                facets["quality_flags"].add(str(flag))
+
+    return {key: sorted(values) for key, values in facets.items()}
+
+
 def build_gallery_index(output_dir: Path) -> List[Dict[str, Any]]:
     """Build public gallery metadata from the backend publication catalog."""
     if not catalog_path_for(output_dir).exists():
@@ -272,7 +402,7 @@ def build_gallery_index(output_dir: Path) -> List[Dict[str, Any]]:
             ),
             "size": stat_result.st_size,
             "prompt_hash": image_file.stem.rsplit("_", 1)[-1],
-            "metadata": catalog_entry.get("metadata", {}),
+            "metadata": display_metadata_for_catalog(catalog_entry.get("metadata", {})),
             "publication": {
                 "id": catalog_entry.get("id"),
                 "state": catalog_entry.get("publication_state"),
@@ -339,9 +469,17 @@ class GenerateRequest(BaseModel):
     """Request model for image generation"""
 
     prompt: Optional[str] = Field(None, description="Optional custom prompt")
+    meta_prompt: Optional[str] = Field(None, description="Optional prompt-generation steering text")
     enable_plugins: bool = Field(True, description="Enable plugin enhancements")
     seed: Optional[int] = Field(None, description="Random seed for reproducibility")
     recipe_id: Optional[str] = Field(None, description="Optional workflow recipe ID")
+    experiment_label: Optional[str] = Field(None, description="Optional operator label for the run")
+    prompt_family: Optional[str] = Field(
+        None, description="Optional prompt family for review filters"
+    )
+    quality_flags: List[str] = Field(
+        default_factory=list, description="Operator quality flags to attach to this run"
+    )
     client_request_id: Optional[str] = Field(
         None, description="Client-provided request ID used to correlate progress events"
     )
@@ -365,6 +503,13 @@ class JobCreateRequest(BaseModel):
     seed: Optional[int] = Field(None, description="Random seed for reproducibility")
     recipe_id: Optional[str] = Field(None, description="Optional workflow recipe ID")
     publication_state: str = Field("draft", description="Initial publication state")
+    experiment_label: Optional[str] = Field(None, description="Optional operator label for the run")
+    prompt_family: Optional[str] = Field(
+        None, description="Optional prompt family for review filters"
+    )
+    quality_flags: List[str] = Field(
+        default_factory=list, description="Operator quality flags to attach to this run"
+    )
     client_request_id: Optional[str] = Field(
         None, description="Client-provided request ID used to correlate progress events"
     )
@@ -375,10 +520,6 @@ class PublicationUpdateRequest(BaseModel):
     """Request model for changing gallery publication state."""
 
     state: str = Field(..., description="Publication state for this image")
-    allow_placeholder_publish: bool = Field(
-        False,
-        description="Allow publishing mock/test placeholder images when explicitly requested",
-    )
 
 
 class EditRequest(BaseModel):
@@ -666,6 +807,27 @@ async def run_generation_job_safely(job_id: str) -> None:
         logger.error("Generation job %s failed: %s", job_id, exc)
 
 
+def experiment_request_metadata(
+    *,
+    metadata: Dict[str, Any] | None = None,
+    experiment_label: Optional[str] = None,
+    prompt_family: Optional[str] = None,
+    quality_flags: Optional[List[str]] = None,
+    enable_plugins: Optional[bool] = None,
+) -> Dict[str, Any]:
+    """Merge operator experiment annotations into job metadata."""
+    merged = dict(metadata or {})
+    if experiment_label:
+        merged["experiment_label"] = experiment_label
+    if prompt_family:
+        merged["prompt_family"] = prompt_family
+    if quality_flags:
+        merged["quality_flags"] = [str(flag).strip() for flag in quality_flags if str(flag).strip()]
+    if enable_plugins is not None:
+        merged["plugins_enabled_requested"] = enable_plugins
+    return merged
+
+
 def generation_job_from_request(
     *,
     prompt: Optional[str],
@@ -674,9 +836,20 @@ def generation_job_from_request(
     publication_state: str,
     client_request_id: Optional[str],
     metadata: Dict[str, Any] | None = None,
+    experiment_label: Optional[str] = None,
+    prompt_family: Optional[str] = None,
+    quality_flags: Optional[List[str]] = None,
+    enable_plugins: Optional[bool] = None,
     recipe_id: Optional[str] = None,
 ) -> GenerationJobCreate:
     """Build a job creation payload, resolving a workflow recipe when requested."""
+    merged_metadata = experiment_request_metadata(
+        metadata=metadata,
+        experiment_label=experiment_label,
+        prompt_family=prompt_family,
+        quality_flags=quality_flags,
+        enable_plugins=enable_plugins,
+    )
     if not recipe_id:
         return GenerationJobCreate(
             prompt=prompt,
@@ -684,7 +857,7 @@ def generation_job_from_request(
             seed=seed,
             publication_state=publication_state,
             client_request_id=client_request_id,
-            metadata=metadata or {},
+            metadata=merged_metadata,
         )
 
     resolution = resolve_workflow_recipe(
@@ -692,7 +865,7 @@ def generation_job_from_request(
         prompt=prompt,
         meta_prompt=meta_prompt,
         seed=seed,
-        metadata=metadata,
+        metadata=merged_metadata,
     )
     payload = resolution.to_job_payload(client_request_id=client_request_id)
     return GenerationJobCreate(**payload)
@@ -1325,10 +1498,14 @@ async def generate_image(request: GenerateRequest):
         job = generation_job_store.create_job(
             generation_job_from_request(
                 prompt=request.prompt,
-                meta_prompt=None,
+                meta_prompt=request.meta_prompt,
                 seed=request.seed,
                 publication_state="draft",
                 client_request_id=request.client_request_id,
+                experiment_label=request.experiment_label,
+                prompt_family=request.prompt_family,
+                quality_flags=request.quality_flags,
+                enable_plugins=request.enable_plugins,
                 recipe_id=request.recipe_id,
             )
         )
@@ -1372,6 +1549,9 @@ async def create_generation_job(request: JobCreateRequest, background_tasks: Bac
                 publication_state=request.publication_state,
                 client_request_id=request.client_request_id,
                 metadata=request.metadata,
+                experiment_label=request.experiment_label,
+                prompt_family=request.prompt_family,
+                quality_flags=request.quality_flags,
                 recipe_id=request.recipe_id,
             )
         )
@@ -1438,6 +1618,10 @@ async def get_gallery(limit: int = 50, offset: int = 0):
 @app.get("/api/gallery/catalog")
 async def get_gallery_catalog(
     publication_state: Optional[str] = Query(None, alias="state"),
+    backend: Optional[str] = Query(None),
+    model: Optional[str] = Query(None),
+    prompt_family: Optional[str] = Query(None),
+    quality_flag: Optional[str] = Query(None),
     limit: int = 100,
     offset: int = 0,
 ):
@@ -1456,10 +1640,22 @@ async def get_gallery_catalog(
     if publication_state:
         normalized_state = publication_state.strip().lower()
         entries = [entry for entry in entries if entry.get("publication_state") == normalized_state]
+    entries = [
+        entry
+        for entry in entries
+        if matches_gallery_filters(
+            entry,
+            backend=backend,
+            model=model,
+            prompt_family=prompt_family,
+            quality_flag=quality_flag,
+        )
+    ]
 
     page_entries = []
     for entry in entries[offset : offset + limit]:
         payload = dict(entry)
+        payload["metadata"] = display_metadata_for_catalog(entry.get("metadata", {}))
         image_file = OUTPUT_DIR / str(entry.get("path", ""))
         if image_file.exists():
             payload["size"] = image_file.stat().st_size
@@ -1472,6 +1668,19 @@ async def get_gallery_catalog(
         "limit": limit,
         "offset": offset,
     }
+
+
+@app.get("/api/gallery/facets")
+async def get_gallery_facets():
+    """Return distinct experiment/catalog filters for local review workflows."""
+    if not catalog_path_for(OUTPUT_DIR).exists():
+        await asyncio.to_thread(
+            backfill_catalog, OUTPUT_DIR, default_state="published", include_placeholders=True
+        )
+
+    catalog = await asyncio.to_thread(load_catalog, OUTPUT_DIR)
+    entries = list(catalog["assets"].values())
+    return gallery_experiment_facets(entries)
 
 
 @app.get("/api/gallery/sync/status")
@@ -1526,7 +1735,6 @@ async def update_image_publication(image_path: str, request: PublicationUpdateRe
             OUTPUT_DIR,
             key,
             request.state,
-            allow_placeholder_publish=request.allow_placeholder_publish,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

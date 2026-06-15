@@ -11,6 +11,7 @@ import {
   api,
   API_BASE,
   type GalleryCatalogEntry,
+  type GalleryFacets,
   type GallerySyncStatus,
   type PublicationState,
 } from "@/lib/api";
@@ -132,6 +133,11 @@ export default function Gallery() {
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("week");
   const [catalogFilter, setCatalogFilter] = useState<CatalogFilter>("all");
+  const [backendFilter, setBackendFilter] = useState("all");
+  const [modelFilter, setModelFilter] = useState("all");
+  const [promptFamilyFilter, setPromptFamilyFilter] = useState("all");
+  const [qualityFlagFilter, setQualityFlagFilter] = useState("all");
+  const [facets, setFacets] = useState<GalleryFacets | null>(null);
   const [syncStatus, setSyncStatus] = useState<GallerySyncStatus | null>(null);
   const [copiedPromptPath, setCopiedPromptPath] = useState<string | null>(null);
   const loadRequestRef = useRef(0);
@@ -185,16 +191,32 @@ export default function Gallery() {
     loadRequestRef.current = requestId;
     const limit = viewMode === "all" ? ALL_PAGE_SIZE : WEEK_PAGE_SIZE;
     const offset = viewMode === "all" ? page * ALL_PAGE_SIZE : 0;
-    const cacheKey = `gallery_catalog_${viewMode}_${catalogFilter}_${page}_${limit}`;
+    const cacheKey = [
+      "gallery_catalog",
+      viewMode,
+      catalogFilter,
+      backendFilter,
+      modelFilter,
+      promptFamilyFilter,
+      qualityFlagFilter,
+      page,
+      limit,
+    ].join("_");
 
     setLoading(true);
     setError(null);
 
     try {
       console.log('Fetching gallery catalog from API');
-      const [catalogResponse, publishStatus] = await Promise.all([
-        api.getGalleryCatalog(limit, offset, catalogFilter, GALLERY_TIMEOUT_MS),
+      const [catalogResponse, publishStatus, facetResponse] = await Promise.all([
+        api.getGalleryCatalog(limit, offset, catalogFilter, GALLERY_TIMEOUT_MS, {
+          backend: backendFilter === "all" ? undefined : backendFilter,
+          model: modelFilter === "all" ? undefined : modelFilter,
+          prompt_family: promptFamilyFilter === "all" ? undefined : promptFamilyFilter,
+          quality_flag: qualityFlagFilter === "all" ? undefined : qualityFlagFilter,
+        }),
         api.getGallerySyncStatus(10),
+        api.getGalleryFacets(),
       ]);
 
       if (loadRequestRef.current !== requestId) return;
@@ -215,6 +237,7 @@ export default function Gallery() {
       setImages(response.images);
       setTotal(response.total);
       setSyncStatus(publishStatus);
+      setFacets(facetResponse);
 
       if (viewMode === "week") {
         organizeByWeek(response.images);
@@ -248,7 +271,16 @@ export default function Gallery() {
         setLoading(false);
       }
     }
-  }, [catalogFilter, organizeByWeek, page, viewMode]);
+  }, [
+    backendFilter,
+    catalogFilter,
+    modelFilter,
+    organizeByWeek,
+    page,
+    promptFamilyFilter,
+    qualityFlagFilter,
+    viewMode,
+  ]);
 
   const getWeekNumber = (date: Date): number => {
     const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -288,7 +320,7 @@ export default function Gallery() {
 
   useEffect(() => {
     setPage(0);
-  }, [catalogFilter, viewMode]);
+  }, [backendFilter, catalogFilter, modelFilter, promptFamilyFilter, qualityFlagFilter, viewMode]);
 
   const getImageUrl = (imagePath: string) => `${API_BASE}${imagePath}`;
 
@@ -464,7 +496,74 @@ export default function Gallery() {
       }));
   };
 
+  const getExperimentRows = (image: GalleryImage) => {
+    const experiment = image.metadata.experiment;
+    if (!experiment || typeof experiment !== "object") return [];
+    const data = experiment as {
+      id?: string;
+      label?: string | null;
+      prompt_family?: string | null;
+      diagnostic?: boolean;
+      pipeline?: { resolved_backend?: string; model?: string; prompt_model?: string };
+      parameters?: {
+        seed?: number | null;
+        width?: number | null;
+        height?: number | null;
+        steps?: number | null;
+        guidance_scale?: number | null;
+        true_cfg_scale?: number | null;
+      };
+      timing?: { generation_seconds?: number };
+      enhancers?: { plugins?: string[]; loras?: string[] };
+    };
+    const parameters = data.parameters ?? {};
+    const pipeline = data.pipeline ?? {};
+    const timing = data.timing ?? {};
+    const enhancers = data.enhancers ?? {};
+
+    return [
+      { key: "id", label: "run id", value: data.id },
+      { key: "label", label: "label", value: data.label },
+      { key: "prompt_family", label: "prompt family", value: data.prompt_family },
+      { key: "backend", label: "backend", value: pipeline.resolved_backend },
+      { key: "model", label: "model", value: pipeline.model },
+      { key: "prompt_model", label: "prompt model", value: pipeline.prompt_model },
+      { key: "seed", label: "seed", value: parameters.seed },
+      {
+        key: "size",
+        label: "size",
+        value:
+          parameters.width && parameters.height
+            ? `${parameters.width} x ${parameters.height}`
+            : undefined,
+      },
+      { key: "steps", label: "steps", value: parameters.steps },
+      { key: "guidance", label: "guidance", value: parameters.guidance_scale },
+      { key: "true_cfg", label: "true cfg", value: parameters.true_cfg_scale },
+      {
+        key: "generation_time",
+        label: "time",
+        value:
+          typeof timing.generation_seconds === "number"
+            ? `${timing.generation_seconds.toFixed(2)}s`
+            : undefined,
+      },
+      {
+        key: "plugins",
+        label: "plugins",
+        value: enhancers.plugins?.length ? enhancers.plugins.join(", ") : undefined,
+      },
+      {
+        key: "loras",
+        label: "loras",
+        value: enhancers.loras?.length ? enhancers.loras.join(", ") : undefined,
+      },
+      { key: "diagnostic", label: "diagnostic", value: data.diagnostic },
+    ].filter((row) => row.value !== undefined && row.value !== null && row.value !== "");
+  };
+
   const selectedMetadataRows = selectedImage ? getMetadataRows(selectedImage) : [];
+  const selectedExperimentRows = selectedImage ? getExperimentRows(selectedImage) : [];
 
   const renderStateBadge = (state: PublicationState, className?: string) => (
     <span
@@ -619,6 +718,62 @@ export default function Gallery() {
                 {PUBLICATION_OPTIONS.map((option) => (
                   <option key={option.state} value={option.state}>
                     {option.label}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={backendFilter}
+                onChange={(event) => setBackendFilter(event.target.value)}
+                className="h-8 rounded-md border border-border bg-background px-2 text-sm"
+                title="Filter by backend"
+              >
+                <option value="all">All backends</option>
+                {(facets?.backends ?? []).map((backend) => (
+                  <option key={backend} value={backend}>
+                    {backend}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={modelFilter}
+                onChange={(event) => setModelFilter(event.target.value)}
+                className="h-8 max-w-[180px] rounded-md border border-border bg-background px-2 text-sm"
+                title="Filter by model"
+              >
+                <option value="all">All models</option>
+                {(facets?.models ?? []).map((model) => (
+                  <option key={model} value={model}>
+                    {model}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={promptFamilyFilter}
+                onChange={(event) => setPromptFamilyFilter(event.target.value)}
+                className="h-8 rounded-md border border-border bg-background px-2 text-sm"
+                title="Filter by prompt family"
+              >
+                <option value="all">All families</option>
+                {(facets?.prompt_families ?? []).map((family) => (
+                  <option key={family} value={family}>
+                    {family}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={qualityFlagFilter}
+                onChange={(event) => setQualityFlagFilter(event.target.value)}
+                className="h-8 rounded-md border border-border bg-background px-2 text-sm"
+                title="Filter by quality flag"
+              >
+                <option value="all">All flags</option>
+                {(facets?.quality_flags ?? []).map((flag) => (
+                  <option key={flag} value={flag}>
+                    {flag}
                   </option>
                 ))}
               </select>
@@ -923,16 +1078,32 @@ export default function Gallery() {
                           );
                         })}
                       </div>
-                      {selectedImage.publication.quality_flags.length > 0 && (
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {selectedImage.publication.quality_flags.map((flag) => (
-                            <span key={flag} className="rounded border border-border px-2 py-0.5 text-xs text-muted-foreground">
-                              {flag}
+                    {selectedImage.publication.quality_flags.length > 0 && (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {selectedImage.publication.quality_flags.map((flag) => (
+                          <span key={flag} className="rounded border border-border px-2 py-0.5 text-xs text-muted-foreground">
+                            {flag}
                             </span>
                           ))}
                         </div>
                       )}
                     </div>
+
+                    {selectedExperimentRows.length > 0 && (
+                      <div className="rounded-md border border-border bg-muted/30 p-3">
+                        <div className="mb-2 text-[11px] uppercase tracking-wide text-muted-foreground">Experiment</div>
+                        <dl className="grid gap-2">
+                          {selectedExperimentRows.map((row) => (
+                            <div key={row.key} className="grid grid-cols-[120px_minmax(0,1fr)] gap-3 text-xs">
+                              <dt className="capitalize text-muted-foreground">{row.label}</dt>
+                              <dd className="break-words font-medium text-foreground">
+                                {formatMetadataValue(row.value)}
+                              </dd>
+                            </div>
+                          ))}
+                        </dl>
+                      </div>
+                    )}
 
                     {selectedMetadataRows.length > 0 && (
                       <div className="rounded-md border border-border bg-muted/30 p-3">

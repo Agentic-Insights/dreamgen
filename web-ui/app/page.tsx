@@ -58,6 +58,7 @@ type RecentImage = {
   path: string;
   prompt: string;
   created_at: string;
+  metadata?: GenerateResponse["metadata"];
 };
 
 const CADENCE_OPTIONS: CadenceOption[] = [
@@ -83,6 +84,9 @@ const STORAGE_KEYS = {
   promptSeed: "dreamgen.promptSeed",
   cadenceMinutes: "dreamgen.cadenceMinutes",
   sessionLoop: "dreamgen.sessionLoop",
+  experimentLabel: "dreamgen.experimentLabel",
+  promptFamily: "dreamgen.promptFamily",
+  qualityFlags: "dreamgen.qualityFlags",
 };
 
 const readString = (key: string, fallback: string) => {
@@ -123,6 +127,12 @@ const formatCountdown = (target: Date | null) => {
 const truncatePrompt = (prompt: string, max = 88) =>
   prompt.length > max ? `${prompt.slice(0, max).trim()}...` : prompt;
 
+const splitQualityFlags = (value: string) =>
+  value
+    .split(",")
+    .map((flag) => flag.trim())
+    .filter(Boolean);
+
 const describeGenerationEvent = (event: GenerationEvent) => {
   if (event.type === "generation_error") return `Error: ${event.error ?? "unknown"}`;
   if (event.type === "generation_started") return "Generation started";
@@ -136,6 +146,9 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<TabId>("generate");
   const [promptSeed, setPromptSeed] = useState("");
   const [metaPrompt, setMetaPrompt] = useState("");
+  const [experimentLabel, setExperimentLabel] = useState("");
+  const [promptFamily, setPromptFamily] = useState("");
+  const [qualityFlags, setQualityFlags] = useState("");
   const [promptError, setPromptError] = useState<string | null>(null);
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
   const [promptProgress, setPromptProgress] = useState<ProgressSnapshot | null>(null);
@@ -161,6 +174,9 @@ export default function Home() {
   const [logs, setLogs] = useState<string[]>(["DreamGen is ready."]);
 
   const promptSeedRef = useRef(promptSeed);
+  const experimentLabelRef = useRef(experimentLabel);
+  const promptFamilyRef = useRef(promptFamily);
+  const qualityFlagsRef = useRef(qualityFlags);
   const cadenceMinutesRef = useRef(cadenceMinutes);
   const isGeneratingRef = useRef(isGenerating);
   const statusRef = useRef<SystemStatus | null>(status);
@@ -190,6 +206,33 @@ export default function Home() {
       ? generationConfig?.ollama_image_model || "Ollama image model"
       : generationConfig?.image_model ?? selectedBackend;
   const lastActivity = logs[logs.length - 1];
+  const currentExperiment = currentImage?.metadata.experiment;
+  const currentParameters = currentExperiment?.parameters;
+  const currentTiming = currentExperiment?.timing;
+  const currentQualityFlags =
+    currentExperiment?.quality_flags ?? currentImage?.metadata.quality_flags ?? [];
+  const currentExperimentRows = [
+    { label: "Run ID", value: currentExperiment?.id },
+    { label: "Prompt family", value: currentExperiment?.prompt_family },
+    { label: "Seed", value: currentParameters?.seed ?? currentImage?.metadata.seed },
+    {
+      label: "Size",
+      value:
+        currentParameters?.width && currentParameters?.height
+          ? `${currentParameters.width} x ${currentParameters.height}`
+          : undefined,
+    },
+    { label: "Steps", value: currentParameters?.steps },
+    { label: "Guidance", value: currentParameters?.guidance_scale },
+    { label: "True CFG", value: currentParameters?.true_cfg_scale },
+    {
+      label: "Time",
+      value:
+        currentTiming?.generation_seconds ?? currentImage?.metadata.generation_time
+          ? `${(currentTiming?.generation_seconds ?? currentImage?.metadata.generation_time ?? 0).toFixed(2)}s`
+          : undefined,
+    },
+  ].filter((row) => row.value !== undefined && row.value !== null && row.value !== "");
 
   const addLog = (message: string, type: "info" | "error" = "info") => {
     const timestamp = new Date().toLocaleTimeString();
@@ -214,6 +257,7 @@ export default function Home() {
               prompt: latestImage.prompt,
               image_path: latestImage.path,
               metadata: {
+                ...(latestImage.metadata ?? {}),
                 backend: latestStatus?.backend ?? "unknown",
                 plugins_used: latestStatus?.active_plugins ?? [],
               },
@@ -291,8 +335,12 @@ export default function Home() {
     try {
       const response = await api.generate({
         prompt: promptSeedRef.current.trim() || undefined,
+        meta_prompt: metaPrompt || undefined,
         enable_plugins: true,
         seed: seed ?? undefined,
+        experiment_label: experimentLabelRef.current.trim() || undefined,
+        prompt_family: promptFamilyRef.current.trim() || undefined,
+        quality_flags: splitQualityFlags(qualityFlagsRef.current),
         client_request_id: clientRequestId,
       });
 
@@ -334,6 +382,9 @@ export default function Home() {
 
   useEffect(() => {
     setPromptSeed(readString(STORAGE_KEYS.promptSeed, ""));
+    setExperimentLabel(readString(STORAGE_KEYS.experimentLabel, ""));
+    setPromptFamily(readString(STORAGE_KEYS.promptFamily, ""));
+    setQualityFlags(readString(STORAGE_KEYS.qualityFlags, ""));
     setCadenceMinutes(readNumber(STORAGE_KEYS.cadenceMinutes, 60));
     setLoopEnabled(readBoolean(STORAGE_KEYS.sessionLoop, false));
   }, []);
@@ -343,6 +394,24 @@ export default function Home() {
     window.localStorage.setItem(STORAGE_KEYS.promptSeed, promptSeed);
     promptSeedRef.current = promptSeed;
   }, [promptSeed]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(STORAGE_KEYS.experimentLabel, experimentLabel);
+    experimentLabelRef.current = experimentLabel;
+  }, [experimentLabel]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(STORAGE_KEYS.promptFamily, promptFamily);
+    promptFamilyRef.current = promptFamily;
+  }, [promptFamily]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(STORAGE_KEYS.qualityFlags, qualityFlags);
+    qualityFlagsRef.current = qualityFlags;
+  }, [qualityFlags]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -572,6 +641,15 @@ export default function Home() {
         seed: job.request.seed ?? undefined,
         recipe_id: job.request.recipe_id ?? undefined,
         publication_state: job.request.publication_state ?? "draft",
+        experiment_label:
+          typeof job.metadata.experiment_label === "string"
+            ? job.metadata.experiment_label
+            : undefined,
+        prompt_family:
+          typeof job.metadata.prompt_family === "string" ? job.metadata.prompt_family : undefined,
+        quality_flags: Array.isArray(job.metadata.quality_flags)
+          ? job.metadata.quality_flags.map(String)
+          : undefined,
         metadata: {
           ...(job.request.metadata ?? {}),
           rerun_of_job_id: job.id,
@@ -846,6 +924,42 @@ export default function Home() {
                                       />
                                     </div>
 
+                                    <div className="grid gap-3 sm:grid-cols-2">
+                                      <div>
+                                        <label className="mb-2 block text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                                          Experiment label
+                                        </label>
+                                        <input
+                                          value={experimentLabel}
+                                          onChange={(event) => setExperimentLabel(event.target.value)}
+                                          placeholder="text probe, backend sweep"
+                                          className="w-full rounded-xl border border-input/85 bg-background/95 px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="mb-2 block text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                                          Prompt family
+                                        </label>
+                                        <input
+                                          value={promptFamily}
+                                          onChange={(event) => setPromptFamily(event.target.value)}
+                                          placeholder="hands, text, layout"
+                                          className="w-full rounded-xl border border-input/85 bg-background/95 px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                                        />
+                                      </div>
+                                      <div className="sm:col-span-2">
+                                        <label className="mb-2 block text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                                          Quality flags
+                                        </label>
+                                        <input
+                                          value={qualityFlags}
+                                          onChange={(event) => setQualityFlags(event.target.value)}
+                                          placeholder="diagnostic, text-failure, publish-candidate"
+                                          className="w-full rounded-xl border border-input/85 bg-background/95 px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                                        />
+                                      </div>
+                                    </div>
+
                                     <div className="flex flex-wrap items-center justify-between gap-3">
                                       <span className="text-xs leading-6 text-muted-foreground">
                                         {promptSeed.trim()
@@ -992,6 +1106,45 @@ export default function Home() {
                         </div>
                       </div>
 
+                      {currentExperimentRows.length > 0 && (
+                        <div className="mb-4 rounded-2xl border border-border/60 bg-background/78 px-4 py-3">
+                          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                              Experiment
+                            </div>
+                            {currentExperiment?.diagnostic && (
+                              <span className="rounded border border-amber-400/40 px-2 py-0.5 text-[11px] text-amber-300">
+                                diagnostic
+                              </span>
+                            )}
+                          </div>
+                          <dl className="grid gap-2 sm:grid-cols-2">
+                            {currentExperimentRows.map((row) => (
+                              <div key={row.label} className="min-w-0">
+                                <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                                  {row.label}
+                                </dt>
+                                <dd className="mt-1 truncate text-xs font-medium text-foreground" title={String(row.value)}>
+                                  {String(row.value)}
+                                </dd>
+                              </div>
+                            ))}
+                          </dl>
+                          {currentQualityFlags.length > 0 && (
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {currentQualityFlags.map((flag) => (
+                                <span
+                                  key={flag}
+                                  className="rounded border border-border px-2 py-0.5 text-[11px] text-muted-foreground"
+                                >
+                                  {flag}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       <div className="min-h-[380px] rounded-[1.5rem] border border-border/70 bg-background/70 p-4">
                         <AnimatePresence mode="wait">
                           {isGenerating ? (
@@ -1090,7 +1243,7 @@ export default function Home() {
                             <div className="mt-3 space-y-2">
                               {generationEvents.slice(0, 4).map((event, index) => (
                                 <div
-                                  key={`${event.timestamp}-${event.id ?? index}-${event.type}`}
+                                  key={`${event.timestamp}-${event.id ?? "event"}-${event.type}-${event.name ?? ""}-${index}`}
                                   className="flex items-start justify-between gap-3 text-xs"
                                 >
                                   <span className="min-w-0 capitalize text-foreground">
@@ -1146,6 +1299,7 @@ export default function Home() {
                                     prompt: image.prompt,
                                     image_path: image.path,
                                     metadata: {
+                                      ...(image.metadata ?? {}),
                                       backend: status?.backend ?? "unknown",
                                       plugins_used: status?.active_plugins ?? [],
                                     },
