@@ -13,11 +13,51 @@ const WS_BASE = normalizeBase(
 
 export interface GenerateRequest {
   prompt?: string;
+  meta_prompt?: string;
   use_mock?: boolean;
   enable_plugins?: boolean;
   seed?: number;
   recipe_id?: string;
+  experiment_label?: string;
+  prompt_family?: string;
+  quality_flags?: string[];
   client_request_id?: string;
+}
+
+export interface ExperimentMetadata {
+  id?: string;
+  label?: string | null;
+  prompt_family?: string | null;
+  prompt?: {
+    source?: string;
+    meta_prompt?: string | null;
+    final?: string;
+    model?: string | null;
+  };
+  pipeline?: {
+    configured_backend?: string;
+    resolved_backend?: string;
+    model?: string;
+    prompt_model?: string | null;
+  };
+  parameters?: {
+    seed?: number | null;
+    width?: number | null;
+    height?: number | null;
+    steps?: number | null;
+    guidance_scale?: number | null;
+    true_cfg_scale?: number | null;
+  };
+  enhancers?: {
+    plugins?: string[];
+    loras?: string[];
+    lora_application_probability?: number | null;
+  };
+  timing?: {
+    generation_seconds?: number;
+  };
+  diagnostic?: boolean;
+  quality_flags?: string[];
 }
 
 export interface GenerateResponse {
@@ -26,6 +66,10 @@ export interface GenerateResponse {
   image_path: string;
   metadata: {
     backend: string;
+    model?: string;
+    generation_time?: number;
+    experiment?: ExperimentMetadata;
+    quality_flags?: string[];
     plugins_used: string[];
     seed?: number;
     provider?: string;
@@ -129,6 +173,7 @@ export interface GenerationConfig {
   ollama_temperature: number;
   ollama_model?: string;
   prompt_model?: string;
+  configured_prompt_model?: string;
   image_backend?: string;
   image_model?: string;
   ollama_image_model?: string;
@@ -136,6 +181,7 @@ export interface GenerationConfig {
     prompt: {
       provider: string;
       model: string;
+      configured_model?: string;
     };
     image: {
       backend: string;
@@ -222,6 +268,9 @@ export interface CreateGenerationJobRequest {
   seed?: number;
   recipe_id?: string;
   publication_state?: string;
+  experiment_label?: string;
+  prompt_family?: string;
+  quality_flags?: string[];
   client_request_id?: string;
   metadata?: Record<string, unknown>;
 }
@@ -271,6 +320,21 @@ export interface GallerySyncStatus {
   skipped_preview: Array<{ key: string; reason: string }>;
   command: string;
   message: string;
+}
+
+export interface GalleryFacets {
+  backends: string[];
+  models: string[];
+  prompt_families: string[];
+  quality_flags: string[];
+  publication_states: string[];
+}
+
+export interface GalleryCatalogFilters {
+  backend?: string;
+  model?: string;
+  prompt_family?: string;
+  quality_flag?: string;
 }
 
 const extractErrorMessage = async (response: Response, fallback: string) => {
@@ -404,7 +468,8 @@ export class ImageGenAPI {
     limit: number = 100,
     offset: number = 0,
     state?: PublicationState | 'all',
-    timeoutMs: number = 20000
+    timeoutMs: number = 20000,
+    filters: GalleryCatalogFilters = {}
   ): Promise<GalleryCatalogResponse> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -413,6 +478,10 @@ export class ImageGenAPI {
       offset: String(offset),
     });
     if (state && state !== 'all') params.set('state', state);
+    if (filters.backend) params.set('backend', filters.backend);
+    if (filters.model) params.set('model', filters.model);
+    if (filters.prompt_family) params.set('prompt_family', filters.prompt_family);
+    if (filters.quality_flag) params.set('quality_flag', filters.quality_flag);
 
     try {
       const response = await fetch(`${this.baseUrl}/api/gallery/catalog?${params.toString()}`, {
@@ -437,17 +506,22 @@ export class ImageGenAPI {
     return response.json();
   }
 
+  async getGalleryFacets(): Promise<GalleryFacets> {
+    const response = await fetch(`${this.baseUrl}/api/gallery/facets`);
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to get gallery facets'));
+    return response.json();
+  }
+
   async updatePublicationState(
     imagePath: string,
-    state: PublicationState,
-    allowPlaceholderPublish: boolean = false
+    state: PublicationState
   ): Promise<GalleryCatalogEntry> {
     const response = await fetch(`${this.baseUrl}/api/gallery/publication/${encodeURIComponent(imagePath)}`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ state, allow_placeholder_publish: allowPlaceholderPublish }),
+      body: JSON.stringify({ state }),
     });
     if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to update publication state'));
     return response.json();

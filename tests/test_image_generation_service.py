@@ -63,19 +63,29 @@ async def test_service_generates_image_metadata_and_catalog_entry(mock_service_c
     assert result.backend == "mock"
     assert result.metadata["backend"] == "mock"
     assert result.metadata["seed"] == 123
+    assert result.metadata["model"] == "mock"
+    assert result.metadata["generation_time"] >= 0
+    assert result.metadata["experiment"]["parameters"]["seed"] == 123
+    assert result.metadata["experiment"]["parameters"]["width"] == 64
+    assert result.metadata["experiment"]["pipeline"]["resolved_backend"] == "mock"
+    assert result.metadata["experiment"]["prompt"]["source"] == "operator"
+    assert result.metadata["experiment"]["diagnostic"] is True
+    assert "diagnostic" in result.metadata["experiment"]["quality_flags"]
     assert result.metadata["publication"]["state"] == "rejected"
-    assert result.metadata["publication"]["quality_flags"] == ["placeholder"]
+    assert result.metadata["publication"]["quality_flags"] == ["diagnostic", "placeholder"]
 
     metadata = read_image_metadata(result.image_path)
     assert metadata["backend"] == "mock"
     assert metadata["configured_backend"] == "mock"
     assert metadata["seed"] == 123
+    assert metadata["experiment"]["id"]
+    assert metadata["quality_flags"] == ["diagnostic"]
 
     catalog = load_catalog(tmp_path)
     relative_key = result.image_path.relative_to(tmp_path).as_posix()
     assert catalog["assets"][relative_key]["prompt"] == "service boundary test"
     assert catalog["assets"][relative_key]["publication_state"] == "rejected"
-    assert catalog["assets"][relative_key]["quality_flags"] == ["placeholder"]
+    assert catalog["assets"][relative_key]["quality_flags"] == ["diagnostic", "placeholder"]
 
 
 @pytest.mark.asyncio
@@ -127,3 +137,31 @@ async def test_service_can_reuse_caller_owned_backend(mock_service_config, tmp_p
     assert result.metadata["backend_double"] is True
     assert result.metadata["force_reinit"] is True
     assert result.metadata["seed"] == 99
+
+
+@pytest.mark.asyncio
+async def test_service_records_resolved_prompt_model(mock_service_config, tmp_path, monkeypatch):
+    """Generated prompt metadata should use the model that actually produced it."""
+
+    async def fake_generate_prompt(self, meta_prompt=None):
+        self.model_name = "qwen3.5:9b"
+        return "generated prompt from resolved model"
+
+    monkeypatch.setattr(
+        "src.services.image_generation.PromptGenerator.generate_prompt",
+        fake_generate_prompt,
+    )
+
+    service = ImageGenService(mock_service_config, output_dir=tmp_path)
+    backend = ReusableBackend()
+
+    result = await service.generate(
+        GenerationServiceRequest(meta_prompt="probe prompt model"),
+        backend=backend,
+        backend_name="reusable",
+    )
+
+    experiment = result.metadata["experiment"]
+    assert experiment["prompt"]["source"] == "generated"
+    assert experiment["prompt"]["model"] == "qwen3.5:9b"
+    assert experiment["pipeline"]["prompt_model"] == "qwen3.5:9b"

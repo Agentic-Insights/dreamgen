@@ -9,6 +9,7 @@ import pytest
 import torch
 from PIL import Image
 
+import src.generators.ernie_image_generator as ernie_module
 from src.generators.ernie_image_generator import ErnieImageGenerator
 from src.utils.config import Config
 
@@ -40,11 +41,9 @@ async def test_generate_image_uses_ernie_pipeline(monkeypatch, tmp_path):
     pipeline_cls = MagicMock()
     pipeline_cls.from_pretrained.return_value = pipe
 
-    monkeypatch.setattr("src.generators.ernie_image_generator.ErnieImagePipeline", pipeline_cls)
-    monkeypatch.setattr(
-        "src.generators.ernie_image_generator.incomplete_model_downloads", lambda _model: []
-    )
-    monkeypatch.setattr("src.generators.ernie_image_generator.is_model_cached", lambda _model: True)
+    monkeypatch.setattr(ernie_module, "ErnieImagePipeline", pipeline_cls)
+    monkeypatch.setattr(ernie_module, "incomplete_model_downloads", lambda _model: [])
+    monkeypatch.setattr(ernie_module, "is_model_cached", lambda _model: True)
 
     path, _duration, model_name = await generator.generate_image(
         'A bilingual poster that says "DREAMGEN"',
