@@ -80,7 +80,14 @@ export default function QueueHistory({
                     </span>
                     <span className="shrink-0 text-muted-foreground">{job.progress}%</span>
                   </div>
-                  <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className="h-1.5 overflow-hidden rounded-full bg-muted"
+                    role="progressbar"
+                    aria-label={`Job ${job.status} progress`}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={Math.max(0, Math.min(100, job.progress))}
+                  >
                     <div
                       className="h-full rounded-full bg-primary transition-[width] duration-500"
                       style={{ width: `${Math.max(4, Math.min(100, job.progress))}%` }}
