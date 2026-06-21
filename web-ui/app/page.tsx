@@ -3,9 +3,14 @@
 import { startTransition, useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import {
+  AlertTriangle,
   Check,
   Clock3,
+  Copy,
+  FileJson,
+  Gauge,
   Image as ImageIcon,
+  Layers3,
   Loader2,
   Play,
   RotateCcw,
@@ -133,6 +138,14 @@ const splitQualityFlags = (value: string) =>
     .map((flag) => flag.trim())
     .filter(Boolean);
 
+const formatFieldValue = (value: unknown) => {
+  if (value === null || value === undefined || value === "") return "n/a";
+  if (typeof value === "boolean") return value ? "yes" : "no";
+  if (typeof value === "number") return Number.isInteger(value) ? String(value) : value.toFixed(2);
+  if (Array.isArray(value)) return value.length ? value.join(", ") : "none";
+  return String(value);
+};
+
 const describeGenerationEvent = (event: GenerationEvent) => {
   if (event.type === "generation_error") return `Error: ${event.error ?? "unknown"}`;
   if (event.type === "generation_started") return "Generation started";
@@ -205,12 +218,58 @@ export default function Home() {
     selectedBackend === "ollama"
       ? generationConfig?.ollama_image_model || "Ollama image model"
       : generationConfig?.image_model ?? selectedBackend;
+  const configuredSize =
+    generationConfig?.width && generationConfig?.height
+      ? `${generationConfig.width} x ${generationConfig.height}`
+      : "n/a";
+  const activeJobs = generationJobs.filter(
+    (job) => job.status === "queued" || job.status === "running"
+  );
   const lastActivity = logs[logs.length - 1];
   const currentExperiment = currentImage?.metadata.experiment;
   const currentParameters = currentExperiment?.parameters;
+  const currentPipeline = currentExperiment?.pipeline;
+  const currentEnhancers = currentExperiment?.enhancers;
   const currentTiming = currentExperiment?.timing;
   const currentQualityFlags =
     currentExperiment?.quality_flags ?? currentImage?.metadata.quality_flags ?? [];
+  const readinessWarnings = [
+    selectedBackend === "mock" ? "Mock backend is configured; outputs are placeholders." : null,
+    selectedBackend === "smoke" || currentBackend === "smoke-test"
+      ? "Smoke mode is diagnostic and should not be reviewed as image quality."
+      : null,
+    status && !status.gpu_available ? "GPU is offline; generation may fall back or run slowly." : null,
+    status && !status.ollama_available ? "Ollama is unavailable; prompt drafting may fail." : null,
+  ].filter(Boolean) as string[];
+  const probeRecipe = {
+    configured_backend: selectedBackend,
+    resolved_backend: currentPipeline?.resolved_backend ?? currentImage?.metadata.backend ?? status?.backend ?? null,
+    prompt_model: currentPipeline?.prompt_model ?? promptModelLabel,
+    image_model: currentPipeline?.model ?? imageModelLabel,
+    seed: currentParameters?.seed ?? currentImage?.metadata.seed ?? seed,
+    width: currentParameters?.width ?? generationConfig?.width,
+    height: currentParameters?.height ?? generationConfig?.height,
+    steps: currentParameters?.steps ?? generationConfig?.num_inference_steps,
+    guidance_scale: currentParameters?.guidance_scale ?? generationConfig?.guidance_scale,
+    true_cfg_scale: currentParameters?.true_cfg_scale ?? generationConfig?.true_cfg_scale,
+    plugins: currentEnhancers?.plugins ?? enabledPlugins.map((plugin) => plugin.name),
+    loras: currentEnhancers?.loras ?? enabledLoras,
+    prompt_family: currentExperiment?.prompt_family ?? (promptFamily || null),
+    quality_flags: currentQualityFlags.length ? currentQualityFlags : splitQualityFlags(qualityFlags),
+    diagnostic: currentExperiment?.diagnostic ?? (isSmokeBackend || selectedBackend === "mock"),
+  };
+  const recipeRows = [
+    { label: "Configured", value: selectedBackend },
+    { label: "Resolved", value: probeRecipe.resolved_backend },
+    { label: "Prompt model", value: probeRecipe.prompt_model },
+    { label: "Image model", value: probeRecipe.image_model },
+    { label: "Seed", value: probeRecipe.seed ?? "random" },
+    { label: "Size", value: `${probeRecipe.width ?? "n/a"} x ${probeRecipe.height ?? "n/a"}` },
+    { label: "Steps", value: probeRecipe.steps },
+    { label: "Guidance", value: probeRecipe.guidance_scale },
+    { label: "Plugins", value: probeRecipe.plugins },
+    { label: "LoRAs", value: probeRecipe.loras },
+  ];
   const currentExperimentRows = [
     { label: "Run ID", value: currentExperiment?.id },
     { label: "Prompt family", value: currentExperiment?.prompt_family },
@@ -632,6 +691,16 @@ export default function Home() {
     addLog("Copied job prompt into the generator.");
   };
 
+  const copyProbeRecipe = async () => {
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(probeRecipe, null, 2));
+      addLog("Copied probe recipe JSON.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      addLog(`Failed to copy recipe: ${message}`, "error");
+    }
+  };
+
   const rerunJob = async (job: GenerationJob) => {
     try {
       const prompt = job.prompt || job.request.prompt || undefined;
@@ -666,8 +735,7 @@ export default function Home() {
   return (
     <div className="relative flex h-screen overflow-hidden bg-background">
       <div className="pointer-events-none absolute inset-0">
-        <div className="absolute inset-x-0 top-0 h-64 bg-[radial-gradient(circle_at_top_left,hsl(var(--primary)/0.16),transparent_36rem)]" />
-        <div className="absolute right-0 top-0 h-72 w-72 rounded-full bg-accent/8 blur-3xl" />
+        <div className="absolute inset-x-0 top-0 h-32 bg-primary/5" />
       </div>
 
       <div className="relative z-10 flex h-full w-full flex-col overflow-hidden">
@@ -680,7 +748,7 @@ export default function Home() {
             <div>
               <div className="text-base font-semibold tracking-tight text-foreground">DreamGen</div>
               <div className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground/85">
-                recurring local image generator
+                local model probe console
               </div>
             </div>
           </div>
@@ -700,8 +768,8 @@ export default function Home() {
         </div>
       </header>
 
-      <div className="border-b border-border/70 bg-muted/20">
-        <div className="mx-auto flex max-w-7xl gap-2 overflow-x-auto px-3 py-3 sm:px-6">
+      <div className="flex min-h-0 flex-1 overflow-hidden border-t border-border/60">
+        <aside className="hidden w-20 shrink-0 flex-col items-center gap-2 border-r border-border/70 bg-card/70 px-2 py-4 lg:flex">
           {tabs.map((tab) => {
             const Icon = tab.icon;
             return (
@@ -709,21 +777,46 @@ export default function Home() {
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
                 className={cn(
-                  "flex items-center gap-2 rounded-full border px-3 py-2 text-sm transition whitespace-nowrap",
+                  "flex h-14 w-full flex-col items-center justify-center gap-1 rounded-lg border text-[11px] transition",
                   activeTab === tab.id
-                    ? "border-border/80 bg-card/90 text-foreground shadow-[0_8px_30px_rgba(0,0,0,0.18)]"
-                    : "border-transparent text-muted-foreground hover:border-border/60 hover:bg-card/40 hover:text-foreground"
+                    ? "border-primary/40 bg-primary/12 text-foreground"
+                    : "border-transparent text-muted-foreground hover:border-border/60 hover:bg-background/70 hover:text-foreground"
                 )}
+                aria-current={activeTab === tab.id ? "page" : undefined}
               >
                 <Icon className="h-4 w-4" />
                 {tab.label}
               </button>
             );
           })}
-        </div>
-      </div>
+        </aside>
 
-      <main className="flex-1 overflow-hidden">
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <div className="border-b border-border/70 bg-muted/20 lg:hidden">
+            <div className="flex gap-2 overflow-x-auto px-3 py-2">
+              {tabs.map((tab) => {
+                const Icon = tab.icon;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={cn(
+                      "flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition whitespace-nowrap",
+                      activeTab === tab.id
+                        ? "border-primary/40 bg-primary/12 text-foreground"
+                        : "border-transparent text-muted-foreground hover:border-border/60 hover:bg-card/40 hover:text-foreground"
+                    )}
+                    aria-current={activeTab === tab.id ? "page" : undefined}
+                  >
+                    <Icon className="h-4 w-4" />
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+      <main className="min-h-0 flex-1 overflow-hidden">
         <AnimatePresence mode="wait">
           {activeTab === "generate" && (
             <motion.div
@@ -731,11 +824,11 @@ export default function Home() {
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
-              className="h-full overflow-y-auto"
+              className="h-full overflow-y-auto xl:overflow-hidden"
             >
-              <div className="mx-auto max-w-[1600px] px-4 py-4 sm:px-6">
-                <div className="ambient-panel rounded-2xl border border-border/80 bg-card/75 p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="mx-auto flex min-h-full max-w-[1800px] flex-col px-3 py-3 sm:px-4 xl:h-full">
+                <div className="ambient-panel shrink-0 rounded-lg border border-border/80 bg-card/75 p-3">
+                  <div className="grid gap-3 xl:flex xl:items-center xl:justify-between">
                     <div className="flex flex-wrap items-center gap-2">
                       <button
                         onClick={() => void runGenerationRef.current("manual")}
@@ -765,11 +858,12 @@ export default function Home() {
                       </button>
                     </div>
 
-                    <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
-                      <span className="status-pill">
+                    <div className="flex w-full gap-2 overflow-x-auto pb-1 xl:min-w-0 xl:flex-1 xl:flex-wrap xl:items-center xl:justify-end xl:overflow-visible xl:pb-0">
+                      <span className="status-pill shrink-0">
                         {promptSeed.trim() ? "Prompt locked" : "Prompt from plugins"}
                       </span>
-                      <span className="status-pill">
+                      <span className="status-pill shrink-0">{configuredSize}</span>
+                      <span className="status-pill shrink-0">
                         Next: {loopEnabled ? formatCountdown(nextRunAt) : "Not scheduled"}
                       </span>
                       {CADENCE_OPTIONS.map((option) => (
@@ -778,7 +872,7 @@ export default function Home() {
                           aria-pressed={cadenceMinutes === option.minutes}
                           onClick={() => setCadenceMinutes(option.minutes)}
                           className={cn(
-                            "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition",
+                            "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition",
                             cadenceMinutes === option.minutes
                               ? "border-primary bg-primary text-primary-foreground"
                               : "border-border/70 bg-background/70 text-muted-foreground hover:border-primary/30 hover:text-foreground"
@@ -794,19 +888,19 @@ export default function Home() {
                   </div>
                 </div>
 
-                <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
-                  <section className="grid content-start gap-5 lg:grid-cols-[minmax(380px,460px)_minmax(0,1fr)] lg:items-start">
-                    <div className="ambient-panel rounded-[2rem] border border-border/80 p-6 lg:col-start-1 lg:row-start-1">
+                <div className="mt-3 grid gap-3 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(0,1fr)_340px]">
+                  <section className="grid gap-3 lg:grid-cols-[minmax(340px,440px)_minmax(0,1fr)] xl:min-h-0">
+                    <div className="ambient-panel rounded-lg border border-border/80 p-4 xl:min-h-0 xl:overflow-y-auto lg:col-start-1 lg:row-start-1">
                       <div className="flex flex-wrap items-start justify-between gap-4">
                         <div>
                           <div className="text-[11px] uppercase tracking-[0.22em] text-primary">
                             One-off prompt
                           </div>
-                          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-foreground">
-                            Seed the next image.
+                          <h1 className="mt-2 text-xl font-semibold tracking-tight text-foreground">
+                            Probe recipe
                           </h1>
                           <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-                            Leave the field empty for DreamGen to compose a prompt from the active plugins.
+                            Lock the prompt, seed, backend, and tags needed to reproduce the next artifact.
                           </p>
                         </div>
 
@@ -825,6 +919,7 @@ export default function Home() {
                             <button
                               key={plugin.name}
                               onClick={() => void togglePlugin(plugin.name)}
+                              aria-pressed={plugin.enabled}
                               className={cn(
                                 "rounded-full border px-3 py-2 text-sm transition",
                                 plugin.enabled
@@ -1025,6 +1120,7 @@ export default function Home() {
                                 <button
                                   key={option.id}
                                   onClick={() => void updateBackend(option.id)}
+                                  aria-pressed={selectedBackend === option.id}
                                   className={cn(
                                     "rounded-2xl border px-3 py-2 text-sm transition",
                                     selectedBackend === option.id
@@ -1080,8 +1176,8 @@ export default function Home() {
                       </div>
                     </div>
 
-                    <div className="ambient-panel order-first rounded-[2rem] border border-border/80 p-5 lg:sticky lg:top-4 lg:col-start-2 lg:row-start-1 lg:order-none">
-                      <div className="mb-4 flex items-center justify-between gap-4">
+                    <div className="ambient-panel order-first flex min-h-0 flex-col rounded-lg border border-border/80 p-4 lg:col-start-2 lg:row-start-1 lg:order-none">
+                      <div className="mb-3 flex shrink-0 items-center justify-between gap-4">
                         <div>
                           <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
                             Current output
@@ -1097,7 +1193,7 @@ export default function Home() {
                         </div>
                       </div>
 
-                      <div className="mb-4 rounded-2xl border border-border/60 bg-background/78 px-4 py-3">
+                      <div className="mb-3 shrink-0 rounded-lg border border-border/60 bg-background/78 px-4 py-3">
                         <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
                           Image location
                         </div>
@@ -1107,7 +1203,7 @@ export default function Home() {
                       </div>
 
                       {currentExperimentRows.length > 0 && (
-                        <div className="mb-4 rounded-2xl border border-border/60 bg-background/78 px-4 py-3">
+                        <div className="mb-3 shrink-0 rounded-lg border border-border/60 bg-background/78 px-4 py-3">
                           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                             <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
                               Experiment
@@ -1145,7 +1241,7 @@ export default function Home() {
                         </div>
                       )}
 
-                      <div className="min-h-[380px] rounded-[1.5rem] border border-border/70 bg-background/70 p-4">
+                      <div className="min-h-0 flex-1 rounded-lg border border-border/70 bg-background/70 p-3">
                         <AnimatePresence mode="wait">
                           {isGenerating ? (
                             <motion.div
@@ -1153,7 +1249,7 @@ export default function Home() {
                               initial={{ opacity: 0, scale: 0.97 }}
                               animate={{ opacity: 1, scale: 1 }}
                               exit={{ opacity: 0, scale: 0.97 }}
-                              className="flex min-h-[340px] flex-col items-center justify-center text-center"
+                              className="flex h-full min-h-[320px] flex-col items-center justify-center text-center"
                             >
                               <TaskProgress progress={generationProgress ?? INITIAL_IMAGE_PROGRESS} />
                             </motion.div>
@@ -1165,23 +1261,23 @@ export default function Home() {
                               exit={{ opacity: 0, scale: 0.97 }}
                               className="flex w-full flex-col items-center"
                             >
-                              <div className="flex min-h-[320px] w-full items-center justify-center rounded-[1.5rem] border border-border/60 bg-[radial-gradient(circle_at_top,hsl(var(--accent)/0.08),transparent_22rem)] px-4 py-6">
+                              <div className="flex min-h-[300px] w-full flex-1 items-center justify-center rounded-lg border border-border/60 bg-muted/20 px-4 py-4">
                                 {/* Backend-served generated files are not routed through Next image optimization. */}
                                 {/* eslint-disable-next-line @next/next/no-img-element */}
                                 <img
                                   src={`${API_BASE}${currentImage.image_path}`}
                                   alt="Generated image"
-                                  className="max-h-[62vh] max-w-full rounded-2xl object-contain shadow-[0_24px_80px_rgba(0,0,0,0.34)]"
+                                  className="max-h-[58vh] max-w-full rounded-lg object-contain shadow-[0_24px_80px_rgba(0,0,0,0.34)]"
                                 />
                               </div>
-                              <div className="mt-4 w-full rounded-2xl border border-border/60 bg-background/80 px-4 py-3">
+                              <div className="mt-3 max-h-28 w-full overflow-y-auto rounded-lg border border-border/60 bg-background/80 px-4 py-3">
                                 <p className="text-sm leading-7 text-muted-foreground">
                                   {currentImage.prompt}
                                 </p>
                               </div>
                             </motion.div>
                           ) : (
-                            <div className="flex min-h-[340px] flex-col items-center justify-center text-center">
+                            <div className="flex h-full min-h-[320px] flex-col items-center justify-center text-center">
                               <ImageIcon className="mb-4 h-14 w-14 text-muted-foreground/30" />
                               <p className="text-sm text-muted-foreground">
                                 Generate once when the prompt and runtime controls are ready.
@@ -1193,54 +1289,107 @@ export default function Home() {
                     </div>
                   </section>
 
-                  <aside className="grid content-start gap-4">
-                    <div className="ambient-panel rounded-[1.75rem] border border-border/80 p-5">
-                      <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                        Session
+                  <aside className="grid content-start gap-3 xl:min-h-0 xl:overflow-y-auto">
+                    <div className="ambient-panel rounded-lg border border-border/80 p-4">
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+                            Inspector
+                          </div>
+                          <h2 className="mt-1 text-base font-semibold text-foreground">
+                            Run evidence
+                          </h2>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => void copyProbeRecipe()}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border/70 text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
+                          title="Copy recipe JSON"
+                          aria-label="Copy recipe JSON"
+                        >
+                          <FileJson className="h-4 w-4" />
+                        </button>
                       </div>
-                      <div className="mt-4 grid gap-3">
-                        <div className="rounded-2xl border border-border/60 bg-background/78 px-4 py-3">
-                          <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                            <Clock3 className="h-4 w-4 text-primary" />
-                            {loopEnabled ? "Loop running" : "Loop stopped"}
-                          </div>
-                          <div className="mt-2 text-xs leading-6 text-muted-foreground">
-                            Next run: {loopEnabled ? formatCountdown(nextRunAt) : "Not scheduled"}
-                          </div>
-                        </div>
 
-                        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                          <div className="rounded-2xl border border-border/60 bg-background/78 px-4 py-3">
+                      <div className="grid gap-2">
+                        <div className="grid grid-cols-3 gap-2">
+                          <div className="rounded-lg border border-border/60 bg-background/78 px-3 py-2">
+                            <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
+                              <Gauge className="h-3.5 w-3.5" />
+                              Jobs
+                            </div>
+                            <div className="mt-1 text-sm font-medium text-foreground">
+                              {activeJobs.length} active
+                            </div>
+                          </div>
+                          <div className="rounded-lg border border-border/60 bg-background/78 px-3 py-2">
+                            <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
+                              <Clock3 className="h-3.5 w-3.5" />
+                              Loop
+                            </div>
+                            <div className="mt-1 text-sm font-medium text-foreground">
+                              {loopEnabled ? formatCountdown(nextRunAt) : "stopped"}
+                            </div>
+                          </div>
+                          <div className="rounded-lg border border-border/60 bg-background/78 px-3 py-2">
                             <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                              Backend
+                              Session
                             </div>
-                            <div className="mt-2 text-sm font-medium capitalize text-foreground">
-                              {currentBackend}
-                            </div>
-                          </div>
-                          <div className="rounded-2xl border border-border/60 bg-background/78 px-4 py-3">
-                            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                              This session
-                            </div>
-                            <div className="mt-2 text-sm font-medium text-foreground">
-                              {sessionCount} images
+                            <div className="mt-1 text-sm font-medium text-foreground">
+                              {sessionCount}
                             </div>
                           </div>
                         </div>
 
-                        <div className="rounded-2xl border border-border/60 bg-background/78 px-4 py-3">
-                          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                            Last activity
+                        <div className="rounded-lg border border-border/60 bg-background/78 px-3 py-2">
+                          <div className="mb-2 flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
+                            <AlertTriangle className="h-3.5 w-3.5" />
+                            Readiness
                           </div>
-                          <div className="mt-2 text-sm leading-6 text-foreground">{lastActivity}</div>
+                          {readinessWarnings.length > 0 ? (
+                            <div className="space-y-2">
+                              {readinessWarnings.map((warning) => (
+                                <div
+                                  key={warning}
+                                  className="rounded-md border border-amber-400/35 bg-amber-400/10 px-2 py-1.5 text-xs leading-5 text-amber-200"
+                                >
+                                  {warning}
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="text-xs leading-5 text-muted-foreground">
+                              API, GPU, Ollama, and backend status are ready for local probing.
+                            </div>
+                          )}
                         </div>
 
-                        <div className="rounded-2xl border border-border/60 bg-background/78 px-4 py-3">
+                        <div className="rounded-lg border border-border/60 bg-background/78 px-3 py-2">
+                          <div className="mb-2 flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
+                              <Layers3 className="h-3.5 w-3.5" />
+                              Recipe
+                            </div>
+                            <Copy className="h-3.5 w-3.5 text-muted-foreground" />
+                          </div>
+                          <dl className="grid gap-1.5">
+                            {recipeRows.map((row) => (
+                              <div key={row.label} className="grid grid-cols-[88px_minmax(0,1fr)] gap-2 text-xs">
+                                <dt className="text-muted-foreground">{row.label}</dt>
+                                <dd className="truncate font-medium text-foreground" title={formatFieldValue(row.value)}>
+                                  {formatFieldValue(row.value)}
+                                </dd>
+                              </div>
+                            ))}
+                          </dl>
+                        </div>
+
+                        <div className="rounded-lg border border-border/60 bg-background/78 px-3 py-2">
                           <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
                             Lifecycle
                           </div>
                           {generationEvents.length > 0 ? (
-                            <div className="mt-3 space-y-2">
+                            <div className="mt-2 space-y-2">
                               {generationEvents.slice(0, 4).map((event, index) => (
                                 <div
                                   key={`${event.timestamp}-${event.id ?? "event"}-${event.type}-${event.name ?? ""}-${index}`}
@@ -1256,13 +1405,12 @@ export default function Home() {
                               ))}
                             </div>
                           ) : (
-                            <div className="mt-2 text-sm leading-6 text-muted-foreground">
+                            <div className="mt-2 text-xs leading-5 text-muted-foreground">
                               No recorded lifecycle events yet.
                             </div>
                           )}
                         </div>
                       </div>
-
                     </div>
 
                     <QueueHistory
@@ -1399,6 +1547,8 @@ export default function Home() {
           </span>
         </div>
       </footer>
+      </div>
+      </div>
       </div>
 
       <MetaPromptModal
