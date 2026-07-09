@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback, useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Settings as SettingsIcon,
@@ -38,6 +38,7 @@ import { cn } from "@/lib/utils";
 
 interface SettingsProps {
   systemStatus: SystemStatus | null;
+  onRuntimeChange?: () => Promise<void> | void;
 }
 
 const IMAGE_BACKEND_OPTIONS = [
@@ -53,7 +54,7 @@ const IMAGE_BACKEND_OPTIONS = [
   { id: "mock", label: "Mock", description: "Generate placeholders without loading a model." },
 ] as const;
 
-export default function Settings({ systemStatus }: SettingsProps) {
+export default function Settings({ systemStatus, onRuntimeChange }: SettingsProps) {
   const [activeSection, setActiveSection] = useState("models");
   const [modelStatus, setModelStatus] = useState<ModelStatus | null>(null);
   const [generationConfig, setGenerationConfig] = useState<GenerationConfig | null>(null);
@@ -68,6 +69,10 @@ export default function Settings({ systemStatus }: SettingsProps) {
   const [loadingOllama, setLoadingOllama] = useState(false);
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [loadingPlugins, setLoadingPlugins] = useState(false);
+
+  const notifyRuntimeChange = useCallback(async () => {
+    await onRuntimeChange?.();
+  }, [onRuntimeChange]);
 
   useEffect(() => {
     loadModelStatus();
@@ -167,6 +172,7 @@ export default function Settings({ systemStatus }: SettingsProps) {
     try {
       const response = await api.setGenerationConfig(updates);
       setGenerationConfig(response.config);
+      await notifyRuntimeChange();
       if (successText) {
         setMessage({ type: 'success', text: successText });
         setTimeout(() => setMessage(null), 4000);
@@ -186,6 +192,7 @@ export default function Settings({ systemStatus }: SettingsProps) {
       setMessage({ type: 'success', text: `Switched to ${modelName}` });
       await loadOllamaModels(); // Refresh to show updated current model
       await loadGenerationConfig();
+      await notifyRuntimeChange();
     } catch (error) {
       setMessage({
         type: 'error',
@@ -206,8 +213,14 @@ export default function Settings({ systemStatus }: SettingsProps) {
 
   const handlePluginToggle = async (pluginName: string) => {
     try {
-      await api.togglePlugin(pluginName);
+      const response = await api.togglePlugin(pluginName);
       await loadPlugins();
+      await notifyRuntimeChange();
+      setMessage({
+        type: 'success',
+        text: `${pluginName} ${response.enabled ? 'enabled' : 'disabled'}`,
+      });
+      setTimeout(() => setMessage(null), 4000);
     } catch (error) {
       setMessage({
         type: 'error',
@@ -233,6 +246,7 @@ export default function Settings({ systemStatus }: SettingsProps) {
     try {
       await api.setPluginOrder(nextPlugins.map((plugin) => plugin.name));
       await loadPlugins();
+      await notifyRuntimeChange();
     } catch (error) {
       await loadPlugins();
       setMessage({
@@ -1173,6 +1187,8 @@ export default function Settings({ systemStatus }: SettingsProps) {
                           type="button"
                           onClick={() => setShowToken(!showToken)}
                           className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                          aria-label={showToken ? "Hide Hugging Face token" : "Show Hugging Face token"}
+                          title={showToken ? "Hide token" : "Show token"}
                         >
                           {showToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                         </button>

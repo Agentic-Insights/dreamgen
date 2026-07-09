@@ -62,6 +62,40 @@ Docker notes for reviewers:
 - Ollama is expected on `http://host.docker.internal:11434` from inside Docker on this machine.
 - If generated images look like diagnostic noise, the stack is likely on `smoke`; use `auto` or `small` for a real visual check.
 
+### Post-merge Docker deployment SOP
+
+After a branch is merged to `main`, do not treat a local dev server as the deployed review surface. The Next.js dev server on ports such as `3000` or `3001` is only for hot-reload development. The Docker stack is the reviewer/staging-like surface:
+
+- Frontend: `http://localhost:7860`
+- Backend/API: `http://localhost:25800`
+
+When merged changes affect `web-ui/`, frontend Dockerfiles, shared UI configuration, or any API contract consumed by the UI, rebuild and restart the Docker frontend:
+
+```bash
+docker compose --env-file .env.docker up -d --build frontend
+```
+
+When merged changes affect `src/`, backend Dockerfiles, model/runtime configuration, API behavior, generation jobs, plugins, or storage/catalog behavior, rebuild and restart the Docker backend:
+
+```bash
+docker compose --env-file .env.docker up -d --build backend
+```
+
+If changes span both sides or the affected service is ambiguous, rebuild the full stack:
+
+```bash
+docker compose --env-file .env.docker up -d --build
+```
+
+After deployment, verify the Docker surfaces, not only the dev server:
+
+```bash
+curl http://localhost:25800/api/status
+curl http://localhost:25800/api/models/status
+```
+
+Then open `http://localhost:7860` and click through the affected flows. If `7860` does not reflect the merged change but `3000`/`3001` does, the Docker frontend has not been rebuilt or restarted yet.
+
 ## Architecture Overview
 
 This is a Python-based AI image generation system with the following architecture:

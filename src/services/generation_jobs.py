@@ -296,6 +296,20 @@ class SQLiteGenerationJobStore:
             )
         return self.get_job(job_id) or {}
 
+    def fail_interrupted_jobs(self, error: str) -> list[dict[str, Any]]:
+        """Mark queued or running jobs as failed after a process restart."""
+        self.initialize()
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id FROM generation_jobs
+                WHERE status IN ('queued', 'running')
+                ORDER BY created_at ASC
+                """
+            ).fetchall()
+
+        return [self.fail_job(row["id"], error) for row in rows]
+
     def cancel_job(self, job_id: str) -> dict[str, Any]:
         """Cancel a queued job."""
         self.initialize()

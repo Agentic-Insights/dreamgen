@@ -108,4 +108,35 @@
   .status-pill {
     @apply inline-flex items-center gap-2 rounded-full border border-border/80 bg-background/70 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-muted-foreground;
   }
+
+  .command-primary {
+    @apply inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-primary px-5 py-3 text-base font-semibold text-primary-foreground transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60;
+    box-shadow:
+      0 0 0 1px hsl(var(--primary) / 0.38) inset,
+      0 16px 36px hsl(var(--primary) / 0.18);
+  }
+
+  .command-secondary {
+    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-accent/40 bg-accent/10 px-4 py-2.5 text-sm font-medium text-foreground transition hover:border-accent/70 hover:bg-accent/20;
+  }
+
+  .command-secondary-danger {
+    @apply border-destructive/40 bg-destructive/10 hover:border-destructive/70 hover:bg-destructive/20;
+  }
+
+  .choice-chip {
+    @apply inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md border border-border/70 bg-background/70 px-3 text-xs font-medium text-muted-foreground transition hover:border-primary/30 hover:text-foreground;
+  }
+
+  .choice-chip-active {
+    @apply border-primary/70 bg-primary/20 text-foreground shadow-[0_0_0_1px_hsl(var(--primary)/0.22)_inset];
+  }
+
+  .choice-tile {
+    @apply rounded-lg border border-border/70 bg-background/75 px-3 py-2 text-left text-sm text-muted-foreground transition hover:border-primary/30 hover:text-foreground;
+  }
+
+  .choice-tile-active {
+    @apply border-primary/60 bg-primary/10 text-foreground shadow-[0_0_0_1px_hsl(var(--primary)/0.18)_inset];
+  }
 }

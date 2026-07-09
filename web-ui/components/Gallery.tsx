@@ -51,6 +51,7 @@ interface WeekGroup {
 
 type ViewMode = "week" | "all";
 type CatalogFilter = PublicationState | "all";
+type ActionMessage = { type: "success" | "error"; text: string };
 
 const ALL_PAGE_SIZE = 20;
 const WEEK_PAGE_SIZE = 200;
@@ -75,6 +76,10 @@ const stateStyles: Record<PublicationState, string> = {
   hidden: "bg-zinc-700 text-white",
   rejected: "bg-rose-700 text-white",
 };
+
+const isPublicGalleryState = (state: PublicationState) => (
+  state === "featured" || state === "published"
+);
 
 const toGalleryImage = (entry: GalleryCatalogEntry): GalleryImage => ({
   path: entry.image_url || `/images/${entry.path}`,
@@ -129,8 +134,10 @@ export default function Gallery() {
   const [page, setPage] = useState(0);
   const [total, setTotal] = useState(0);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<GalleryImage | null>(null);
   const [publicationUpdating, setPublicationUpdating] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<ActionMessage | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("week");
   const [catalogFilter, setCatalogFilter] = useState<CatalogFilter>("all");
   const [backendFilter, setBackendFilter] = useState("all");
@@ -147,6 +154,15 @@ export default function Gallery() {
     ? images.findIndex((image) => image.catalog_path === selectedImage.catalog_path)
     : -1;
   const canNavigateSelectedImage = selectedImageIndex >= 0 && images.length > 1;
+
+  const showActionMessage = useCallback((message: ActionMessage) => {
+    setActionMessage(message);
+    window.setTimeout(() => {
+      setActionMessage((currentMessage) => (
+        currentMessage?.text === message.text ? null : currentMessage
+      ));
+    }, message.type === "success" ? 3000 : 6000);
+  }, []);
 
   const organizeByWeek = useCallback((images: GalleryImage[]) => {
     const groups = new Map<string, WeekGroup>();
@@ -353,10 +369,15 @@ export default function Gallery() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [selectAdjacentImage, selectedImage]);
 
-  const handleDelete = async (imagePath: string, event: React.MouseEvent) => {
+  const handleDelete = (image: GalleryImage, event: React.MouseEvent) => {
     event.stopPropagation();
-    if (!confirm("Are you sure you want to delete this image?")) return;
+    setPendingDelete(image);
+  };
 
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+
+    const imagePath = pendingDelete.path;
     setDeleting(imagePath);
     try {
       const pathParts = imagePath.split("/images/");
@@ -370,9 +391,12 @@ export default function Gallery() {
       if (selectedImage?.path === imagePath) {
         setSelectedImage(null);
       }
+      setPendingDelete(null);
+      showActionMessage({ type: "success", text: "Image deleted." });
     } catch (err) {
       console.error("Failed to delete image:", err);
-      alert("Failed to delete image");
+      const message = err instanceof Error ? err.message : "Failed to delete image";
+      showActionMessage({ type: "error", text: message });
     } finally {
       setDeleting(null);
     }
@@ -384,6 +408,14 @@ export default function Gallery() {
     event?: React.MouseEvent
   ) => {
     event?.stopPropagation();
+    if (!image.publication.publishable && isPublicGalleryState(state)) {
+      showActionMessage({
+        type: "error",
+        text: "Diagnostic placeholder images cannot be published or featured.",
+      });
+      return;
+    }
+
     const updateKey = `${image.catalog_path}:${state}`;
     setPublicationUpdating(updateKey);
     try {
@@ -399,10 +431,14 @@ export default function Gallery() {
 
       await withTimeout(galleryCache.clear(), CACHE_TIMEOUT_MS, undefined);
       await loadImages();
+      showActionMessage({
+        type: "success",
+        text: `Publication state set to ${state}.`,
+      });
     } catch (err) {
       console.error("Failed to update publication state:", err);
       const message = err instanceof Error ? err.message : "Failed to update publication state";
-      alert(message);
+      showActionMessage({ type: "error", text: message });
     } finally {
       setPublicationUpdating(null);
     }
@@ -433,7 +469,7 @@ export default function Gallery() {
       }, 1600);
     } catch (err) {
       console.error("Failed to copy prompt:", err);
-      alert("Failed to copy prompt");
+      showActionMessage({ type: "error", text: "Failed to copy prompt" });
     }
   };
 
@@ -579,72 +615,89 @@ export default function Gallery() {
 
   const renderImageGrid = (images: GalleryImage[]) => (
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2 sm:gap-3 lg:gap-4">
-      {images.map((image) => (
-        <motion.div
-          key={image.path}
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="group relative aspect-square bg-card border border-border rounded-lg overflow-hidden cursor-pointer hover:border-primary transition-colors"
-          onClick={() => setSelectedImage(image)}
-        >
-          <img
-            src={getImageUrl(image.path)}
-            alt={image.prompt}
-            className="w-full h-full object-cover"
-            loading="lazy"
-          />
-          <div className="absolute left-2 top-2">
-            {renderStateBadge(image.publication.state, "shadow-sm")}
-          </div>
+      {images.map((image) => {
+        const featuredBlocked = !image.publication.publishable;
+        return (
+          <motion.div
+            key={image.path}
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="group relative aspect-square bg-card border border-border rounded-lg overflow-hidden cursor-pointer hover:border-primary transition-colors"
+            onClick={() => setSelectedImage(image)}
+          >
+            <img
+              src={getImageUrl(image.path)}
+              alt={image.prompt}
+              className="w-full h-full object-cover"
+              loading="lazy"
+            />
+            <div className="absolute left-2 top-2 flex flex-col items-start gap-1">
+              {renderStateBadge(image.publication.state, "shadow-sm")}
+              {featuredBlocked && (
+                <span
+                  className="inline-flex items-center gap-1 rounded bg-black/70 px-2 py-0.5 text-[10px] text-white shadow-sm"
+                  title="Diagnostic placeholder images cannot be published or featured"
+                >
+                  <Info className="h-3 w-3" />
+                  local only
+                </span>
+              )}
+            </div>
 
-          <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
-            <div className="absolute bottom-0 left-0 right-0 p-3">
-              <p className="text-xs text-white line-clamp-2 mb-2">{image.prompt}</p>
-              <div className="flex gap-2">
-                <button
-                  onClick={(e) => handleDelete(image.path, e)}
-                  className="p-1.5 bg-destructive/80 hover:bg-destructive rounded text-white"
-                  disabled={deleting === image.path}
-                >
-                  {deleting === image.path ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Trash2 className="w-3.5 h-3.5" />
-                  )}
-                </button>
-                <button
-                  onClick={(e) => handleDownload(image.path, image.prompt, e)}
-                  className="p-1.5 bg-primary/80 hover:bg-primary rounded text-primary-foreground"
-                  title="Download image"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={(e) => handlePublicationChange(image, "featured", e)}
-                  className="p-1.5 bg-amber-500/90 hover:bg-amber-500 rounded text-black disabled:opacity-50"
-                  disabled={
-                    image.publication.state === "featured"
-                    || publicationUpdating === `${image.catalog_path}:featured`
-                  }
-                  title="Mark featured"
-                >
-                  {publicationUpdating === `${image.catalog_path}:featured` ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Star className="w-3.5 h-3.5" />
-                  )}
-                </button>
+            <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="absolute bottom-0 left-0 right-0 p-3">
+                <p className="text-xs text-white line-clamp-2 mb-2">{image.prompt}</p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={(e) => handleDelete(image, e)}
+                    className="p-1.5 bg-destructive/80 hover:bg-destructive rounded text-white disabled:opacity-50"
+                    disabled={deleting === image.path}
+                    title="Delete image"
+                    aria-label={`Delete ${image.catalog_path}`}
+                  >
+                    {deleting === image.path ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Trash2 className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                  <button
+                    onClick={(e) => handleDownload(image.path, image.prompt, e)}
+                    className="p-1.5 bg-primary/80 hover:bg-primary rounded text-primary-foreground"
+                    title="Download image"
+                    aria-label={`Download ${image.catalog_path}`}
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={(e) => handlePublicationChange(image, "featured", e)}
+                    className="p-1.5 bg-amber-500/90 hover:bg-amber-500 rounded text-black disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={
+                      featuredBlocked
+                      || image.publication.state === "featured"
+                      || publicationUpdating === `${image.catalog_path}:featured`
+                    }
+                    title={featuredBlocked ? "Diagnostic placeholder cannot be featured" : "Mark featured"}
+                    aria-label={featuredBlocked ? "Diagnostic placeholder cannot be featured" : `Mark ${image.catalog_path} featured`}
+                  >
+                    {publicationUpdating === `${image.catalog_path}:featured` ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Star className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
 
-          <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-            <div className="bg-black/60 backdrop-blur-sm rounded px-2 py-1">
-              <p className="text-xs text-white">{formatSize(image.size)}</p>
+            <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="bg-black/60 backdrop-blur-sm rounded px-2 py-1">
+                <p className="text-xs text-white">{formatSize(image.size)}</p>
+              </div>
             </div>
-          </div>
-        </motion.div>
-      ))}
+          </motion.div>
+        );
+      })}
     </div>
   );
 
@@ -824,6 +877,29 @@ export default function Gallery() {
             </div>
           </div>
         </div>
+
+        {actionMessage && (
+          <div
+            className={cn(
+              "mx-4 mt-3 flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm sm:mx-6",
+              actionMessage.type === "error"
+                ? "border-destructive/40 bg-destructive/10 text-destructive"
+                : "border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+            )}
+            role={actionMessage.type === "error" ? "alert" : "status"}
+          >
+            <span>{actionMessage.text}</span>
+            <button
+              type="button"
+              onClick={() => setActionMessage(null)}
+              className="rounded p-1 opacity-80 transition hover:opacity-100"
+              aria-label="Dismiss gallery message"
+              title="Dismiss"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
 
         {/* Content Area */}
         <div className="flex-1 overflow-y-auto p-3 sm:p-4 lg:p-6">
@@ -1051,22 +1127,30 @@ export default function Gallery() {
                           </span>
                         )}
                       </div>
+                      {!selectedImage.publication.publishable && (
+                        <p className="mb-3 text-xs leading-5 text-muted-foreground">
+                          Diagnostic placeholder images are kept local and cannot be published or featured.
+                        </p>
+                      )}
                       <div className="flex flex-wrap gap-2">
                         {PUBLICATION_OPTIONS.map((option) => {
                           const Icon = option.icon;
                           const updateKey = `${selectedImage.catalog_path}:${option.state}`;
                           const isCurrent = selectedImage.publication.state === option.state;
+                          const isBlocked = !selectedImage.publication.publishable
+                            && isPublicGalleryState(option.state);
                           return (
                             <button
                               key={option.state}
                               onClick={(event) => handlePublicationChange(selectedImage, option.state, event)}
                               className={cn(
-                                "flex h-9 items-center gap-2 rounded-md border px-3 text-sm transition-colors",
+                                "flex h-9 items-center gap-2 rounded-md border px-3 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50",
                                 isCurrent
                                   ? "border-primary bg-primary text-primary-foreground"
                                   : "border-border bg-background/80 hover:bg-muted"
                               )}
-                              disabled={isCurrent || publicationUpdating === updateKey}
+                              disabled={isCurrent || isBlocked || publicationUpdating === updateKey}
+                              title={isBlocked ? "Diagnostic placeholder cannot be published or featured" : `Set ${option.label}`}
                             >
                               {publicationUpdating === updateKey ? (
                                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -1150,7 +1234,7 @@ export default function Gallery() {
                       Download
                     </button>
                     <button
-                      onClick={(event) => handleDelete(selectedImage.path, event)}
+                      onClick={(event) => handleDelete(selectedImage, event)}
                       className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-destructive text-sm text-destructive-foreground transition hover:opacity-90"
                       disabled={deleting === selectedImage.path}
                     >
@@ -1164,6 +1248,63 @@ export default function Gallery() {
                   </div>
                 </div>
               </aside>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {pendingDelete && (
+          <motion.div
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Delete image confirmation"
+            onClick={() => setPendingDelete(null)}
+          >
+            <motion.div
+              className="w-full max-w-md rounded-lg border border-border bg-background p-5 shadow-2xl"
+              initial={{ opacity: 0, scale: 0.96, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 10 }}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="flex items-start gap-3">
+                <div className="rounded-md bg-destructive/10 p-2 text-destructive">
+                  <Trash2 className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-base font-semibold text-foreground">Delete image?</h3>
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                    This removes the image file and its catalog entry from the local gallery.
+                  </p>
+                  <p className="mt-3 break-all font-mono text-xs text-muted-foreground">
+                    {pendingDelete.catalog_path}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-5 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPendingDelete(null)}
+                  className="h-9 rounded-md border border-border px-3 text-sm transition hover:bg-muted"
+                  disabled={deleting === pendingDelete.path}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void confirmDelete()}
+                  className="inline-flex h-9 items-center gap-2 rounded-md bg-destructive px-3 text-sm text-destructive-foreground transition hover:opacity-90 disabled:opacity-60"
+                  disabled={deleting === pendingDelete.path}
+                >
+                  {deleting === pendingDelete.path && <Loader2 className="h-4 w-4 animate-spin" />}
+                  Delete
+                </button>
+              </div>
             </motion.div>
           </motion.div>
         )}

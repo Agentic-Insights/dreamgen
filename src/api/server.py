@@ -892,6 +892,14 @@ async def prefetch_default_fallback_model() -> None:
 @app.on_event("startup")
 async def startup_event() -> None:
     generation_job_store.initialize()
+    interrupted_jobs = generation_job_store.fail_interrupted_jobs(
+        "Server restarted before this generation finished. Start a new run to retry it."
+    )
+    if interrupted_jobs:
+        logger.warning(
+            "Marked %s interrupted generation job(s) as failed during startup",
+            len(interrupted_jobs),
+        )
     asyncio.create_task(prefetch_default_fallback_model())
 
 

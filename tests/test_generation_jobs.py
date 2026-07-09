@@ -75,3 +75,31 @@ def test_generation_job_store_lists_and_records_failures(tmp_path):
     assert failed["error"] == "backend unavailable"
     assert store.list_jobs(status="failed")[0]["id"] == "job-fail"
     assert store.request_for_job("job-fail").prompt == "will fail"
+
+
+def test_generation_job_store_marks_interrupted_jobs_failed(tmp_path):
+    store = SQLiteGenerationJobStore(tmp_path / "jobs.sqlite3")
+    store.create_job(GenerationJobCreate(prompt="queued"), job_id="queued-job")
+    store.create_job(GenerationJobCreate(prompt="running"), job_id="running-job")
+    store.create_job(GenerationJobCreate(prompt="done"), job_id="done-job")
+    store.start_job("running-job")
+    store.complete_job(
+        "done-job",
+        prompt="done",
+        image_path=Path("output/done.png"),
+        relative_image_path="/images/done.png",
+        backend="mock",
+        model_name="mock-generator",
+        generation_time=0.1,
+        metadata={"backend": "mock"},
+    )
+
+    reloaded = SQLiteGenerationJobStore(tmp_path / "jobs.sqlite3")
+    recovered = reloaded.fail_interrupted_jobs("server restarted")
+
+    assert {job["id"] for job in recovered} == {"queued-job", "running-job"}
+    assert reloaded.get_job("queued-job")["status"] == "failed"
+    assert reloaded.get_job("running-job")["status"] == "failed"
+    assert reloaded.get_job("queued-job")["error"] == "server restarted"
+    assert reloaded.get_job("done-job")["status"] == "succeeded"
+    assert [event["name"] for event in reloaded.get_events("running-job")][-1] == "failed"

@@ -155,8 +155,16 @@ const describeGenerationEvent = (event: GenerationEvent) => {
   return event.type.replaceAll("_", " ");
 };
 
+const TAB_IDS: readonly TabId[] = ["generate", "gallery", "settings"];
+
+const readTabFromHash = (): TabId => {
+  if (typeof window === "undefined") return "generate";
+  const hashTab = window.location.hash.replace(/^#/, "");
+  return TAB_IDS.includes(hashTab as TabId) ? (hashTab as TabId) : "generate";
+};
+
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<TabId>("generate");
+  const [activeTab, setActiveTab] = useState<TabId>(() => readTabFromHash());
   const [promptSeed, setPromptSeed] = useState("");
   const [metaPrompt, setMetaPrompt] = useState("");
   const [experimentLabel, setExperimentLabel] = useState("");
@@ -201,15 +209,19 @@ export default function Home() {
   const promptResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const generationResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const currentBackend =
+  const currentBackend = status?.backend ?? "unknown";
+  const currentOutputBackend =
     currentImage?.metadata.backend && currentImage.metadata.backend !== "unknown"
       ? currentImage.metadata.backend
-      : status?.backend ?? "unknown";
+      : currentBackend;
+  const currentImageLoadedFromGallery = Boolean(
+    (currentImage?.metadata as Record<string, unknown> | undefined)?.loaded_from_gallery
+  );
   const currentPluginCount =
     currentImage?.metadata.plugins_used?.length && currentImage.metadata.plugins_used.length > 0
       ? currentImage.metadata.plugins_used.length
       : status?.active_plugins?.length ?? 0;
-  const isSmokeBackend = currentBackend === "smoke-test";
+  const isSmokeBackend = currentBackend === "smoke-test" || currentOutputBackend === "smoke-test";
   const enabledPlugins = plugins.filter((plugin) => plugin.enabled);
   const selectedBackend = generationConfig?.image_backend ?? "auto";
   const enabledLoras = generationConfig?.enabled_loras ?? [];
@@ -243,7 +255,7 @@ export default function Home() {
   ].filter(Boolean) as string[];
   const probeRecipe = {
     configured_backend: selectedBackend,
-    resolved_backend: currentPipeline?.resolved_backend ?? currentImage?.metadata.backend ?? status?.backend ?? null,
+    resolved_backend: status?.backend ?? currentPipeline?.resolved_backend ?? currentImage?.metadata.backend ?? null,
     prompt_model: currentPipeline?.prompt_model ?? promptModelLabel,
     image_model: currentPipeline?.model ?? imageModelLabel,
     seed: currentParameters?.seed ?? currentImage?.metadata.seed ?? seed,
@@ -319,6 +331,7 @@ export default function Home() {
                 ...(latestImage.metadata ?? {}),
                 backend: latestStatus?.backend ?? "unknown",
                 plugins_used: latestStatus?.active_plugins ?? [],
+                loaded_from_gallery: true,
               },
               created_at: latestImage.created_at,
             } satisfies GenerateResponse)
@@ -342,6 +355,23 @@ export default function Home() {
       });
     } catch (error) {
       console.error("Failed to load dashboard controls:", error);
+    }
+  }, []);
+
+  const refreshDashboardState = useCallback(async () => {
+    try {
+      const [pluginList, runtimeConfig, refreshedStatus] = await Promise.all([
+        api.getPlugins(),
+        api.getGenerationConfig(),
+        api.getStatus(),
+      ]);
+      startTransition(() => {
+        setPlugins(pluginList);
+        setGenerationConfig(runtimeConfig);
+        setStatus(refreshedStatus);
+      });
+    } catch (error) {
+      console.error("Failed to refresh dashboard state:", error);
     }
   }, []);
 
@@ -486,6 +516,26 @@ export default function Home() {
   useEffect(() => {
     statusRef.current = status;
   }, [status]);
+
+  const selectTab = useCallback((tab: TabId) => {
+    setActiveTab(tab);
+    if (typeof window === "undefined") return;
+
+    const nextHash = `#${tab}`;
+    if (window.location.hash !== nextHash) {
+      window.history.pushState(null, "", nextHash);
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleLocationChange = () => setActiveTab(readTabFromHash());
+    window.addEventListener("popstate", handleLocationChange);
+    window.addEventListener("hashchange", handleLocationChange);
+    return () => {
+      window.removeEventListener("popstate", handleLocationChange);
+      window.removeEventListener("hashchange", handleLocationChange);
+    };
+  }, []);
 
   useEffect(() => {
     isGeneratingRef.current = isGenerating;
@@ -775,7 +825,7 @@ export default function Home() {
             return (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => selectTab(tab.id)}
                 className={cn(
                   "flex h-14 w-full flex-col items-center justify-center gap-1 rounded-lg border text-[11px] transition",
                   activeTab === tab.id
@@ -799,7 +849,7 @@ export default function Home() {
                 return (
                   <button
                     key={tab.id}
-                    onClick={() => setActiveTab(tab.id)}
+                    onClick={() => selectTab(tab.id)}
                     className={cn(
                       "flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition whitespace-nowrap",
                       activeTab === tab.id
@@ -828,62 +878,83 @@ export default function Home() {
             >
               <div className="mx-auto flex min-h-full max-w-[1800px] flex-col px-3 py-3 sm:px-4 xl:h-full">
                 <div className="ambient-panel shrink-0 rounded-lg border border-border/80 bg-card/75 p-3">
-                  <div className="grid gap-3 xl:flex xl:items-center xl:justify-between">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        onClick={() => void runGenerationRef.current("manual")}
-                        disabled={isGenerating}
-                        className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition hover:opacity-95 disabled:opacity-60"
-                      >
-                        {isGenerating ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Sparkles className="h-4 w-4" />
-                        )}
-                        {isGenerating
-                          ? `Generating ${generationProgress?.progress ?? INITIAL_IMAGE_PROGRESS.progress}%`
-                          : "Generate"}
-                      </button>
-                      <button
-                        onClick={() => setLoopEnabled((value) => !value)}
-                        className={cn(
-                          "inline-flex items-center gap-2 rounded-full border px-4 py-2.5 text-sm font-medium transition",
-                          loopEnabled
-                            ? "border-destructive/40 bg-destructive/12 text-foreground hover:bg-destructive/18"
-                            : "border-border/70 bg-background/75 text-muted-foreground hover:border-primary/30 hover:text-foreground"
-                        )}
-                      >
-                        {loopEnabled ? <Square className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-                        {loopEnabled ? "Stop loop" : "Start loop"}
-                      </button>
+                  <div className="grid gap-3 2xl:grid-cols-[minmax(260px,auto)_minmax(0,1fr)]">
+                    <div className="rounded-lg border border-primary/25 bg-primary/5 p-3">
+                      <div className="mb-2 text-[11px] font-medium uppercase tracking-[0.18em] text-primary">
+                        One-shot
+                      </div>
+                      <div className="flex flex-wrap items-center gap-3">
+                        <button
+                          onClick={() => void runGenerationRef.current("manual")}
+                          disabled={isGenerating}
+                          className="command-primary"
+                        >
+                          {isGenerating ? (
+                            <Loader2 className="h-5 w-5 animate-spin" />
+                          ) : (
+                            <Sparkles className="h-5 w-5" />
+                          )}
+                          {isGenerating
+                            ? `Generating ${generationProgress?.progress ?? INITIAL_IMAGE_PROGRESS.progress}%`
+                            : "Generate once"}
+                        </button>
+                        <div className="flex flex-wrap gap-2">
+                          <span className="status-pill shrink-0">
+                            {promptSeed.trim() ? "Prompt locked" : "Prompt from plugins"}
+                          </span>
+                          <span className="status-pill shrink-0">{configuredSize}</span>
+                        </div>
+                      </div>
                     </div>
 
-                    <div className="flex w-full gap-2 overflow-x-auto pb-1 xl:min-w-0 xl:flex-1 xl:flex-wrap xl:items-center xl:justify-end xl:overflow-visible xl:pb-0">
-                      <span className="status-pill shrink-0">
-                        {promptSeed.trim() ? "Prompt locked" : "Prompt from plugins"}
-                      </span>
-                      <span className="status-pill shrink-0">{configuredSize}</span>
-                      <span className="status-pill shrink-0">
-                        Next: {loopEnabled ? formatCountdown(nextRunAt) : "Not scheduled"}
-                      </span>
-                      {CADENCE_OPTIONS.map((option) => (
+                    <div className="rounded-lg border border-accent/25 bg-accent/5 p-3">
+                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                        <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-accent">
+                          Scheduled loop
+                        </div>
+                        <span className="status-pill shrink-0">
+                          Next: {loopEnabled ? formatCountdown(nextRunAt) : "Not scheduled"}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-3">
                         <button
-                          key={option.minutes}
-                          aria-pressed={cadenceMinutes === option.minutes}
-                          onClick={() => setCadenceMinutes(option.minutes)}
+                          onClick={() => setLoopEnabled((value) => !value)}
                           className={cn(
-                            "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition",
-                            cadenceMinutes === option.minutes
-                              ? "border-primary bg-primary text-primary-foreground"
-                              : "border-border/70 bg-background/70 text-muted-foreground hover:border-primary/30 hover:text-foreground"
+                            "command-secondary",
+                            loopEnabled && "command-secondary-danger"
                           )}
                         >
-                          {cadenceMinutes === option.minutes ? (
-                            <Check className="h-3 w-3" />
-                          ) : null}
-                          {option.label}
+                          {loopEnabled ? <Square className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                          {loopEnabled ? "Stop loop" : "Start loop"}
                         </button>
-                      ))}
+
+                        <div className="flex min-w-0 items-center gap-2 overflow-x-auto pb-1 sm:overflow-visible sm:pb-0">
+                          <span className="shrink-0 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                            Loop cadence
+                          </span>
+                          <div className="flex shrink-0 gap-1 rounded-lg border border-border/70 bg-background/50 p-1">
+                            {CADENCE_OPTIONS.map((option) => (
+                              <button
+                                key={option.minutes}
+                                aria-pressed={cadenceMinutes === option.minutes}
+                                title={option.description}
+                                onClick={() => setCadenceMinutes(option.minutes)}
+                                className={cn(
+                                  "choice-chip",
+                                  cadenceMinutes === option.minutes
+                                    ? "choice-chip-active"
+                                    : "border-transparent bg-transparent"
+                                )}
+                              >
+                                {cadenceMinutes === option.minutes ? (
+                                  <Check className="h-3 w-3" />
+                                ) : null}
+                                {option.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -905,7 +976,7 @@ export default function Home() {
                         </div>
 
                         <div className="flex flex-wrap gap-2">
-                          <span className="status-pill capitalize">{currentBackend}</span>
+                          <span className="status-pill capitalize">{currentOutputBackend}</span>
                           <span className="status-pill">{enabledPlugins.length} plugins</span>
                         </div>
                       </div>
@@ -921,10 +992,8 @@ export default function Home() {
                               onClick={() => void togglePlugin(plugin.name)}
                               aria-pressed={plugin.enabled}
                               className={cn(
-                                "rounded-full border px-3 py-2 text-sm transition",
-                                plugin.enabled
-                                  ? "border-primary/35 bg-primary/10 text-foreground"
-                                  : "border-border/70 bg-background/75 text-muted-foreground hover:border-primary/25 hover:text-foreground"
+                                "choice-chip h-9 rounded-lg text-sm",
+                                plugin.enabled && "choice-chip-active"
                               )}
                             >
                               {plugin.name.replaceAll("_", " ")}
@@ -976,7 +1045,7 @@ export default function Home() {
                                       <button
                                         type="button"
                                         onClick={() => setShowMetaPromptModal(true)}
-                                        className="inline-flex items-center gap-2 rounded-full border border-border/70 px-4 py-2 text-sm text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
+                                        className="command-secondary min-h-0 rounded-lg border-border/70 bg-background/70 px-4 py-2 text-sm text-muted-foreground hover:border-primary/40"
                                       >
                                         <SettingsIcon className="h-3.5 w-3.5" />
                                         Meta prompt
@@ -985,7 +1054,7 @@ export default function Home() {
                                         type="button"
                                         onClick={() => void generatePromptDraft()}
                                         disabled={isGeneratingPrompt}
-                                        className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-95 disabled:opacity-60"
+                                        className="command-secondary min-h-0 px-4 py-2 disabled:cursor-not-allowed disabled:opacity-60"
                                       >
                                         {isGeneratingPrompt ? (
                                           <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -1122,10 +1191,8 @@ export default function Home() {
                                   onClick={() => void updateBackend(option.id)}
                                   aria-pressed={selectedBackend === option.id}
                                   className={cn(
-                                    "rounded-2xl border px-3 py-2 text-sm transition",
-                                    selectedBackend === option.id
-                                      ? "border-primary/40 bg-primary/12 text-foreground"
-                                      : "border-border/70 bg-background/75 text-muted-foreground hover:border-primary/30 hover:text-foreground"
+                                    "choice-tile",
+                                    selectedBackend === option.id && "choice-tile-active"
                                   )}
                                 >
                                   {option.label}
@@ -1183,7 +1250,11 @@ export default function Home() {
                             Current output
                           </div>
                           <div className="mt-1 text-lg font-semibold text-foreground">
-                            {currentImage ? "Latest generation" : "Waiting for first image"}
+                            {currentImage
+                              ? currentImageLoadedFromGallery
+                                ? "Latest saved image"
+                                : "Latest generation"
+                              : "Waiting for first image"}
                           </div>
                         </div>
                         <div className="flex flex-wrap gap-2">
@@ -1528,7 +1599,7 @@ export default function Home() {
               exit={{ opacity: 0, y: -8 }}
               className="h-full"
             >
-              <Settings systemStatus={status} />
+              <Settings systemStatus={status} onRuntimeChange={refreshDashboardState} />
             </motion.div>
           )}
 
