@@ -566,6 +566,9 @@ export class ImageGenAPI {
           clearTimeout(this.reconnectTimer);
           this.reconnectTimer = null;
         }
+        for (const subscriber of this.subscribers) {
+          subscriber({ type: 'connection_open' });
+        }
       };
 
       this.ws.onmessage = (event) => {

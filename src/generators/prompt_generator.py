@@ -153,6 +153,10 @@ class PromptGenerator:
                 model=self.model_name,
                 messages=self.conversation_history,
                 options={"temperature": self.config.model.ollama_temperature},
+                # DreamGen's image backends need the same GPU immediately after
+                # prompt drafting. Do not leave the Ollama completion model
+                # resident and competing with Z-Image for VRAM.
+                keep_alive=0,
             )
 
             # Process and log the generated prompt. Ollama can return either a

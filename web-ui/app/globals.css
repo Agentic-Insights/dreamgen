@@ -105,6 +105,16 @@
       0 18px 50px hsl(229 60% 3% / 0.28);
   }
 
+  .playground-shell {
+    background:
+      linear-gradient(120deg, hsl(var(--primary) / 0.11), transparent 42%),
+      linear-gradient(180deg, hsl(var(--card) / 0.98), hsl(var(--card) / 0.88));
+    box-shadow:
+      0 1px 0 hsl(var(--foreground) / 0.06) inset,
+      0 22px 60px hsl(229 60% 3% / 0.34),
+      0 0 48px hsl(var(--primary) / 0.06);
+  }
+
   .status-pill {
     @apply inline-flex items-center gap-2 rounded-full border border-border/80 bg-background/70 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-muted-foreground;
   }

@@ -4,7 +4,7 @@ import { startTransition, useCallback, useEffect, useRef, useState } from "react
 import Image from "next/image";
 import {
   AlertTriangle,
-  Check,
+  CheckCircle2,
   Clock3,
   Copy,
   FileJson,
@@ -19,7 +19,6 @@ import {
   ChevronRight,
   SlidersHorizontal,
   Sparkles,
-  Square,
   Wand2,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
@@ -174,7 +173,7 @@ export default function Home() {
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
   const [promptProgress, setPromptProgress] = useState<ProgressSnapshot | null>(null);
   const [showMetaPromptModal, setShowMetaPromptModal] = useState(false);
-  const [promptBuilderOpen, setPromptBuilderOpen] = useState(true);
+  const [promptBuilderOpen, setPromptBuilderOpen] = useState(false);
   const [runControlsOpen, setRunControlsOpen] = useState(false);
   const [seed, setSeed] = useState<number | null>(null);
   const [cadenceMinutes, setCadenceMinutes] = useState(60);
@@ -206,7 +205,6 @@ export default function Home() {
   );
   const promptRequestIdRef = useRef<string | null>(null);
   const generationRequestIdRef = useRef<string | null>(null);
-  const promptResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const generationResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const currentBackend = status?.backend ?? "unknown";
@@ -214,15 +212,13 @@ export default function Home() {
     currentImage?.metadata.backend && currentImage.metadata.backend !== "unknown"
       ? currentImage.metadata.backend
       : currentBackend;
-  const currentImageLoadedFromGallery = Boolean(
-    (currentImage?.metadata as Record<string, unknown> | undefined)?.loaded_from_gallery
-  );
   const currentPluginCount =
     currentImage?.metadata.plugins_used?.length && currentImage.metadata.plugins_used.length > 0
       ? currentImage.metadata.plugins_used.length
       : status?.active_plugins?.length ?? 0;
   const isSmokeBackend = currentBackend === "smoke-test" || currentOutputBackend === "smoke-test";
   const enabledPlugins = plugins.filter((plugin) => plugin.enabled);
+  const loraPluginEnabled = enabledPlugins.some((plugin) => plugin.name === "lora");
   const selectedBackend = generationConfig?.image_backend ?? "auto";
   const enabledLoras = generationConfig?.enabled_loras ?? [];
   const promptModelLabel = generationConfig?.prompt_model ?? generationConfig?.ollama_model ?? "Ollama prompt model";
@@ -316,27 +312,8 @@ export default function Home() {
   const loadRecentImages = useCallback(async () => {
     try {
       const response = await api.getGallery(6, 0);
-      const latestImage = response.images[0];
-      const latestStatus = statusRef.current;
       startTransition(() => {
         setRecentImages(response.images);
-        if (latestImage) {
-          setCurrentImage((existing) =>
-            existing ??
-            ({
-              id: latestImage.path,
-              prompt: latestImage.prompt,
-              image_path: latestImage.path,
-              metadata: {
-                ...(latestImage.metadata ?? {}),
-                backend: latestStatus?.backend ?? "unknown",
-                plugins_used: latestStatus?.active_plugins ?? [],
-                loaded_from_gallery: true,
-              },
-              created_at: latestImage.created_at,
-            } satisfies GenerateResponse)
-          );
-        }
       });
     } catch (error) {
       console.error("Failed to load recent images:", error);
@@ -402,6 +379,10 @@ export default function Home() {
 
   runGenerationRef.current = async (source: "manual" | "loop") => {
     if (isGeneratingRef.current) return;
+
+    if (source === "manual") {
+      setPromptProgress(null);
+    }
 
     const clientRequestId = createClientRequestId(source);
     generationRequestIdRef.current = clientRequestId;
@@ -574,7 +555,9 @@ export default function Home() {
       if (typeof data !== "object" || data === null || !("type" in data)) return;
 
       const msg = data as Record<string, unknown>;
-      if (msg.type === "model_loading") {
+      if (msg.type === "connection_open") {
+        void refreshDashboardState();
+      } else if (msg.type === "model_loading") {
         addLog(String(msg.message ?? "Loading model..."));
       } else if (msg.type === "generation_completed") {
         addLog(`Saved ${String(msg.image_path ?? "image")}.`);
@@ -589,14 +572,11 @@ export default function Home() {
 
     return () => {
       unsubscribe();
-      if (promptResetTimeoutRef.current) {
-        clearTimeout(promptResetTimeoutRef.current);
-      }
       if (generationResetTimeoutRef.current) {
         clearTimeout(generationResetTimeoutRef.current);
       }
     };
-  }, [loadDashboardControls, loadGenerationEvents, loadGenerationJobs, loadRecentImages]);
+  }, [loadDashboardControls, loadGenerationEvents, loadGenerationJobs, loadRecentImages, refreshDashboardState]);
 
   useEffect(() => {
     const hasActiveJobs = generationJobs.some(
@@ -670,9 +650,6 @@ export default function Home() {
   const generatePromptDraft = async () => {
     const clientRequestId = createClientRequestId("prompt");
     promptRequestIdRef.current = clientRequestId;
-    if (promptResetTimeoutRef.current) {
-      clearTimeout(promptResetTimeoutRef.current);
-    }
     setIsGeneratingPrompt(true);
     setPromptError(null);
     setPromptProgress(INITIAL_PROMPT_PROGRESS);
@@ -687,9 +664,7 @@ export default function Home() {
         title: "Prompt ready",
         detail: "The draft prompt is ready to edit or run.",
       });
-      promptResetTimeoutRef.current = setTimeout(() => {
-        setPromptProgress(null);
-      }, 900);
+      window.setTimeout(() => setPromptProgress(null), 5000);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to generate prompt";
       setPromptError(message);
@@ -877,101 +852,122 @@ export default function Home() {
               className="h-full overflow-y-auto xl:overflow-hidden"
             >
               <div className="mx-auto flex min-h-full max-w-[1800px] flex-col px-3 py-3 sm:px-4 xl:h-full">
-                <div className="ambient-panel shrink-0 rounded-lg border border-border/80 bg-card/75 p-3">
-                  <div className="grid gap-3 2xl:grid-cols-[minmax(260px,auto)_minmax(0,1fr)]">
-                    <div className="rounded-lg border border-primary/25 bg-primary/5 p-3">
-                      <div className="mb-2 text-[11px] font-medium uppercase tracking-[0.18em] text-primary">
-                        One-shot
-                      </div>
-                      <div className="flex flex-wrap items-center gap-3">
-                        <button
-                          onClick={() => void runGenerationRef.current("manual")}
-                          disabled={isGenerating}
-                          className="command-primary"
-                        >
-                          {isGenerating ? (
-                            <Loader2 className="h-5 w-5 animate-spin" />
-                          ) : (
-                            <Sparkles className="h-5 w-5" />
-                          )}
-                          {isGenerating
-                            ? `Generating ${generationProgress?.progress ?? INITIAL_IMAGE_PROGRESS.progress}%`
-                            : "Generate once"}
-                        </button>
+                <div className="playground-shell shrink-0 rounded-xl border border-primary/30 p-4 sm:p-5">
+                  <div className="grid items-end gap-5 xl:grid-cols-[minmax(0,1fr)_auto]">
+                    <div>
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-primary">
+                            Creative playground
+                          </div>
+                          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-foreground">
+                            What should the model imagine?
+                          </h1>
+                        </div>
                         <div className="flex flex-wrap gap-2">
-                          <span className="status-pill shrink-0">
-                            {promptSeed.trim() ? "Prompt locked" : "Prompt from plugins"}
-                          </span>
-                          <span className="status-pill shrink-0">{configuredSize}</span>
+                          <span className="status-pill capitalize">{selectedBackend}</span>
+                          <span className="status-pill">{configuredSize}</span>
+                          <span className="status-pill">{enabledPlugins.length} enhancers</span>
                         </div>
                       </div>
-                    </div>
 
-                    <div className="rounded-lg border border-accent/25 bg-accent/5 p-3">
-                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                        <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-accent">
-                          Scheduled loop
-                        </div>
-                        <span className="status-pill shrink-0">
-                          Next: {loopEnabled ? formatCountdown(nextRunAt) : "Not scheduled"}
+                      <textarea
+                        value={promptSeed}
+                        onChange={(event) => setPromptSeed(event.target.value)}
+                        rows={3}
+                        placeholder="Describe an idea — or leave this empty and let DreamGen surprise you."
+                        aria-label="Image prompt"
+                        className="mt-4 w-full resize-none rounded-xl border border-input/90 bg-background/90 px-4 py-3 text-base leading-7 text-foreground outline-none transition placeholder:text-muted-foreground/70 focus:border-primary focus:ring-2 focus:ring-primary/20"
+                      />
+
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void generatePromptDraft()}
+                          disabled={isGeneratingPrompt}
+                          className="command-secondary min-h-10 px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {isGeneratingPrompt ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
+                          {promptSeed.trim() ? "Rewrite my idea" : "Draft an idea"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowMetaPromptModal(true)}
+                          className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-border/70 px-3 py-2 text-sm text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
+                        >
+                          <SettingsIcon className="h-4 w-4" />
+                          Guide the draft
+                        </button>
+                        {promptSeed.trim() && (
+                          <button type="button" onClick={() => setPromptSeed("")} className="px-3 py-2 text-sm text-muted-foreground hover:text-foreground">
+                            Clear
+                          </button>
+                        )}
+                        <span className="ml-auto text-xs text-muted-foreground">
+                          {promptSeed.trim() ? "Your prompt will run as written." : "Empty prompt = a fresh surprise."}
                         </span>
                       </div>
-                      <div className="flex flex-wrap items-center gap-3">
-                        <button
-                          onClick={() => setLoopEnabled((value) => !value)}
-                          className={cn(
-                            "command-secondary",
-                            loopEnabled && "command-secondary-danger"
-                          )}
-                        >
-                          {loopEnabled ? <Square className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-                          {loopEnabled ? "Stop loop" : "Start loop"}
-                        </button>
 
-                        <div className="flex min-w-0 items-center gap-2 overflow-x-auto pb-1 sm:overflow-visible sm:pb-0">
-                          <span className="shrink-0 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
-                            Loop cadence
+                      <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border/50 pt-3">
+                        <span className="mr-1 text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                          Enhancers
+                        </span>
+                        {plugins.map((plugin) => (
+                          <button
+                            key={plugin.name}
+                            onClick={() => void togglePlugin(plugin.name)}
+                            aria-pressed={plugin.enabled}
+                            title={`Toggle ${plugin.name.replaceAll("_", " ")} for the next generation`}
+                            className={cn("choice-chip", plugin.enabled && "choice-chip-active")}
+                          >
+                            {plugin.name.replaceAll("_", " ")}
+                          </button>
+                        ))}
+                        {loraPluginEnabled && enabledLoras.length > 0 && (
+                          <span className="status-pill" title="LoRA models applied to the next generation">
+                            LoRA: {enabledLoras.join(", ")}
                           </span>
-                          <div className="flex shrink-0 gap-1 rounded-lg border border-border/70 bg-background/50 p-1">
-                            {CADENCE_OPTIONS.map((option) => (
-                              <button
-                                key={option.minutes}
-                                aria-pressed={cadenceMinutes === option.minutes}
-                                title={option.description}
-                                onClick={() => setCadenceMinutes(option.minutes)}
-                                className={cn(
-                                  "choice-chip",
-                                  cadenceMinutes === option.minutes
-                                    ? "choice-chip-active"
-                                    : "border-transparent bg-transparent"
-                                )}
-                              >
-                                {cadenceMinutes === option.minutes ? (
-                                  <Check className="h-3 w-3" />
-                                ) : null}
-                                {option.label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
+                        )}
                       </div>
+
+                      {(promptProgress || promptError) && (
+                        <div className="mt-3" role="status" aria-live="polite">
+                          {promptProgress && promptProgress.progress < 100 && <TaskProgress progress={promptProgress} compact />}
+                          {promptProgress?.progress === 100 && (
+                            <div className="inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/10 px-3 py-2 text-sm text-foreground">
+                              <CheckCircle2 className="h-4 w-4 text-primary" />
+                              Prompt ready
+                            </div>
+                          )}
+                          {promptError && <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">{promptError}</div>}
+                        </div>
+                      )}
                     </div>
+
+                    <button
+                      onClick={() => void runGenerationRef.current("manual")}
+                      disabled={isGenerating}
+                      className="command-primary min-w-56 xl:min-h-[92px] xl:flex-col"
+                    >
+                      {isGenerating ? <Loader2 className="h-6 w-6 animate-spin" /> : <Sparkles className="h-6 w-6" />}
+                      <span>{isGenerating ? `Generating ${generationProgress?.progress ?? INITIAL_IMAGE_PROGRESS.progress}%` : promptSeed.trim() ? "Generate this idea" : "Surprise me"}</span>
+                    </button>
                   </div>
                 </div>
 
                 <div className="mt-3 grid gap-3 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(0,1fr)_340px]">
                   <section className="grid gap-3 lg:grid-cols-[minmax(340px,440px)_minmax(0,1fr)] xl:min-h-0">
                     <div className="ambient-panel rounded-lg border border-border/80 p-4 xl:min-h-0 xl:overflow-y-auto lg:col-start-1 lg:row-start-1">
-                      <div className="flex flex-wrap items-start justify-between gap-4">
+                      <div className="hidden">
                         <div>
                           <div className="text-[11px] uppercase tracking-[0.22em] text-primary">
-                            One-off prompt
+                            Creative ingredients
                           </div>
-                          <h1 className="mt-2 text-xl font-semibold tracking-tight text-foreground">
-                            Probe recipe
-                          </h1>
+                          <h2 className="mt-2 text-xl font-semibold tracking-tight text-foreground">
+                            Shape the next run
+                          </h2>
                           <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-                            Lock the prompt, seed, backend, and tags needed to reproduce the next artifact.
+                            Optional modifiers and evidence fields for a more deliberate model probe.
                           </p>
                         </div>
 
@@ -981,7 +977,7 @@ export default function Home() {
                         </div>
                       </div>
 
-                      <div className="mt-4">
+                      <div className="hidden">
                         <div className="mb-2 text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
                           Plugins
                         </div>
@@ -1001,7 +997,7 @@ export default function Home() {
                           ))}
                         </div>
                         <div className="mt-2 text-xs leading-6 text-muted-foreground">
-                          {selectedBackend === "zimage" && enabledLoras.length > 0
+                          {selectedBackend === "zimage" && loraPluginEnabled && enabledLoras.length > 0
                             ? `LoRA path armed: ${enabledLoras.slice(0, 3).join(", ")}${enabledLoras.length > 3 ? "..." : ""}.`
                             : selectedBackend === "ollama"
                               ? `Ollama image backend${generationConfig?.ollama_image_model ? ` using ${generationConfig.ollama_image_model}` : " using auto model selection"}.`
@@ -1012,7 +1008,7 @@ export default function Home() {
                       </div>
 
                       <div className="mt-5 grid gap-4">
-                        <div className="grid content-start gap-4">
+                        <div className="hidden">
                           <div className="rounded-[1.75rem] border border-border/70 bg-background/82 p-4">
                             <button
                               type="button"
@@ -1022,7 +1018,7 @@ export default function Home() {
                               <div className="flex items-center gap-2">
                                 <Wand2 className="h-4 w-4 text-primary" />
                                 <span className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
-                                  Prompt builder
+                                  Experiment notes
                                 </span>
                               </div>
                               {promptBuilderOpen ? (
@@ -1153,7 +1149,7 @@ export default function Home() {
                         </div>
 
                         <div className="grid content-start gap-4">
-                          <div className="rounded-[1.75rem] border border-primary/25 bg-primary/10 p-4">
+                          <div className="hidden">
                             <div className="mb-3 text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
                               Model pipeline
                             </div>
@@ -1250,17 +1246,13 @@ export default function Home() {
                             Current output
                           </div>
                           <div className="mt-1 text-lg font-semibold text-foreground">
-                            {currentImage
-                              ? currentImageLoadedFromGallery
-                                ? "Latest saved image"
-                                : "Latest generation"
-                              : "Waiting for first image"}
+                            {currentImage ? "Latest generation" : "Waiting for this session"}
                           </div>
                         </div>
                         <div className="flex flex-wrap gap-2">
-                          <span className="status-pill capitalize">{currentBackend}</span>
-                          <span className="status-pill">{currentPluginCount} plugins</span>
-                          {isSmokeBackend ? <span className="status-pill">smoke-test quality</span> : null}
+                          {currentImage && <span className="status-pill capitalize">{currentOutputBackend}</span>}
+                          {currentImage && <span className="status-pill">used {currentPluginCount} plugins</span>}
+                          {currentImage && isSmokeBackend ? <span className="status-pill">smoke-test quality</span> : null}
                         </div>
                       </div>
 
@@ -1350,9 +1342,7 @@ export default function Home() {
                           ) : (
                             <div className="flex h-full min-h-[320px] flex-col items-center justify-center text-center">
                               <ImageIcon className="mb-4 h-14 w-14 text-muted-foreground/30" />
-                              <p className="text-sm text-muted-foreground">
-                                Generate once when the prompt and runtime controls are ready.
-                              </p>
+                              <p className="text-sm text-muted-foreground">Your next generated image will appear here.</p>
                             </div>
                           )}
                         </AnimatePresence>
