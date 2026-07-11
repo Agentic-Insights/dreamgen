@@ -55,6 +55,7 @@ from ..services import (
 from .config import Config
 from .logging_config import setup_logging
 from .metrics import MetricsCollector
+from .storage import StorageManager
 from .troubleshoot import SystemDiagnostics
 
 # Initialize rich console for better output
@@ -441,6 +442,17 @@ def generate(
         "--summary-json",
         help="Print a machine-readable generation summary after success",
     ),
+    no_gallery: bool = typer.Option(
+        False,
+        "--no-gallery",
+        help="Save an ad-hoc image in the current directory without adding it to the gallery",
+    ),
+    output: Optional[Path] = typer.Option(
+        None,
+        "--output",
+        "--ad-hoc-path",
+        help="Save outside the gallery at this PNG file or directory",
+    ),
 ) -> None:
     """Generate a single image using AI-generated prompts or a custom prompt."""
 
@@ -527,6 +539,21 @@ def generate(
                                 prompt_gen.cleanup()
 
                         # Generate image
+                        ad_hoc = no_gallery or output is not None
+                        requested_output_path = None
+                        if ad_hoc:
+                            target = (output or Path.cwd()).expanduser()
+                            if target.suffix.lower() == ".png":
+                                requested_output_path = target
+                            else:
+                                filename = (
+                                    StorageManager(".")
+                                    .get_output_path(generation_prompt or "generated image")
+                                    .name
+                                )
+                                requested_output_path = target / filename
+                            requested_output_path = requested_output_path.resolve()
+
                         image_task = progress.add_task("[cyan]Generating image...", total=None)
                         try:
                             with temporary_backend_override(app.state.config, backend, mock):
@@ -538,12 +565,14 @@ def generate(
                                             publication_state=publication_state,
                                             metadata=generation_metadata,
                                             cleanup=True,
+                                            output_path=requested_output_path,
+                                            add_to_gallery=not ad_hoc,
                                         ),
                                         callback=print_generation_service_event,
                                     ),
                                     backend_name=resolved_backend,
                                     phase="Image generation",
-                                    output_path=None,
+                                    output_path=requested_output_path,
                                 )
                         except Exception as e:
                             console.print(
