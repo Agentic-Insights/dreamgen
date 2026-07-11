@@ -46,6 +46,7 @@ from src.services import (
 from src.utils.config import Config
 from src.utils.gallery_publisher import DEFAULT_BUCKET, build_publish_status
 from src.utils.ollama import (
+    OllamaModelInfo,
     get_ollama_version,
     list_ollama_models,
     ollama_host,
@@ -173,12 +174,48 @@ def resolved_prompt_model_name() -> str:
     configured_prompt_model = config.model.ollama_model
     try:
         return (
-            resolve_ollama_model(list_ollama_models(), configured_prompt_model, "completion")
+            resolve_prompt_model_from_models(
+                list_ollama_models(),
+                default_to_configured=True,
+            )
             or configured_prompt_model
         )
     except Exception as exc:
         logger.warning("Could not resolve configured Ollama prompt model: %s", exc)
         return configured_prompt_model
+
+
+def set_configured_prompt_model(model_name: str) -> None:
+    """Update the process-wide preferred Ollama prompt model."""
+    config.model.ollama_model = model_name
+    os.environ["OLLAMA_MODEL"] = model_name
+
+
+def resolve_prompt_model_from_models(
+    models: List[OllamaModelInfo],
+    *,
+    reconcile_config: bool = False,
+    default_to_configured: bool = False,
+) -> Optional[str]:
+    """Resolve a prompt model and optionally promote the resolved model into config."""
+    configured_prompt_model = config.model.ollama_model
+    resolved_model = resolve_ollama_model(models, configured_prompt_model, "completion")
+
+    if resolved_model and reconcile_config and resolved_model != configured_prompt_model:
+        logger.info(
+            "Updating Ollama prompt model config from %s to available local model %s",
+            configured_prompt_model,
+            resolved_model,
+        )
+        set_configured_prompt_model(resolved_model)
+
+    if resolved_model:
+        return resolved_model
+
+    if default_to_configured:
+        return configured_prompt_model
+
+    return None
 
 
 def generation_config_payload() -> Dict[str, Any]:
@@ -1291,7 +1328,11 @@ async def get_ollama_models():
     """Get list of available Ollama models"""
     try:
         models = list_ollama_models()
-        current_prompt = resolve_ollama_model(models, config.model.ollama_model, "completion")
+        current_prompt = resolve_prompt_model_from_models(
+            models,
+            reconcile_config=True,
+            default_to_configured=False,
+        )
         current_image = resolve_ollama_model(models, config.model.ollama_image_model, "image")
         try:
             version = get_ollama_version()
@@ -1335,11 +1376,7 @@ async def set_ollama_model(data: dict):
         raise HTTPException(status_code=400, detail="Model name is required")
 
     try:
-        # Update config
-        config.model.ollama_model = model_name
-
-        # Also update environment variable for persistence
-        os.environ["OLLAMA_MODEL"] = model_name
+        set_configured_prompt_model(model_name)
 
         logger.info(f"Ollama model set to: {model_name}")
         return {"message": f"Ollama model set to {model_name}", "model": model_name}
@@ -1374,8 +1411,7 @@ async def set_generation_config(data: dict):
             prompt_model = str(data["ollama_model"]).strip()
             if not prompt_model:
                 raise ValueError("ollama_model must not be empty")
-            config.model.ollama_model = prompt_model
-            os.environ["OLLAMA_MODEL"] = prompt_model
+            set_configured_prompt_model(prompt_model)
         if "image_backend" in data:
             backend = str(data["image_backend"]).lower()
             if backend not in ALLOWED_IMAGE_BACKENDS:

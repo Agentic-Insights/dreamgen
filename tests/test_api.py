@@ -463,9 +463,10 @@ def test_jobs_endpoint_runs_recipe_and_persists_recipe_metadata(client):
 
 
 def test_ollama_models_endpoint_includes_capabilities_and_resolved_models(client, monkeypatch):
-    """The Ollama models endpoint should expose capabilities plus resolved prompt/image selections."""
+    """The Ollama models endpoint should expose capabilities and normalize stale prompt config."""
     original_prompt_model = api_config.model.ollama_model
     original_image_model = api_config.model.ollama_image_model
+    original_env_prompt_model = os.environ.get("OLLAMA_MODEL")
 
     mock_models = [
         OllamaModelInfo(
@@ -506,16 +507,22 @@ def test_ollama_models_endpoint_includes_capabilities_and_resolved_models(client
 
         data = response.json()
         assert data["current"] == "qwen3.6:27b"
-        assert data["configured_prompt"] == "llama3.2:3b"
+        assert data["configured_prompt"] == "qwen3.6:27b"
         assert data["current_image"] == "x/z-image-turbo:latest"
         assert data["configured_image"] == "x/z-image-turbo"
         assert data["version"] == "0.21.2"
         assert data["models"][0]["can_image"] is True
         assert data["models"][1]["can_prompt"] is True
         assert "vision" in data["models"][1]["capabilities"]
+        assert api_config.model.ollama_model == "qwen3.6:27b"
+        assert os.environ["OLLAMA_MODEL"] == "qwen3.6:27b"
     finally:
         api_config.model.ollama_model = original_prompt_model
         api_config.model.ollama_image_model = original_image_model
+        if original_env_prompt_model is None:
+            os.environ.pop("OLLAMA_MODEL", None)
+        else:
+            os.environ["OLLAMA_MODEL"] = original_env_prompt_model
 
 
 def test_gallery_endpoint(client):
