@@ -140,6 +140,26 @@ async def test_service_can_reuse_caller_owned_backend(mock_service_config, tmp_p
 
 
 @pytest.mark.asyncio
+async def test_service_ad_hoc_output_skips_catalog(mock_service_config, tmp_path):
+    gallery_dir = tmp_path / "gallery"
+    output_path = tmp_path / "agent" / "result.png"
+    service = ImageGenService(mock_service_config, output_dir=gallery_dir)
+
+    result = await service.generate(
+        GenerationServiceRequest(
+            prompt="ad hoc service test",
+            output_path=output_path,
+            add_to_gallery=False,
+        )
+    )
+
+    assert result.image_path == output_path
+    assert result.relative_image_path == str(output_path.resolve())
+    assert result.publication == {"state": "untracked", "publishable": False}
+    assert not (gallery_dir / ".gallery_catalog.json").exists()
+
+
+@pytest.mark.asyncio
 async def test_service_records_resolved_prompt_model(mock_service_config, tmp_path, monkeypatch):
     """Generated prompt metadata should use the model that actually produced it."""
 

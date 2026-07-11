@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import shutil
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -47,6 +48,8 @@ class GenerationServiceRequest:
     publication_state: str = "draft"
     cleanup: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
+    output_path: Path | None = None
+    add_to_gallery: bool = True
 
 
 @dataclass(frozen=True)
@@ -359,7 +362,7 @@ class ImageGenService:
         )
 
         storage = StorageManager(str(self.output_dir))
-        requested_output_path = storage.get_output_path(final_prompt)
+        requested_output_path = request.output_path or storage.get_output_path(final_prompt)
         await self._emit(
             callback,
             GenerationProgressEvent(
@@ -374,6 +377,17 @@ class ImageGenService:
                 force_reinit=request.force_reinit,
                 seed=request.seed,
             )
+            if image_path.resolve() != requested_output_path.resolve():
+                requested_output_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(image_path), str(requested_output_path))
+                for suffix in (".txt", ".meta.json"):
+                    source_sidecar = image_path.with_suffix(suffix)
+                    if source_sidecar.exists():
+                        shutil.move(
+                            str(source_sidecar),
+                            str(requested_output_path.with_suffix(suffix)),
+                        )
+                image_path = requested_output_path
         finally:
             if request.cleanup:
                 image_gen.cleanup()
@@ -384,7 +398,11 @@ class ImageGenService:
                 name="finalizing_output",
                 progress=92,
                 label="Finalizing output",
-                detail="Saving metadata and writing the finished image to the gallery.",
+                detail=(
+                    "Saving metadata and writing the finished image to the gallery."
+                    if request.add_to_gallery
+                    else "Saving metadata for the ad-hoc output."
+                ),
             ),
         )
 
@@ -421,14 +439,18 @@ class ImageGenService:
             "quality_flags": experiment_metadata["quality_flags"],
         }
         write_image_metadata(image_path, saved_metadata)
-        publication_entry = register_image(
-            image_path,
-            self.output_dir,
-            prompt=final_prompt,
-            metadata=saved_metadata,
-            publication_state=request.publication_state,
-        )
-        relative_image_path = f"/images/{image_path.relative_to(self.output_dir).as_posix()}"
+        publication_entry = None
+        if request.add_to_gallery:
+            publication_entry = register_image(
+                image_path,
+                self.output_dir,
+                prompt=final_prompt,
+                metadata=saved_metadata,
+                publication_state=request.publication_state,
+            )
+            relative_image_path = f"/images/{image_path.relative_to(self.output_dir).as_posix()}"
+        else:
+            relative_image_path = str(image_path.resolve())
         response_metadata = {
             **request.metadata,
             **generation_metadata,
@@ -437,12 +459,16 @@ class ImageGenService:
             "generation_time": generation_time,
             "experiment": experiment_metadata,
             "quality_flags": experiment_metadata["quality_flags"],
-            "publication": {
-                "id": publication_entry["id"],
-                "state": publication_entry["publication_state"],
-                "publishable": publication_entry["publishable"],
-                "quality_flags": publication_entry["quality_flags"],
-            },
+            "publication": (
+                {
+                    "id": publication_entry["id"],
+                    "state": publication_entry["publication_state"],
+                    "publishable": publication_entry["publishable"],
+                    "quality_flags": publication_entry["quality_flags"],
+                }
+                if publication_entry
+                else {"state": "untracked", "publishable": False}
+            ),
             "plugins_used": active_plugins,
             "seed": resolved_seed,
         }

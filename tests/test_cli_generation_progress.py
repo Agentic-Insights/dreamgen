@@ -48,6 +48,54 @@ def test_generate_accepts_model_alias_for_backend(tmp_path, monkeypatch):
     assert "resolved: mock" in result.stdout
 
 
+def test_generate_no_gallery_saves_in_current_directory(tmp_path, monkeypatch):
+    gallery_dir = tmp_path / "gallery"
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    monkeypatch.setenv("OUTPUT_DIR", str(gallery_dir))
+
+    with runner.isolated_filesystem(temp_dir=work_dir):
+        result = runner.invoke(
+            app, ["generate", "--mock", "--prompt", "ad hoc prompt", "--no-gallery"]
+        )
+        images = list(Path.cwd().glob("*.png"))
+
+    assert result.exit_code == 0, result.stdout
+    assert len(images) == 1
+    assert not (gallery_dir / ".gallery_catalog.json").exists()
+
+
+def test_generate_output_path_implies_no_gallery(tmp_path, monkeypatch):
+    gallery_dir = tmp_path / "gallery"
+    output_path = tmp_path / "agent-output" / "result.png"
+    monkeypatch.setenv("OUTPUT_DIR", str(gallery_dir))
+
+    result = runner.invoke(
+        app,
+        [
+            "generate",
+            "--mock",
+            "--prompt",
+            "agent image",
+            "--output",
+            str(output_path),
+            "--summary-json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    assert output_path.exists()
+    assert output_path.with_suffix(".txt").exists()
+    assert output_path.with_suffix(".meta.json").exists()
+    assert not (gallery_dir / ".gallery_catalog.json").exists()
+    summary_line = next(
+        line for line in reversed(result.stdout.splitlines()) if line.startswith("{")
+    )
+    summary = json.loads(summary_line)
+    assert summary["image_path"] == str(output_path)
+    assert summary["metadata"]["publication"]["state"] == "untracked"
+
+
 def test_generate_summary_json_prints_machine_readable_result(tmp_path, monkeypatch):
     """Automation can consume a stable summary after human-readable output."""
     monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
