@@ -43,6 +43,7 @@ from src.services import (
     list_workflow_recipes,
     resolve_workflow_recipe,
 )
+from src.services.model_runtime import ModelRuntimeManager
 from src.utils.config import Config
 from src.utils.gallery_publisher import DEFAULT_BUCKET, build_publish_status
 from src.utils.ollama import (
@@ -121,6 +122,8 @@ app.add_middleware(
 
 # Global state
 config = Config()
+runtime_manager = ModelRuntimeManager(config)
+runtime_manager.load_selection()
 state = {
     "configured_backend": config.model.image_backend,
     "use_mock": config.model.image_backend == "mock",
@@ -189,6 +192,7 @@ def set_configured_prompt_model(model_name: str) -> None:
     """Update the process-wide preferred Ollama prompt model."""
     config.model.ollama_model = model_name
     os.environ["OLLAMA_MODEL"] = model_name
+    runtime_manager.persist_selection()
 
 
 def resolve_prompt_model_from_models(
@@ -1006,6 +1010,29 @@ async def get_plugins():
 @app.get("/api/models/status")
 async def get_model_status():
     """Get status of available models and their download progress"""
+    return runtime_manager.status()
+
+
+@app.get("/api/models/recommended")
+async def get_recommended_model_settings():
+    """Recommend safe image settings from current cache and memory signals."""
+    return runtime_manager.recommended()
+
+
+@app.post("/api/models/unload")
+async def unload_model_runtime():
+    """Release process model caches and CUDA allocator state."""
+    return runtime_manager.unload()
+
+
+@app.post("/api/models/{model_id}/prefetch")
+async def prefetch_model(model_id: str):
+    """Prefetch alias for the existing asynchronous model download operation."""
+    return await download_model(model_id)
+
+
+async def _legacy_get_model_status():
+    """Legacy implementation retained temporarily for download helpers."""
     # Use HF_HOME if set, otherwise use TRANSFORMERS_CACHE, fallback to default
     hf_home = os.getenv("HF_HOME")
     if hf_home:
@@ -1450,6 +1477,8 @@ async def set_generation_config(data: dict):
             if not 0.0 <= probability <= 1.0:
                 raise ValueError("lora_application_probability must be between 0.0 and 1.0")
             config.model.lora.application_probability = probability
+
+        runtime_manager.persist_selection()
 
         logger.info(f"Generation config updated: {data}")
         return {

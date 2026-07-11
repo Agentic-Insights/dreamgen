@@ -38,6 +38,7 @@ os.environ["GUIDANCE_SCALE"] = "0.0"
 os.environ["TRUE_CFG_SCALE"] = "1.0"
 os.environ["ENABLED_PLUGINS"] = "time_of_day,art_style"
 os.environ["OUTPUT_DIR"] = _TEST_OUTPUT_DIR
+os.environ["RUNTIME_SELECTION_PATH"] = str(Path(_TEST_OUTPUT_DIR) / "runtime-selection.json")
 os.environ["LOG_DIR"] = "./logs"
 os.environ["CACHE_DIR"] = "./.cache"
 os.environ["CPU_ONLY"] = "false"
@@ -78,6 +79,26 @@ def test_status_endpoint(client):
         "qwen-image",
         "ernie-image",
     ]
+
+
+def test_model_runtime_status_and_cleanup_endpoints(client):
+    status = client.get("/api/models/status")
+    assert status.status_code == 200
+    payload = status.json()
+    assert payload["configured_backend"]
+    assert payload["resolved_backend"]
+    assert {item["backend"] for item in payload["backends"]} >= {
+        "flux", "small", "turbo", "zimage", "ollama", "smoke", "mock"
+    }
+    assert "system" in payload["memory"]
+
+    recommended = client.get("/api/models/recommended")
+    assert recommended.status_code == 200
+    assert recommended.json()["backend"] in {"zimage", "flux", "small"}
+
+    unloaded = client.post("/api/models/unload")
+    assert unloaded.status_code == 200
+    assert unloaded.json()["message"] == "Runtime caches released"
 
 
 def test_cors_allows_local_review_ports(client):

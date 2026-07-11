@@ -98,10 +98,11 @@ export interface SystemStatus {
 }
 
 export interface ModelInfo {
+  backend?: string;
   id: string;
   name: string;
   type: string;
-  status: 'not_downloaded' | 'downloading' | 'ready' | 'partial';
+  status: 'not_downloaded' | 'not_configured' | 'configured' | 'downloading' | 'ready' | 'partial';
   size: number;
   incomplete_files: number;
   path?: string;
@@ -111,6 +112,14 @@ export interface ModelInfo {
 export interface ModelStatus {
   models: ModelInfo[];
   cache_dir: string;
+  configured_backend: string;
+  resolved_backend: string;
+  memory: {
+    system: { total_gb: number; available_gb: number; percent_used: number };
+    cuda: { available: boolean; device?: string; total_gb?: number; free_gb?: number; allocated_gb?: number; reserved_gb?: number };
+  };
+  recommended: { backend: string; width: number; height: number; reason: string };
+  selection_path: string;
 }
 
 export interface HFTokenStatus {
@@ -652,6 +661,12 @@ export class ImageGenAPI {
       method: 'POST',
     });
     if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to start model download'));
+    return response.json();
+  }
+
+  async unloadModels(): Promise<{ message: string; memory: ModelStatus['memory'] }> {
+    const response = await fetch(`${this.baseUrl}/api/models/unload`, { method: 'POST' });
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to unload models'));
     return response.json();
   }
 

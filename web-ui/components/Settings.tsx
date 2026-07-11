@@ -305,6 +305,16 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
     setTimeout(() => setMessage(null), 5000);
   };
 
+  const handleUnloadModels = async () => {
+    try {
+      const result = await api.unloadModels();
+      setMessage({ type: 'success', text: result.message });
+      await loadModelStatus();
+    } catch (error) {
+      setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Failed to unload models' });
+    }
+  };
+
   const toggleEnabledLora = async (loraName: string) => {
     const enabledLoras = generationConfig?.enabled_loras ?? [];
     const nextEnabledLoras = enabledLoras.includes(loraName)
@@ -553,6 +563,31 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
                   </div>
 
                   <div className="border border-border rounded-lg p-4">
+                    {modelStatus && (
+                      <div className="mb-4 grid gap-3 rounded-lg border border-primary/25 bg-primary/5 p-4 sm:grid-cols-3">
+                        <div>
+                          <div className="text-xs uppercase tracking-wide text-muted-foreground">Runtime</div>
+                          <div className="mt-1 font-medium capitalize">{modelStatus.configured_backend} → {modelStatus.resolved_backend}</div>
+                        </div>
+                        <div>
+                          <div className="text-xs uppercase tracking-wide text-muted-foreground">Memory</div>
+                          <div className="mt-1 font-medium">
+                            {modelStatus.memory.cuda.available
+                              ? `${modelStatus.memory.cuda.free_gb} / ${modelStatus.memory.cuda.total_gb} GB VRAM free`
+                              : `${modelStatus.memory.system.available_gb} / ${modelStatus.memory.system.total_gb} GB RAM free`}
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <div className="text-xs uppercase tracking-wide text-muted-foreground">Recommended</div>
+                            <div className="mt-1 font-medium capitalize">{modelStatus.recommended.backend} · {modelStatus.recommended.width}²</div>
+                          </div>
+                          <button type="button" onClick={() => void handleUnloadModels()} className="rounded-md border border-border px-3 py-2 text-xs hover:bg-muted">
+                            Unload
+                          </button>
+                        </div>
+                      </div>
+                    )}
                     <div className="flex items-center gap-2 mb-3">
                       <SlidersHorizontal className="w-4 h-4 text-primary" />
                       <div>
