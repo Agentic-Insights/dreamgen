@@ -52,13 +52,13 @@ async def test_prompt_generator_falls_back_to_available_completion_model(monkeyp
     config.model.ollama_model = "llama3.2:3b"
     config.model.ollama_temperature = 0.7
 
-    chat_calls: list[str] = []
+    chat_calls: list[tuple[str, int]] = []
 
     fake_ollama = ModuleType("ollama")
 
-    def fake_chat(*, model, messages, options):
+    def fake_chat(*, model, messages, options, keep_alive):
         del messages, options
-        chat_calls.append(model)
+        chat_calls.append((model, keep_alive))
         return SimpleNamespace(message=SimpleNamespace(content="sunlit alley, cinematic framing"))
 
     fake_ollama.chat = fake_chat
@@ -80,7 +80,7 @@ async def test_prompt_generator_falls_back_to_available_completion_model(monkeyp
     prompt = await generator.generate_prompt()
 
     assert prompt == "sunlit alley, cinematic framing"
-    assert chat_calls == ["qwen3.6:27b"]
+    assert chat_calls == [("qwen3.6:27b", 0)]
     assert generator.model_name == "qwen3.6:27b"
 
 

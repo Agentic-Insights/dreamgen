@@ -121,7 +121,7 @@ class TestZImageGeneratorWithMockZImage:
         mock_diffsynth.assert_called_once_with(lora_path)
         mock_native.assert_not_called()
 
-    def test_load_model_uses_native_path_without_lora(self, mock_config):
+    def test_load_model_uses_diffsynth_without_lora(self, mock_config):
         with patch("torch.cuda.is_available", return_value=False):
             gen = ZImageGenerator(mock_config)
 
@@ -130,9 +130,8 @@ class TestZImageGeneratorWithMockZImage:
                 with patch.object(gen, "_load_native_components") as mock_native:
                     gen.load_model()
 
-        mock_native.assert_called_once()
-        mock_diffsynth.assert_not_called()
-        assert gen.using_diffsynth is False
+        mock_diffsynth.assert_called_once_with(None)
+        mock_native.assert_not_called()
 
     def test_build_diffsynth_model_configs_expands_local_shards(self, mock_config, tmp_path):
         model_path = tmp_path / "Z-Image-Turbo"
@@ -226,6 +225,7 @@ class TestZImageGeneratorWithMockZImage:
         with patch("torch.cuda.is_available", return_value=False):
             gen = ZImageGenerator(mock_config)
             gen.using_diffsynth = True
+            gen.selected_lora_name = "test-style"
             gen.pipe = MagicMock(return_value=mock_image)
 
             result = await gen.generate(

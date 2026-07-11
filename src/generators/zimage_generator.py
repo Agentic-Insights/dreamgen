@@ -119,8 +119,8 @@ class ZImageGenerator(ImageGenerator):
             DiffSynthModelConfigSpec(path=vae_paths),
         ]
 
-    def _load_diffsynth_pipe(self, lora_path: Path):
-        """Load Z-Image through DiffSynth-Studio so LoRAs can be applied."""
+    def _load_diffsynth_pipe(self, lora_path: Optional[Path] = None):
+        """Load the memory-efficient DiffSynth Z-Image pipeline, optionally with LoRA."""
         try:
             from diffsynth.pipelines.z_image import ModelConfig, ZImagePipeline
         except ImportError as exc:
@@ -145,9 +145,13 @@ class ZImageGenerator(ImageGenerator):
             model_configs=model_configs,
             tokenizer_config=ModelConfig(path=str(self.model_path / "tokenizer")),
         )
-        self.pipe.load_lora(self.pipe.dit, str(lora_path))
+        if lora_path is not None:
+            self.pipe.load_lora(self.pipe.dit, str(lora_path))
         self.using_diffsynth = True
-        logger.info("Z-Image DiffSynth pipeline with LoRA loaded successfully")
+        logger.info(
+            "Z-Image DiffSynth pipeline{} loaded successfully",
+            " with LoRA" if lora_path is not None else "",
+        )
 
     def _load_native_components(self):
         """Load native Z-Image components without LoRA support."""
@@ -195,11 +199,11 @@ class ZImageGenerator(ImageGenerator):
         """Load Z-Image model components into memory."""
         lora_path = self._get_selected_lora_path()
         self.cleanup()
-        if lora_path is not None:
-            self._load_diffsynth_pipe(lora_path)
-        else:
-            self._load_native_components()
-            self.using_diffsynth = False
+        # DiffSynth fits the full Z-Image pipeline within the practical WDDM
+        # memory budget on 24 GB cards. The native loader can exhaust the
+        # available allocation even at 512x512 before an image is persisted.
+        self._load_diffsynth_pipe(lora_path)
+        if lora_path is None:
             self.selected_lora_name = None
 
     async def generate(
@@ -317,7 +321,7 @@ class ZImageGenerator(ImageGenerator):
             "attention_backend": self.attention_backend,
             "compiled": self.compile_model,
             "device": self.device,
-            "lora_backend": "diffsynth" if self.using_diffsynth else None,
+            "lora_backend": "diffsynth" if self.selected_lora_name else None,
             "using_diffsynth": self.using_diffsynth,
             "selected_lora": self.selected_lora_name if self.using_diffsynth else None,
         }
