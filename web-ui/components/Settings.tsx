@@ -490,11 +490,6 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
                         <div className="mt-3 text-sm font-medium text-foreground break-all">
                           {activePromptModel ?? promptModelFallback ?? "No prompt model"}
                         </div>
-                        {configuredPromptModel && activePromptModel && configuredPromptModel !== activePromptModel && (
-                          <div className="mt-2 text-xs text-amber-700 dark:text-amber-300">
-                            Configured {configuredPromptModel}; using {activePromptModel}.
-                          </div>
-                        )}
                         <div className="mt-3 flex flex-wrap gap-2">
                           {loadingOllama ? (
                             <span className="inline-flex items-center gap-2 text-xs text-muted-foreground">
@@ -890,12 +885,6 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
                   </div>
                 ) : ollamaModels && ollamaModels.models.length > 0 ? (
                   <div className="space-y-6">
-                    {configuredPromptModel && activePromptModel && configuredPromptModel !== activePromptModel && (
-                      <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-                        Configured prompt model <code>{configuredPromptModel}</code> is not usable on this host. DreamGen is falling back to <code>{activePromptModel}</code>.
-                      </div>
-                    )}
-
                     <div>
                       <div className="mb-3">
                         <h4 className="font-medium">Prompt Models</h4>

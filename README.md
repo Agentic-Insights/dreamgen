@@ -52,7 +52,7 @@ uv sync
 # Configure the app
 cp .env.example .env
 # Edit .env for your machine:
-# - OLLAMA_MODEL must point at a local Ollama model
+# - OLLAMA_MODEL is the preferred local prompt model; DreamGen normalizes stale values at runtime
 # - OLLAMA_IMAGE_MODEL is optional and only used for IMAGE_BACKEND=ollama
 # - HF_TOKEN is optional for small/turbo/smoke public models
 # - IMAGE_BACKEND=qwen enables the NF4 Qwen-Image backend for text-heavy posters and signage
