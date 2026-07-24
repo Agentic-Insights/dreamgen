@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Trash2, Download, X, Loader2, Clock, FileText, Copy, Check,
   Calendar, Grid, ChevronLeft, ChevronRight, Folder, Star, Eye, EyeOff, Archive,
-  UploadCloud, ExternalLink, Info
+  UploadCloud, ExternalLink, Info, Search, Square, CheckSquare, Layers3, WandSparkles
 } from "lucide-react";
 import {
   api,
@@ -18,6 +18,7 @@ import {
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import galleryCache from "@/lib/cache";
+import type { ImageEditTarget } from "@/components/ImageEditPanel";
 
 interface GalleryImage {
   path: string;
@@ -81,6 +82,36 @@ const isPublicGalleryState = (state: PublicationState) => (
   state === "featured" || state === "published"
 );
 
+const getCloudSyncState = (image: GalleryImage) => {
+  const blocked = image.publication.quality_flags.length > 0;
+  const publicState = isPublicGalleryState(image.publication.state);
+
+  if (blocked) {
+    return {
+      label: "cloud blocked",
+      title: `Excluded from R2 sync: ${image.publication.quality_flags.join(", ")}`,
+      tone: "bg-rose-600 text-white",
+      icon: Archive,
+    };
+  }
+
+  if (publicState) {
+    return {
+      label: image.publication.state === "featured" ? "R2 featured" : "R2 published",
+      title: "Eligible for cloud sync and public gallery display",
+      tone: "bg-emerald-600 text-white",
+      icon: UploadCloud,
+    };
+  }
+
+  return {
+    label: "local only",
+    title: "Not published to R2",
+    tone: "bg-zinc-700 text-white",
+    icon: EyeOff,
+  };
+};
+
 const toGalleryImage = (entry: GalleryCatalogEntry): GalleryImage => ({
   path: entry.image_url || `/images/${entry.path}`,
   catalog_path: entry.path,
@@ -125,7 +156,11 @@ const withTimeout = async <T,>(
   })
 );
 
-export default function Gallery() {
+interface GalleryProps {
+  onRequestEdit?: (target: ImageEditTarget) => void;
+}
+
+export default function Gallery({ onRequestEdit }: GalleryProps) {
   const [images, setImages] = useState<GalleryImage[]>([]);
   const [weekGroups, setWeekGroups] = useState<WeekGroup[]>([]);
   const [loading, setLoading] = useState(true);
@@ -144,6 +179,10 @@ export default function Gallery() {
   const [modelFilter, setModelFilter] = useState("all");
   const [promptFamilyFilter, setPromptFamilyFilter] = useState("all");
   const [qualityFlagFilter, setQualityFlagFilter] = useState("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
+  const [bulkState, setBulkState] = useState<PublicationState>("published");
+  const [bulkUpdating, setBulkUpdating] = useState(false);
   const [facets, setFacets] = useState<GalleryFacets | null>(null);
   const [syncStatus, setSyncStatus] = useState<GallerySyncStatus | null>(null);
   const [copiedPromptPath, setCopiedPromptPath] = useState<string | null>(null);
@@ -215,6 +254,7 @@ export default function Gallery() {
       modelFilter,
       promptFamilyFilter,
       qualityFlagFilter,
+      searchQuery,
       page,
       limit,
     ].join("_");
@@ -230,6 +270,7 @@ export default function Gallery() {
           model: modelFilter === "all" ? undefined : modelFilter,
           prompt_family: promptFamilyFilter === "all" ? undefined : promptFamilyFilter,
           quality_flag: qualityFlagFilter === "all" ? undefined : qualityFlagFilter,
+          search: searchQuery.trim() || undefined,
         }),
         api.getGallerySyncStatus(10),
         api.getGalleryFacets(),
@@ -295,8 +336,13 @@ export default function Gallery() {
     page,
     promptFamilyFilter,
     qualityFlagFilter,
+    searchQuery,
     viewMode,
   ]);
+
+  useEffect(() => {
+    setSelectedPaths((current) => new Set([...current].filter((path) => images.some((image) => image.catalog_path === path))));
+  }, [images]);
 
   const getWeekNumber = (date: Date): number => {
     const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -441,6 +487,45 @@ export default function Gallery() {
       showActionMessage({ type: "error", text: message });
     } finally {
       setPublicationUpdating(null);
+    }
+  };
+
+  const toggleSelected = (imagePath: string, event: React.MouseEvent) => {
+    event.stopPropagation();
+    setSelectedPaths((current) => {
+      const next = new Set(current);
+      if (next.has(imagePath)) next.delete(imagePath);
+      else next.add(imagePath);
+      return next;
+    });
+  };
+
+  const toggleSelectAllVisible = () => {
+    setSelectedPaths((current) => {
+      const next = new Set(current);
+      const allSelected = images.length > 0 && images.every((image) => next.has(image.catalog_path));
+      images.forEach((image) => (allSelected ? next.delete(image.catalog_path) : next.add(image.catalog_path)));
+      return next;
+    });
+  };
+
+  const handleBulkPublicationChange = async () => {
+    const paths = [...selectedPaths];
+    if (paths.length === 0) return;
+    setBulkUpdating(true);
+    try {
+      const result = await api.bulkUpdatePublicationState(paths, bulkState);
+      setSelectedPaths(new Set());
+      await withTimeout(galleryCache.clear(), CACHE_TIMEOUT_MS, undefined);
+      await loadImages();
+      showActionMessage({
+        type: result.failures.length > 0 ? "error" : "success",
+        text: `${result.updated.length} image${result.updated.length === 1 ? "" : "s"} set to ${bulkState}${result.failures.length ? `; ${result.failures.length} blocked` : ""}.`,
+      });
+    } catch (err) {
+      showActionMessage({ type: "error", text: err instanceof Error ? err.message : "Bulk update failed" });
+    } finally {
+      setBulkUpdating(false);
     }
   };
 
@@ -600,6 +685,7 @@ export default function Gallery() {
 
   const selectedMetadataRows = selectedImage ? getMetadataRows(selectedImage) : [];
   const selectedExperimentRows = selectedImage ? getExperimentRows(selectedImage) : [];
+  const selectedCloudSyncState = selectedImage ? getCloudSyncState(selectedImage) : null;
 
   const renderStateBadge = (state: PublicationState, className?: string) => (
     <span
@@ -617,6 +703,8 @@ export default function Gallery() {
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2 sm:gap-3 lg:gap-4">
       {images.map((image) => {
         const featuredBlocked = !image.publication.publishable;
+        const cloudSyncState = getCloudSyncState(image);
+        const CloudStateIcon = cloudSyncState.icon;
         return (
           <motion.div
             key={image.path}
@@ -633,16 +721,36 @@ export default function Gallery() {
             />
             <div className="absolute left-2 top-2 flex flex-col items-start gap-1">
               {renderStateBadge(image.publication.state, "shadow-sm")}
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] shadow-sm",
+                  cloudSyncState.tone
+                )}
+                title={cloudSyncState.title}
+              >
+                <CloudStateIcon className="h-3 w-3" />
+                {cloudSyncState.label}
+              </span>
               {featuredBlocked && (
                 <span
                   className="inline-flex items-center gap-1 rounded bg-black/70 px-2 py-0.5 text-[10px] text-white shadow-sm"
                   title="Diagnostic placeholder images cannot be published or featured"
                 >
                   <Info className="h-3 w-3" />
-                  local only
+                  blocked
                 </span>
               )}
             </div>
+
+            <button
+              type="button"
+              onClick={(event) => toggleSelected(image.catalog_path, event)}
+              className="absolute right-2 top-2 z-10 rounded bg-black/65 p-1 text-white shadow-sm transition hover:bg-black/85"
+              aria-label={`${selectedPaths.has(image.catalog_path) ? "Deselect" : "Select"} ${image.catalog_path}`}
+              title={selectedPaths.has(image.catalog_path) ? "Deselect image" : "Select image"}
+            >
+              {selectedPaths.has(image.catalog_path) ? <CheckSquare className="h-4 w-4 text-primary" /> : <Square className="h-4 w-4" />}
+            </button>
 
             <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
               <div className="absolute bottom-0 left-0 right-0 p-3">
@@ -661,8 +769,19 @@ export default function Gallery() {
                       <Trash2 className="w-3.5 h-3.5" />
                     )}
                   </button>
-                  <button
-                    onClick={(e) => handleDownload(image.path, image.prompt, e)}
+                    <button
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onRequestEdit?.({ imageUrl: image.path, sourcePath: image.catalog_path, prompt: image.prompt });
+                      }}
+                      className="p-1.5 rounded bg-violet-500/90 hover:bg-violet-500 text-white disabled:opacity-50"
+                      title="Edit image"
+                      aria-label={`Edit ${image.catalog_path}`}
+                    >
+                      <WandSparkles className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={(e) => handleDownload(image.path, image.prompt, e)}
                     className="p-1.5 bg-primary/80 hover:bg-primary rounded text-primary-foreground"
                     title="Download image"
                     aria-label={`Download ${image.catalog_path}`}
@@ -761,6 +880,46 @@ export default function Gallery() {
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              <div className="flex h-8 min-w-[220px] items-center gap-2 rounded-md border border-border bg-background px-2">
+                <Search className="h-3.5 w-3.5 text-muted-foreground" />
+                <input
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="Search prompt, LoRA, plugin..."
+                  className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                  aria-label="Search gallery metadata"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={toggleSelectAllVisible}
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2 text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                title="Select all visible images"
+              >
+                <Layers3 className="h-3.5 w-3.5" />
+                {selectedPaths.size > 0 ? `${selectedPaths.size} selected` : "Select visible"}
+              </button>
+              {selectedPaths.size > 0 && (
+                <div className="flex h-8 items-center gap-1 rounded-md border border-primary/40 bg-primary/10 px-1">
+                  <select
+                    value={bulkState}
+                    onChange={(event) => setBulkState(event.target.value as PublicationState)}
+                    className="h-6 bg-transparent px-1 text-xs text-foreground outline-none"
+                    aria-label="Bulk publication state"
+                  >
+                    {PUBLICATION_OPTIONS.map((option) => <option key={option.state} value={option.state}>{option.label}</option>)}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => void handleBulkPublicationChange()}
+                    disabled={bulkUpdating}
+                    className="inline-flex h-6 items-center gap-1 rounded bg-primary px-2 text-xs text-primary-foreground disabled:opacity-60"
+                  >
+                    {bulkUpdating && <Loader2 className="h-3 w-3 animate-spin" />}
+                    Apply
+                  </button>
+                </div>
+              )}
               <select
                 value={catalogFilter}
                 onChange={(event) => setCatalogFilter(event.target.value as CatalogFilter)}
@@ -1035,6 +1194,21 @@ export default function Gallery() {
               <div className="relative flex min-h-[45vh] items-center justify-center bg-black">
                 <div className="absolute left-3 top-3 z-10 flex items-center gap-2">
                   {renderStateBadge(selectedImage.publication.state, "shadow-sm")}
+                  {selectedCloudSyncState && (() => {
+                    const CloudStateIcon = selectedCloudSyncState.icon;
+                    return (
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px] shadow-sm",
+                          selectedCloudSyncState.tone
+                        )}
+                        title={selectedCloudSyncState.title}
+                      >
+                        <CloudStateIcon className="h-3.5 w-3.5" />
+                        {selectedCloudSyncState.label}
+                      </span>
+                    );
+                  })()}
                   {selectedImageIndex >= 0 && (
                     <span className="rounded bg-black/65 px-2 py-1 text-xs text-white">
                       {selectedImageIndex + 1} / {images.length}
@@ -1132,6 +1306,10 @@ export default function Gallery() {
                           Diagnostic placeholder images are kept local and cannot be published or featured.
                         </p>
                       )}
+                      <div className="mb-3 flex items-center gap-2 text-xs text-muted-foreground">
+                        <UploadCloud className="h-3.5 w-3.5" />
+                        <span>{selectedCloudSyncState?.title || "Cloud sync status unavailable"}</span>
+                      </div>
                       <div className="flex flex-wrap gap-2">
                         {PUBLICATION_OPTIONS.map((option) => {
                           const Icon = option.icon;
@@ -1225,6 +1403,16 @@ export default function Gallery() {
                     >
                       <ExternalLink className="h-4 w-4" />
                       Open
+                    </button>
+                    <button
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onRequestEdit?.({ imageUrl: selectedImage.path, sourcePath: selectedImage.catalog_path, prompt: selectedImage.prompt });
+                      }}
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-violet-500 text-sm text-white transition hover:bg-violet-600"
+                    >
+                      <WandSparkles className="h-4 w-4" />
+                      Edit / branch
                     </button>
                     <button
                       onClick={(event) => handleDownload(selectedImage.path, selectedImage.prompt, event)}

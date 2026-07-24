@@ -130,6 +130,8 @@ export interface HFTokenStatus {
 export interface EditRequest {
   prompt: string;
   strength?: number;
+  backend?: 'auto' | 'mock' | 'qwen';
+  source_path?: string;
 }
 
 export interface EditResponse {
@@ -137,10 +139,7 @@ export interface EditResponse {
   prompt: string;
   original_path: string;
   edited_path: string;
-  metadata: {
-    model: string;
-    strength: number;
-  };
+  metadata: Record<string, unknown>;
   created_at: string;
 }
 
@@ -231,6 +230,14 @@ export interface GenerationEventsResponse {
   limit: number;
 }
 
+export interface GenerationMetricsResponse {
+  events: number;
+  completed_generations: number;
+  phase_averages_ms: Record<string, Record<string, number>>;
+  otel_enabled: boolean;
+  jsonl_path: string;
+}
+
 export type GenerationJobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 
 export interface GenerationJobRequest {
@@ -282,6 +289,7 @@ export interface CreateGenerationJobRequest {
   quality_flags?: string[];
   client_request_id?: string;
   metadata?: Record<string, unknown>;
+  config_overrides?: Record<string, unknown>;
 }
 
 export type PublicationState = 'draft' | 'published' | 'hidden' | 'featured' | 'rejected';
@@ -344,6 +352,7 @@ export interface GalleryCatalogFilters {
   model?: string;
   prompt_family?: string;
   quality_flag?: string;
+  search?: string;
 }
 
 const extractErrorMessage = async (response: Response, fallback: string) => {
@@ -491,6 +500,7 @@ export class ImageGenAPI {
     if (filters.model) params.set('model', filters.model);
     if (filters.prompt_family) params.set('prompt_family', filters.prompt_family);
     if (filters.quality_flag) params.set('quality_flag', filters.quality_flag);
+    if (filters.search) params.set('search', filters.search);
 
     try {
       const response = await fetch(`${this.baseUrl}/api/gallery/catalog?${params.toString()}`, {
@@ -670,6 +680,25 @@ export class ImageGenAPI {
     return response.json();
   }
 
+  async getGenerationMetrics(limit: number = 500): Promise<GenerationMetricsResponse> {
+    const response = await fetch(`${this.baseUrl}/api/generation/metrics?limit=${limit}`);
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to get generation metrics'));
+    return response.json();
+  }
+
+  async bulkUpdatePublicationState(
+    imagePaths: string[],
+    state: PublicationState
+  ): Promise<{ updated: GalleryCatalogEntry[]; failures: Array<{ path: string; error: string }>; state: string }> {
+    const response = await fetch(`${this.baseUrl}/api/gallery/publication/bulk`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image_paths: imagePaths, state }),
+    });
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to update publication states'));
+    return response.json();
+  }
+
   async setHFToken(token: string): Promise<{ message: string }> {
     const response = await fetch(`${this.baseUrl}/api/config/hf-token`, {
       method: 'POST',
@@ -695,12 +724,20 @@ export class ImageGenAPI {
     if (request.strength !== undefined) {
       formData.append('strength', request.strength.toString());
     }
+    if (request.backend) formData.append('backend', request.backend);
+    if (request.source_path) formData.append('source_path', request.source_path);
 
     const response = await fetch(`${this.baseUrl}/api/edit`, {
       method: 'POST',
       body: formData,
     });
     if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to edit image'));
+    return response.json();
+  }
+
+  async getEditJob(jobId: string): Promise<Record<string, unknown>> {
+    const response = await fetch(`${this.baseUrl}/api/edit/jobs/${encodeURIComponent(jobId)}`);
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to get edit job'));
     return response.json();
   }
 
