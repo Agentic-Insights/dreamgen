@@ -1,5 +1,6 @@
 """Application service boundaries for DreamGen workflows."""
 
+from .edit_jobs import SQLiteEditJobStore
 from .generation_jobs import (
     GenerationJobCreate,
     SQLiteGenerationJobStore,
@@ -22,6 +23,7 @@ from .workflow_recipes import (
 
 __all__ = [
     "GenerationJobCreate",
+    "SQLiteEditJobStore",
     "GenerationProgressEvent",
     "GenerationServiceRequest",
     "GenerationServiceResult",

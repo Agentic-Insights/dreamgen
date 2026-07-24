@@ -12,6 +12,7 @@ from PIL import Image
 
 from src.generators.ollama_image_generator import OllamaImageGenerator
 from src.generators.prompt_generator import PromptGenerator
+from src.utils.generation_plan import GenerationPlan
 from src.utils.ollama import OllamaModelInfo
 
 
@@ -67,16 +68,7 @@ async def test_prompt_generator_falls_back_to_available_completion_model(monkeyp
         "src.generators.prompt_generator.list_ollama_models",
         lambda: [_image_model("x/z-image-turbo:latest"), _completion_model("qwen3.6:27b")],
     )
-    monkeypatch.setattr(
-        "src.generators.prompt_generator.get_context_with_descriptions",
-        lambda: {"results": [], "descriptions": []},
-    )
-    monkeypatch.setattr(
-        "src.generators.prompt_generator.get_temporal_descriptor",
-        lambda: "afternoon",
-    )
-
-    generator = PromptGenerator(config)
+    generator = PromptGenerator(config, GenerationPlan((), (), (), "", None))
     prompt = await generator.generate_prompt()
 
     assert prompt == "sunlit alley, cinematic framing"

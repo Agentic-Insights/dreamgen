@@ -14,6 +14,7 @@ from loguru import logger
 
 from ..plugins import plugin_manager, register_lora_plugin
 from ..plugins.lora import get_lora_path
+from ..utils.generation_plan import GenerationPlan, lora_provenance
 from .base_generator import GenerationResult, ImageGenerator
 
 
@@ -49,7 +50,10 @@ class ZImageGenerator(ImageGenerator):
         self.compile_model = config.model.zimage_compile
         self.components = None  # Will hold transformer, vae, text_encoder, tokenizer, scheduler
         self.using_diffsynth = False
+        self.generation_plan: Optional[GenerationPlan] = None
         self.selected_lora_name: Optional[str] = None
+        self.selected_lora_path: Optional[Path] = None
+        self.selected_lora_keyword: Optional[str] = None
         self.last_generation_metadata: dict = {}
 
         # Register LoRA plugin so Z-Image can consume the same selection flow as Flux.
@@ -67,8 +71,41 @@ class ZImageGenerator(ImageGenerator):
             "Clone Z-Image repo: git clone https://github.com/Tongyi-MAI/Z-Image ref-repos/Z-Image"
         )
 
+    def set_generation_plan(self, generation_plan: GenerationPlan) -> None:
+        """Lock this renderer to the job's already-resolved plugin choices."""
+        next_path = (
+            generation_plan.selected_lora.path.resolve()
+            if generation_plan.selected_lora is not None
+            else None
+        )
+        if self.pipe is not None and self.selected_lora_path != next_path:
+            self.cleanup()
+        self.generation_plan = generation_plan
+
     def _get_selected_lora_path(self) -> Optional[Path]:
         """Return the currently selected LoRA path, if any."""
+        if self.generation_plan is not None:
+            selection = self.generation_plan.selected_lora
+            if selection is None:
+                self.selected_lora_name = None
+                self.selected_lora_path = None
+                self.selected_lora_keyword = None
+                return None
+            lora_path = selection.path.resolve()
+            if not lora_path.is_file():
+                raise FileNotFoundError(
+                    f"Resolved LoRA disappeared before Z-Image rendering: {lora_path}"
+                )
+            self.selected_lora_name = selection.name
+            self.selected_lora_path = lora_path
+            self.selected_lora_keyword = selection.keyword
+            logger.info(
+                "Using job-locked Z-Image LoRA '{}' from {}",
+                selection.name,
+                lora_path,
+            )
+            return lora_path
+
         try:
             plugin_results = plugin_manager.execute_plugins()
         except Exception as exc:
@@ -80,9 +117,13 @@ class ZImageGenerator(ImageGenerator):
                 lora_path = get_lora_path(result.value, self.config)
                 if lora_path:
                     self.selected_lora_name = result.value
+                    self.selected_lora_path = lora_path.resolve()
+                    self.selected_lora_keyword = result.value
                     logger.info(f"Selected Z-Image LoRA '{result.value}' from {lora_path}")
                 return lora_path
         self.selected_lora_name = None
+        self.selected_lora_path = None
+        self.selected_lora_keyword = None
         return None
 
     def _build_diffsynth_model_configs(self) -> list[DiffSynthModelConfigSpec]:
@@ -197,8 +238,8 @@ class ZImageGenerator(ImageGenerator):
 
     def load_model(self):
         """Load Z-Image model components into memory."""
-        lora_path = self._get_selected_lora_path()
         self.cleanup()
+        lora_path = self._get_selected_lora_path()
         # DiffSynth fits the full Z-Image pipeline within the practical WDDM
         # memory budget on 24 GB cards. The native loader can exhaust the
         # available allocation even at 512x512 before an image is persisted.
@@ -311,6 +352,13 @@ class ZImageGenerator(ImageGenerator):
         output_path = self._save_image(image, prompt, seed)
 
         # Create metadata
+        selected_lora_provenance = None
+        if self.generation_plan is not None and self.generation_plan.selected_lora is not None:
+            selected_lora_provenance = lora_provenance(
+                self.generation_plan.selected_lora,
+                backend="diffsynth",
+            )
+
         metadata = {
             "model": "Z-Image-Turbo",
             "model_path": str(self.model_path),
@@ -324,6 +372,24 @@ class ZImageGenerator(ImageGenerator):
             "lora_backend": "diffsynth" if self.selected_lora_name else None,
             "using_diffsynth": self.using_diffsynth,
             "selected_lora": self.selected_lora_name if self.using_diffsynth else None,
+            "selected_lora_path": (
+                str(self.selected_lora_path) if self.selected_lora_path is not None else None
+            ),
+            "selected_lora_keyword": self.selected_lora_keyword,
+            "selected_lora_kind": (
+                selected_lora_provenance.get("kind") if selected_lora_provenance else None
+            ),
+            "selected_lora_trigger_placement": (
+                selected_lora_provenance.get("trigger_placement")
+                if selected_lora_provenance
+                else None
+            ),
+            "selected_lora_trigger_required": (
+                selected_lora_provenance.get("trigger_required")
+                if selected_lora_provenance
+                else None
+            ),
+            "lora_provenance": selected_lora_provenance,
         }
         self.last_generation_metadata = metadata
 
@@ -416,6 +482,8 @@ class ZImageGenerator(ImageGenerator):
 
         self.using_diffsynth = False
         self.selected_lora_name = None
+        self.selected_lora_path = None
+        self.selected_lora_keyword = None
         self.last_generation_metadata = {}
         super().cleanup()
 

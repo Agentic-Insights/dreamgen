@@ -79,12 +79,16 @@ class PluginManager:
             self.plugins[name].order = order
             self.logger.debug("Set order for plugin %s: %s", name, order)
 
-    def execute_plugins(self) -> List[PluginResult]:
+    def execute_plugins(self, overrides: Dict[str, Any] | None = None) -> List[PluginResult]:
         """
         Execute all enabled plugins in their specified order.
+        Values supplied in ``overrides`` are used without calling that plugin.
+        This lets a generation plan resolve a random choice once and replay it
+        through prompt and renderer consumers without another random draw.
         Returns a list of plugin results with their contributions.
         """
         results = []
+        resolved_overrides = overrides or {}
 
         # Sort plugins by order
         sorted_plugins = sorted(
@@ -94,7 +98,11 @@ class PluginManager:
         for plugin in sorted_plugins:
             try:
                 self.logger.debug(f"Executing plugin: {plugin.name}")
-                value = plugin.function()
+                value = (
+                    resolved_overrides[plugin.name]
+                    if plugin.name in resolved_overrides
+                    else plugin.function()
+                )
                 if value is not None:
                     result = PluginResult(
                         name=plugin.name, value=value, description=plugin.description

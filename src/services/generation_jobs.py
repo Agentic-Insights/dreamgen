@@ -422,6 +422,9 @@ class SQLiteGenerationJobStore:
         job_id: str,
         event: GenerationProgressEvent,
     ) -> None:
+        payload = dict(event.payload)
+        if event.duration_ms is not None:
+            payload["duration_ms"] = round(event.duration_ms, 2)
         connection.execute(
             """
             INSERT INTO generation_job_events (
@@ -436,7 +439,7 @@ class SQLiteGenerationJobStore:
                 event.progress,
                 event.label,
                 event.detail,
-                json.dumps(event.payload, sort_keys=True, default=str),
+                json.dumps(payload, sort_keys=True, default=str),
             ),
         )
 
@@ -465,6 +468,7 @@ class SQLiteGenerationJobStore:
         }
 
     def _row_to_event(self, row: sqlite3.Row) -> dict[str, Any]:
+        payload = json.loads(row["payload_json"] or "{}")
         return {
             "id": row["id"],
             "job_id": row["job_id"],
@@ -473,7 +477,8 @@ class SQLiteGenerationJobStore:
             "progress": row["progress"],
             "label": row["label"],
             "detail": row["detail"],
-            "payload": json.loads(row["payload_json"] or "{}"),
+            "payload": payload,
+            "duration_ms": payload.get("duration_ms"),
         }
 
 

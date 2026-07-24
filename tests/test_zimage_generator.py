@@ -9,6 +9,9 @@ import torch
 
 from src.generators.base_generator import GenerationResult
 from src.generators.zimage_generator import ZImageGenerator
+from src.plugins.lora import SelectedLora
+from src.utils.generation_plan import GenerationPlan
+from src.utils.plugin_manager import PluginResult
 
 
 @pytest.fixture
@@ -132,6 +135,32 @@ class TestZImageGeneratorWithMockZImage:
 
         mock_diffsynth.assert_called_once_with(None)
         mock_native.assert_not_called()
+
+    def test_load_model_uses_job_locked_lora_after_cleanup(self, mock_config, tmp_path):
+        lora_path = tmp_path / "locked-style" / "epoch-1.safetensors"
+        lora_path.parent.mkdir(parents=True)
+        lora_path.write_bytes(b"locked zimage lora")
+        plan = GenerationPlan(
+            plugin_results=(PluginResult("lora", "locked-trigger", "locked adapter"),),
+            plugin_descriptions=("lora: locked adapter",),
+            enabled_plugins=("lora",),
+            temporal_descriptor="locked-trigger",
+            selected_lora=SelectedLora("locked-style", lora_path, "locked-trigger"),
+        )
+
+        with patch("torch.cuda.is_available", return_value=False):
+            gen = ZImageGenerator(mock_config)
+        gen.set_generation_plan(plan)
+
+        with patch.object(gen, "_load_diffsynth_pipe") as mock_diffsynth:
+            with patch("src.generators.zimage_generator.plugin_manager.execute_plugins") as execute:
+                gen.load_model()
+
+        execute.assert_not_called()
+        mock_diffsynth.assert_called_once_with(lora_path.resolve())
+        assert gen.selected_lora_name == "locked-style"
+        assert gen.selected_lora_path == lora_path.resolve()
+        assert gen.selected_lora_keyword == "locked-trigger"
 
     def test_build_diffsynth_model_configs_expands_local_shards(self, mock_config, tmp_path):
         model_path = tmp_path / "Z-Image-Turbo"

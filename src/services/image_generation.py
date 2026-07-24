@@ -5,16 +5,18 @@ from __future__ import annotations
 import hashlib
 import inspect
 import shutil
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any, Protocol, cast, runtime_checkable
 
 from src.generators.factory import create_image_generator
 from src.generators.prompt_generator import PromptGenerator
-from src.plugins import plugin_manager
+from src.plugins.lora import condition_prompt_for_lora
 from src.utils.config import Config
+from src.utils.generation_plan import GenerationPlan, resolve_generation_plan
 from src.utils.publication_catalog import register_image
 from src.utils.storage import StorageManager, read_image_metadata, write_image_metadata
 
@@ -35,6 +37,14 @@ class ImageBackend(Protocol):
 
     def cleanup(self) -> None:
         """Release backend resources."""
+
+
+@runtime_checkable
+class PlannedImageBackend(Protocol):
+    """Optional backend capability for consuming a locked generation plan."""
+
+    def set_generation_plan(self, generation_plan: GenerationPlan) -> None:
+        """Lock plugin and adapter choices for the next render."""
 
 
 @dataclass(frozen=True)
@@ -61,6 +71,7 @@ class GenerationProgressEvent:
     label: str | None = None
     detail: str | None = None
     payload: dict[str, Any] = field(default_factory=dict)
+    duration_ms: float | None = None
 
 
 @dataclass(frozen=True)
@@ -179,6 +190,7 @@ class ImageGenService:
         resolved_seed: int | None,
         active_plugins: list[str],
         prompt_model: str | None,
+        generation_plan_metadata: dict[str, Any],
     ) -> dict[str, Any]:
         """Capture the reproducibility envelope for one local model probe."""
         width = _metadata_scalar(_config_value(self.config, "image", "width"))
@@ -251,6 +263,9 @@ class ImageGenService:
                 "plugins": active_plugins,
                 "loras": enabled_loras,
                 "lora_application_probability": lora_probability,
+                "plugin_contributions": generation_plan_metadata["plugin_contributions"],
+                "selected_lora": generation_plan_metadata["selected_lora"],
+                "resolution": generation_plan_metadata["resolution"],
             },
             "timing": {
                 "generation_seconds": generation_time,
@@ -274,8 +289,14 @@ class ImageGenService:
         self,
         request: GenerationServiceRequest,
         callback: ProgressCallback | None,
+        generation_plan: GenerationPlan,
     ) -> PromptResolution:
+        phase_started = time.perf_counter()
         if request.prompt:
+            final_prompt = condition_prompt_for_lora(
+                request.prompt,
+                generation_plan.selected_lora,
+            )
             await self._emit(
                 callback,
                 GenerationProgressEvent(
@@ -283,10 +304,11 @@ class ImageGenService:
                     progress=24,
                     label="Prompt ready",
                     detail="Using the prompt you provided directly.",
-                    payload={"prompt": request.prompt},
+                    payload={"prompt": final_prompt},
+                    duration_ms=(time.perf_counter() - phase_started) * 1000,
                 ),
             )
-            return PromptResolution(prompt=request.prompt)
+            return PromptResolution(prompt=final_prompt)
 
         await self._emit(
             callback,
@@ -297,8 +319,9 @@ class ImageGenService:
                 detail="Building a fresh prompt from Ollama and the active plugins.",
             ),
         )
-        prompt_generator = PromptGenerator(self.config)
+        prompt_generator = PromptGenerator(self.config, generation_plan=generation_plan)
         prompt = await prompt_generator.generate_prompt(meta_prompt=request.meta_prompt)
+        prompt = condition_prompt_for_lora(prompt, generation_plan.selected_lora)
         await self._emit(
             callback,
             GenerationProgressEvent(
@@ -307,6 +330,7 @@ class ImageGenService:
                 label="Prompt ready",
                 detail="The prompt is assembled. Preparing the image backend next.",
                 payload={"prompt": prompt},
+                duration_ms=(time.perf_counter() - phase_started) * 1000,
             ),
         )
         return PromptResolution(prompt=prompt, prompt_model=prompt_generator.model_name)
@@ -329,8 +353,27 @@ class ImageGenService:
             ),
         )
 
-        prompt_resolution = await self._resolve_prompt(request, callback)
+        plugins_enabled = request.metadata.get("plugins_enabled_requested") is not False
+        generation_plan = resolve_generation_plan(
+            self.config,
+            plugins_enabled=plugins_enabled,
+        )
+        await self._emit(
+            callback,
+            GenerationProgressEvent(
+                name="generation_plan_resolved",
+                progress=16,
+                label="Generation plan ready",
+                detail="Plugin and LoRA choices are locked for this job.",
+                payload=generation_plan.to_metadata(),
+            ),
+        )
+
+        prompt_started = time.perf_counter()
+        prompt_resolution = await self._resolve_prompt(request, callback, generation_plan)
+        prompt_duration_ms = (time.perf_counter() - prompt_started) * 1000
         final_prompt = prompt_resolution.prompt
+        backend_started = time.perf_counter()
         if backend is None:
             image_gen_raw, backend_name = create_image_generator(self.config)
             image_gen = cast(ImageBackend, image_gen_raw)
@@ -338,6 +381,11 @@ class ImageGenService:
             if backend_name is None:
                 raise ValueError("backend_name is required when passing a reusable backend")
             image_gen = backend
+        if isinstance(image_gen, PlannedImageBackend):
+            image_gen.set_generation_plan(generation_plan)
+        elif backend_name == "z-image":
+            raise RuntimeError("The Z-Image backend does not support job-locked generation plans")
+        backend_duration_ms = (time.perf_counter() - backend_started) * 1000
         await self._emit(
             callback,
             GenerationProgressEvent(
@@ -346,9 +394,9 @@ class ImageGenService:
                 label="Backend ready",
                 detail="The selected image backend is loaded and ready to render.",
                 payload={"backend": backend_name},
+                duration_ms=backend_duration_ms,
             ),
         )
-
         loading_message = loading_message_for_backend(backend_name)
         await self._emit(
             callback,
@@ -370,6 +418,8 @@ class ImageGenService:
                 payload={"output_path": requested_output_path},
             ),
         )
+        render_started = time.perf_counter()
+        generation_metadata: dict[str, Any] = {}
         try:
             image_path, generation_time, model_name = await image_gen.generate_image(
                 final_prompt,
@@ -388,30 +438,52 @@ class ImageGenService:
                             str(requested_output_path.with_suffix(suffix)),
                         )
                 image_path = requested_output_path
+            # Snapshot mutable backend provenance before optional cleanup.
+            generation_metadata = dict(getattr(image_gen, "last_generation_metadata", {}) or {})
         finally:
             if request.cleanup:
                 image_gen.cleanup()
+        render_duration_ms = (time.perf_counter() - render_started) * 1000
+        finalizing_started = time.perf_counter()
 
-        await self._emit(
-            callback,
-            GenerationProgressEvent(
-                name="finalizing_output",
-                progress=92,
-                label="Finalizing output",
-                detail=(
-                    "Saving metadata and writing the finished image to the gallery."
-                    if request.add_to_gallery
-                    else "Saving metadata for the ad-hoc output."
-                ),
-            ),
+        if backend_name == "z-image" and generation_plan.selected_lora is not None:
+            expected_lora = generation_plan.selected_lora
+            actual_lora = generation_metadata.get("selected_lora")
+            if actual_lora not in {None, expected_lora.name}:
+                raise RuntimeError(
+                    "Z-Image rendered with a LoRA that differs from the locked generation plan: "
+                    f"expected {expected_lora.name!r}, got {actual_lora!r}"
+                )
+            actual_path = generation_metadata.get("selected_lora_path")
+            expected_path = expected_lora.path.resolve()
+            if actual_path is not None and Path(actual_path).resolve() != expected_path:
+                raise RuntimeError(
+                    "Z-Image rendered with a LoRA path that differs from the locked generation "
+                    f"plan: expected {expected_path}, got {actual_path}"
+                )
+            generation_metadata.update(
+                {
+                    "selected_lora": expected_lora.name,
+                    "selected_lora_path": str(expected_path),
+                    "selected_lora_keyword": expected_lora.keyword,
+                    "selected_lora_kind": expected_lora.kind,
+                    "selected_lora_trigger_placement": expected_lora.trigger_placement,
+                    "selected_lora_trigger_required": expected_lora.trigger_required,
+                    "lora_backend": "diffsynth",
+                }
+            )
+
+        generation_plan_metadata = generation_plan.to_metadata(
+            lora_backend=generation_metadata.get("lora_backend")
         )
-
-        generation_metadata = getattr(image_gen, "last_generation_metadata", {}) or {}
+        generation_metadata["generation_plan"] = generation_plan_metadata
+        if generation_plan_metadata["selected_lora"] is not None:
+            generation_metadata["lora_provenance"] = generation_plan_metadata["selected_lora"]
         seed_supported = generation_metadata.get("seed_supported", True)
         resolved_seed = generation_metadata.get("seed")
         if resolved_seed is None and request.seed is not None and seed_supported:
             resolved_seed = request.seed
-        active_plugins = [name for name, info in plugin_manager.plugins.items() if info.enabled]
+        active_plugins = list(generation_plan.enabled_plugins)
         experiment_metadata = self._build_experiment_metadata(
             request=request,
             final_prompt=final_prompt,
@@ -422,6 +494,7 @@ class ImageGenService:
             resolved_seed=resolved_seed,
             active_plugins=active_plugins,
             prompt_model=prompt_resolution.prompt_model,
+            generation_plan_metadata=generation_plan_metadata,
         )
 
         existing_metadata = read_image_metadata(image_path)
@@ -451,6 +524,41 @@ class ImageGenService:
             relative_image_path = f"/images/{image_path.relative_to(self.output_dir).as_posix()}"
         else:
             relative_image_path = str(image_path.resolve())
+        phase_durations_ms = {
+            "prompt": round(prompt_duration_ms, 2),
+            "backend": round(backend_duration_ms, 2),
+            "render": round(render_duration_ms, 2),
+            "finalize": round((time.perf_counter() - finalizing_started) * 1000, 2),
+        }
+        experiment_metadata["timing"]["phase_durations_ms"] = phase_durations_ms
+        saved_metadata["experiment"] = experiment_metadata
+        write_image_metadata(image_path, saved_metadata)
+        await self._emit(
+            callback,
+            GenerationProgressEvent(
+                name="finalizing_output",
+                progress=92,
+                label="Finalizing output",
+                detail=(
+                    "Saving metadata and writing the finished image to the gallery."
+                    if request.add_to_gallery
+                    else "Saving metadata for the ad-hoc output."
+                ),
+                payload={
+                    "phase_durations_ms": phase_durations_ms,
+                    "catalog": (
+                        {
+                            "id": publication_entry["id"],
+                            "state": publication_entry["publication_state"],
+                            "publishable": publication_entry["publishable"],
+                        }
+                        if publication_entry
+                        else None
+                    ),
+                },
+                duration_ms=phase_durations_ms["finalize"],
+            ),
+        )
         response_metadata = {
             **request.metadata,
             **generation_metadata,
@@ -485,6 +593,11 @@ class ImageGenService:
                     "image_path": relative_image_path,
                     "prompt": final_prompt,
                     "backend": backend_name,
+                    "model": model_name,
+                    "generation_time": generation_time,
+                    "phase_durations_ms": phase_durations_ms,
+                    "selected_lora": generation_metadata.get("selected_lora"),
+                    "lora_backend": generation_metadata.get("lora_backend"),
                 },
             ),
         )

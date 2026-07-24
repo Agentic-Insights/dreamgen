@@ -12,7 +12,10 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
 
+from src.plugins.lora import SelectedLora
+from src.utils.generation_plan import GenerationPlan
 from src.utils.ollama import OllamaModelInfo
+from src.utils.plugin_manager import PluginResult
 from src.utils.publication_catalog import load_catalog
 from src.utils.storage import metadata_path_for, write_image_metadata
 
@@ -88,7 +91,13 @@ def test_model_runtime_status_and_cleanup_endpoints(client):
     assert payload["configured_backend"]
     assert payload["resolved_backend"]
     assert {item["backend"] for item in payload["backends"]} >= {
-        "flux", "small", "turbo", "zimage", "ollama", "smoke", "mock"
+        "flux",
+        "small",
+        "turbo",
+        "zimage",
+        "ollama",
+        "smoke",
+        "mock",
     }
     assert "system" in payload["memory"]
 
@@ -257,6 +266,86 @@ def test_generate_endpoint_records_durable_job(client):
     assert any(event["name"] == "generation_completed" for event in job["events"])
 
 
+def test_api_job_and_catalog_persist_locked_lora_provenance(client, monkeypatch, tmp_path):
+    """One resolved LoRA should survive API response, job state, and catalog persistence."""
+    lora_path = tmp_path / "loras" / "api-style" / "epoch-1.safetensors"
+    lora_path.parent.mkdir(parents=True)
+    lora_path.write_bytes(b"api locked lora")
+    plan = GenerationPlan(
+        plugin_results=(PluginResult("lora", "api-trigger", "API adapter"),),
+        plugin_descriptions=("lora: API adapter",),
+        enabled_plugins=("lora",),
+        temporal_descriptor="",
+        selected_lora=SelectedLora("api-style", lora_path, "api-trigger"),
+    )
+
+    class ApiZImageBackend:
+        def __init__(self):
+            self.plan = None
+            self.last_generation_metadata = {}
+
+        def set_generation_plan(self, received_plan):
+            self.plan = received_plan
+
+        async def generate_image(self, prompt, output_path, force_reinit=False, seed=None):
+            assert self.plan is plan
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            Image.new("RGB", (16, 16), color=(20, 50, 90)).save(output_path)
+            self.last_generation_metadata = {
+                "selected_lora": "api-style",
+                "selected_lora_path": str(lora_path.resolve()),
+                "selected_lora_keyword": "api-trigger",
+                "lora_backend": "diffsynth",
+                "seed": seed,
+            }
+            return output_path, 0.25, "Z-Image-Turbo"
+
+        def cleanup(self):
+            self.last_generation_metadata = {}
+
+    backend = ApiZImageBackend()
+    monkeypatch.setattr(
+        "src.services.image_generation.resolve_generation_plan",
+        lambda config, plugins_enabled=True: plan,
+    )
+    monkeypatch.setattr(
+        "src.services.image_generation.create_image_generator",
+        lambda config: (backend, "z-image"),
+    )
+
+    response = client.post(
+        "/api/generate",
+        json={"prompt": "A blue model lab with floating geometric instruments", "seed": 88},
+    )
+    assert response.status_code == 200
+    generation = response.json()
+    response_metadata = generation["metadata"]
+    provenance = response_metadata["lora_provenance"]
+    assert response_metadata["selected_lora"] == "api-style"
+    assert response_metadata["lora_backend"] == "diffsynth"
+    assert response_metadata["selected_lora_kind"] == "style"
+    assert generation["prompt"].endswith(", api-trigger")
+    assert "'api-trigger'" not in generation["prompt"]
+    assert provenance["path"] == str(lora_path.resolve())
+    assert provenance["kind"] == "style"
+    assert provenance["sha256"]
+
+    job_response = client.get(f"/api/jobs/{generation['id']}")
+    assert job_response.status_code == 200
+    job = job_response.json()
+    assert job["metadata"]["lora_provenance"] == provenance
+    plan_event = next(
+        event for event in job["events"] if event["name"] == "generation_plan_resolved"
+    )
+    assert plan_event["payload"]["selected_lora"]["name"] == "api-style"
+
+    catalog = load_catalog(Path(_TEST_OUTPUT_DIR))
+    relative_key = generation["image_path"].replace("/images/", "")
+    catalog_metadata = catalog["assets"][relative_key]["metadata"]
+    assert catalog_metadata["generation_plan"]["resolution"] == "once_per_job"
+    assert catalog_metadata["lora_provenance"] == provenance
+
+
 def test_jobs_endpoint_creates_and_lists_generation_job(client):
     """Durable job endpoints should create, run, fetch, and list jobs."""
     response = client.post(
@@ -340,6 +429,10 @@ def test_generation_config_endpoint(client, monkeypatch):
     assert data["pipeline"]["image"]["backend"] == "mock"
     assert isinstance(data["enabled_loras"], list)
     assert isinstance(data["available_loras"], list)
+    assert isinstance(data["lora_metadata"], list)
+    if data["lora_metadata"]:
+        assert {item["kind"] for item in data["lora_metadata"]} <= {"style", "object"}
+        assert all("trigger_placement" in item for item in data["lora_metadata"])
     assert "lora_application_probability" in data
     assert "zimage_model_path" in data
     assert data["qwen_image_model"] == "diffusers/qwen-image-nf4"
