@@ -15,10 +15,11 @@ RUN apt-get update && apt-get install -y \
 # Copy dependency files first for better caching
 COPY pyproject.toml uv.lock ./
 
-# Create virtual environment and install dependencies
-# UV will handle Python and all dependencies
-RUN uv venv /opt/venv && \
-    uv pip install --python /opt/venv/bin/python --system -r pyproject.toml
+# Install the exact production dependency set captured in uv.lock.  Resolving
+# pyproject.toml directly here ignores tool.uv.sources and can select an
+# incompatible diffusers/huggingface-hub combination from the first index.
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv
+RUN uv sync --frozen --no-dev --no-install-project
 
 # Set up environment for builder stage too
 ENV PATH="/opt/venv/bin:$PATH"
@@ -48,7 +49,7 @@ COPY --chown=appuser:appuser data/ ./data/
 COPY --chown=appuser:appuser pyproject.toml uv.lock ./
 
 # Create necessary directories with proper permissions
-RUN mkdir -p /app/output /app/models /app/logs && \
+RUN mkdir -p /app/output /app/models /app/logs /app/.cache && \
     chown -R appuser:appuser /app
 
 # Switch to non-root user
