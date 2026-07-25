@@ -29,7 +29,13 @@ def test_runtime_status_resolves_auto_and_reports_all_required_backends(tmp_path
     assert payload["configured_backend"] == "auto"
     assert payload["resolved_backend"] == "small"
     assert {item["backend"] for item in payload["backends"]} >= {
-        "flux", "small", "turbo", "zimage", "ollama", "smoke", "mock"
+        "flux",
+        "small",
+        "turbo",
+        "zimage",
+        "ollama",
+        "smoke",
+        "mock",
     }
     assert "system" in payload["memory"]
     assert payload["recommended"]["backend"] in {"zimage", "flux", "small"}
