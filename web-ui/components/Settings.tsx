@@ -57,6 +57,7 @@ const IMAGE_BACKEND_OPTIONS = [
 export default function Settings({ systemStatus, onRuntimeChange }: SettingsProps) {
   const [activeSection, setActiveSection] = useState("models");
   const [modelStatus, setModelStatus] = useState<ModelStatus | null>(null);
+  const [modelStatusError, setModelStatusError] = useState(false);
   const [generationConfig, setGenerationConfig] = useState<GenerationConfig | null>(null);
   const [loadingGenerationConfig, setLoadingGenerationConfig] = useState(false);
   const [hfTokenStatus, setHFTokenStatus] = useState<HFTokenStatus | null>(null);
@@ -69,6 +70,7 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
   const [loadingOllama, setLoadingOllama] = useState(false);
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [loadingPlugins, setLoadingPlugins] = useState(false);
+  const [pluginsError, setPluginsError] = useState(false);
 
   const notifyRuntimeChange = useCallback(async () => {
     await onRuntimeChange?.();
@@ -114,11 +116,13 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
   }, []);
 
   const loadModelStatus = async () => {
+    setModelStatusError(false);
     try {
       const status = await api.getModelStatus();
       setModelStatus(status);
     } catch (error) {
       console.error('Failed to load model status:', error);
+      setModelStatusError(true);
     }
   };
 
@@ -159,11 +163,13 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
 
   const loadPlugins = async () => {
     setLoadingPlugins(true);
+    setPluginsError(false);
     try {
       const pluginList = await api.getPlugins();
       setPlugins(pluginList);
     } catch (error) {
       console.error('Failed to load plugins:', error);
+      setPluginsError(true);
       setMessage({ type: 'error', text: 'Failed to load plugins' });
     } finally {
       setLoadingPlugins(false);
@@ -367,6 +373,11 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
   };
 
   const loraPluginEnabled = plugins.some((plugin) => plugin.name === "lora" && plugin.enabled);
+  const enabledPromptPlugins = plugins.filter((plugin) => plugin.enabled && plugin.kind !== "guard");
+  const enabledGuardPlugins = plugins.filter((plugin) => plugin.enabled && plugin.kind === "guard");
+  const activeRuntimeModel = modelStatus?.models.find(
+    (model) => model.backend === modelStatus.resolved_backend && model.status === "ready"
+  );
   const entropyLevel = generationConfig?.entropy_level ?? "strange";
   const selectedBackend = generationConfig?.image_backend ?? "auto";
   const availableLoras = generationConfig?.available_loras ?? [];
@@ -1300,76 +1311,97 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
               exit={{ opacity: 0, y: -10 }}
               className="p-4 sm:p-6 lg:p-8"
             >
-              <div className="max-w-2xl">
-                <h3 className="text-xl font-semibold mb-6">System Information</h3>
+              <div className="max-w-3xl">
+                <h3 className="text-xl font-semibold">System Information</h3>
+                <p className="text-sm text-muted-foreground mt-1 mb-6">
+                  Live readiness, runtime, resource, and plugin guard state from the backend.
+                </p>
 
-                {systemStatus && (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div className="border border-border rounded-lg p-4">
-                        <div className="flex items-center gap-2 mb-2">
-                          <Server className="w-4 h-4 text-muted-foreground" />
-                          <span className="text-sm font-medium">API Status</span>
-                        </div>
-                        <div className={cn(
-                          "text-lg font-semibold",
-                          systemStatus.status === 'ready' ? 'text-green-500' : 'text-orange-500'
-                        )}>
-                          {systemStatus.status === 'ready' ? 'Ready' : 'Not Ready'}
-                        </div>
-                      </div>
-
-                      <div className="border border-border rounded-lg p-4">
-                        <div className="flex items-center gap-2 mb-2">
-                          <Cpu className="w-4 h-4 text-muted-foreground" />
-                          <span className="text-sm font-medium">GPU</span>
-                        </div>
-                        <div className={cn(
-                          "text-lg font-semibold",
-                          systemStatus.gpu_available ? 'text-green-500' : 'text-orange-500'
-                        )}>
-                          {systemStatus.gpu_available ? 'Available' : 'Not Available'}
-                        </div>
-                      </div>
-
-                      <div className="border border-border rounded-lg p-4">
-                        <div className="flex items-center gap-2 mb-2">
-                          <Database className="w-4 h-4 text-muted-foreground" />
-                          <span className="text-sm font-medium">Backend</span>
-                        </div>
-                        <div className="text-lg font-semibold text-foreground capitalize">
-                          {systemStatus.backend}
-                        </div>
-                      </div>
-
-                      <div className="border border-border rounded-lg p-4">
-                        <div className="flex items-center gap-2 mb-2">
-                          <SettingsIcon className="w-4 h-4 text-muted-foreground" />
-                          <span className="text-sm font-medium">Plugins</span>
-                        </div>
-                        <div className="text-lg font-semibold text-foreground">
-                          {systemStatus.active_plugins.length} Active
-                        </div>
-                      </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="border border-border rounded-lg p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Server className="w-4 h-4 text-muted-foreground" />
+                      <span className="text-sm font-medium">Backend readiness</span>
                     </div>
-
-                    {systemStatus.active_plugins.length > 0 && (
-                      <div className="border border-border rounded-lg p-4">
-                        <h4 className="text-sm font-medium mb-3">Active Plugins</h4>
-                        <div className="flex flex-wrap gap-2">
-                          {systemStatus.active_plugins.map((plugin) => (
-                            <span
-                              key={plugin}
-                              className="px-2 py-1 bg-primary/10 text-primary text-xs rounded-md"
-                            >
-                              {plugin}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+                    <div className={cn(
+                      "text-lg font-semibold",
+                      systemStatus?.status === "ready" ? "text-green-500" : "text-orange-500"
+                    )}>
+                      {systemStatus ? (systemStatus.status === "ready" ? "Ready" : systemStatus.status) : "Unavailable"}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-2">
+                      {systemStatus
+                        ? `Image backend: ${systemStatus.backend}. Prompt service: ${systemStatus.ollama_available ? "online" : "unavailable"}.`
+                        : "The /api/status response has not loaded."}
+                    </p>
                   </div>
-                )}
+
+                  <div className="border border-border rounded-lg p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Database className="w-4 h-4 text-muted-foreground" />
+                      <span className="text-sm font-medium">Active runtime</span>
+                    </div>
+                    <div className="text-lg font-semibold text-foreground capitalize">
+                      {modelStatus?.resolved_backend ?? (modelStatusError ? "Unavailable" : "Loading…")}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-2">
+                      {modelStatus
+                        ? `${modelStatus.configured_backend} configured → ${activeRuntimeModel?.name ?? "runtime model not identified"}.`
+                        : modelStatusError
+                          ? "The /api/models/status response is unavailable."
+                          : "Loading /api/models/status…"}
+                    </p>
+                  </div>
+
+                  <div className="border border-border rounded-lg p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Cpu className="w-4 h-4 text-muted-foreground" />
+                      <span className="text-sm font-medium">Device & resources</span>
+                    </div>
+                    <div className={cn(
+                      "text-lg font-semibold",
+                      modelStatus?.memory.cuda.available || systemStatus?.gpu_available
+                        ? "text-green-500"
+                        : "text-orange-500"
+                    )}>
+                      {modelStatus
+                        ? (modelStatus.memory.cuda.available
+                          ? modelStatus.memory.cuda.device ?? "CUDA available"
+                          : "CPU only")
+                        : systemStatus
+                          ? (systemStatus.gpu_available ? "GPU available" : "CPU only")
+                          : "Unavailable"}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-2">
+                      {modelStatus
+                        ? (modelStatus.memory.cuda.available && modelStatus.memory.cuda.free_gb !== undefined
+                          ? `${modelStatus.memory.cuda.free_gb.toFixed(1)} / ${modelStatus.memory.cuda.total_gb?.toFixed(1) ?? "?"} GB VRAM free.`
+                          : `${modelStatus.memory.system.available_gb.toFixed(1)} / ${modelStatus.memory.system.total_gb.toFixed(1)} GB RAM free.`)
+                        : "Resource details are unavailable until the model status loads."}
+                    </p>
+                  </div>
+
+                  <div className="border border-border rounded-lg p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <SettingsIcon className="w-4 h-4 text-muted-foreground" />
+                      <span className="text-sm font-medium">Plugins & guards</span>
+                    </div>
+                    <div className="text-lg font-semibold text-foreground">
+                      {pluginsError
+                        ? "Unavailable"
+                        : loadingPlugins
+                          ? "Loading…"
+                          : `${enabledPromptPlugins.length} prompt · ${enabledGuardPlugins.length} guard`}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-2">
+                      {pluginsError
+                        ? "The /api/plugins response is unavailable."
+                        : loadingPlugins
+                          ? "Loading plugin state…"
+                          : `Prompt: ${enabledPromptPlugins.map((plugin) => plugin.name.replaceAll("_", " ")).join(", ") || "none"}. Guard: ${enabledGuardPlugins.map((plugin) => plugin.name.replaceAll("_", " ")).join(", ") || "none"}.`}
+                    </p>
+                  </div>
+                </div>
               </div>
             </motion.div>
           )}
