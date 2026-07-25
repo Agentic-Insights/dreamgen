@@ -86,6 +86,16 @@ ALLOWED_IMAGE_BACKENDS = {
     "mock",
 }
 MAX_RECENT_GENERATION_EVENTS = 100
+HF_TOKEN_PLACEHOLDER = "your_hugging_face_token_here"
+
+
+def configured_hf_token() -> str | None:
+    """Return a usable Hugging Face token without exposing placeholder values."""
+    token = os.getenv("HF_TOKEN", "").strip()
+    if not token or token == HF_TOKEN_PLACEHOLDER:
+        return None
+    return token
+
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -980,7 +990,11 @@ async def prefetch_default_fallback_model() -> None:
         from huggingface_hub import snapshot_download
 
         logger.info("Prefetching small fallback model: %s", config.model.small_sd_model)
-        await asyncio.to_thread(snapshot_download, repo_id=config.model.small_sd_model)
+        await asyncio.to_thread(
+            snapshot_download,
+            repo_id=config.model.small_sd_model,
+            token=configured_hf_token(),
+        )
         logger.info("Small fallback model is ready")
     except Exception as e:
         logger.warning("Small fallback prefetch failed: %s", e)
@@ -1276,15 +1290,23 @@ async def download_model(model_id: str):
 
                 # Use snapshot_download to get the entire model
                 loop = asyncio.get_event_loop()
+                download_token = configured_hf_token()
                 if local_dir is not None:
                     await loop.run_in_executor(
                         None,
-                        lambda: snapshot_download(repo_id=resolved_model_id, local_dir=local_dir),
+                        lambda: snapshot_download(
+                            repo_id=resolved_model_id,
+                            local_dir=local_dir,
+                            token=download_token,
+                        ),
                     )
                 else:
                     await loop.run_in_executor(
                         None,
-                        lambda: snapshot_download(repo_id=resolved_model_id),
+                        lambda: snapshot_download(
+                            repo_id=resolved_model_id,
+                            token=download_token,
+                        ),
                     )
 
                 logger.info(f"Download completed for model: {resolved_model_id}")
@@ -1326,7 +1348,7 @@ async def set_hf_token(token_data: dict):
     """Set HuggingFace token"""
     token = token_data.get("token", "").strip()
 
-    if not token:
+    if not token or token == HF_TOKEN_PLACEHOLDER:
         raise HTTPException(status_code=400, detail="Token is required")
 
     try:
@@ -1336,8 +1358,13 @@ async def set_hf_token(token_data: dict):
         hf_cache_dir.mkdir(parents=True, exist_ok=True)
         token_file = hf_cache_dir / "token"
 
-        with open(token_file, "w") as f:
-            f.write(token)
+        token_file.write_text(token, encoding="utf-8")
+        try:
+            token_file.chmod(0o600)
+        except OSError:
+            # Windows ACLs do not map cleanly to POSIX modes; keep the local
+            # cache behavior working while avoiding a noisy failure.
+            pass
 
         # Also set environment variable for current session
         os.environ["HF_TOKEN"] = token
@@ -1354,7 +1381,7 @@ async def set_hf_token(token_data: dict):
 async def get_hf_token_status():
     """Check if HF token is configured"""
     # Check environment variable first
-    if os.getenv("HF_TOKEN"):
+    if configured_hf_token():
         return {"configured": True, "source": "environment"}
 
     # Check token file using configured HF_HOME
@@ -1362,7 +1389,12 @@ async def get_hf_token_status():
     token_file = hf_cache_dir / "token"
 
     if token_file.exists():
-        return {"configured": True, "source": "file"}
+        try:
+            stored_token = token_file.read_text(encoding="utf-8").strip()
+        except OSError:
+            stored_token = ""
+        if stored_token and stored_token != HF_TOKEN_PLACEHOLDER:
+            return {"configured": True, "source": "file"}
 
     return {"configured": False, "source": None}
 

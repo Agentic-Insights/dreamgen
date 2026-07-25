@@ -84,6 +84,16 @@ def test_status_endpoint(client):
     ]
 
 
+def test_hf_token_status_ignores_placeholder_environment_value(client, monkeypatch, tmp_path):
+    """A template value must not make the authentication page report a token."""
+    monkeypatch.setenv("HF_TOKEN", "your_hugging_face_token_here")
+    monkeypatch.setenv("HF_HOME", str(tmp_path))
+    response = client.get("/api/config/hf-token-status")
+
+    assert response.status_code == 200
+    assert response.json() == {"configured": False, "source": None}
+
+
 def test_model_runtime_status_and_cleanup_endpoints(client):
     status = client.get("/api/models/status")
     assert status.status_code == 200

@@ -75,6 +75,11 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
   }, [onRuntimeChange]);
 
   useEffect(() => {
+    // Older builds briefly mirrored the HF token into browser storage. Remove
+    // that stale copy and keep the browser out of credential persistence.
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem("hf_token");
+    }
     loadModelStatus();
     loadGenerationConfig();
     loadHFTokenStatus();
@@ -264,10 +269,7 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
     setIsSubmitting(true);
     try {
       await api.setHFToken(hfToken.trim());
-      setMessage({ type: 'success', text: 'HuggingFace token saved successfully!' });
-
-      // Store in localStorage as well (like agenticinsights.com pattern)
-      localStorage.setItem('hf_token', hfToken.trim());
+      setMessage({ type: 'success', text: 'Hugging Face token saved to the local backend.' });
 
       setHFToken("");
       await loadHFTokenStatus();
@@ -1185,8 +1187,9 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
                     </div>
 
                     <p className="text-sm text-muted-foreground mb-4">
-                      Optional for the tiny public fallback model. Still useful for gated or private
-                      model downloads and for avoiding rate limits.
+                      Optional for public fallback models. Useful for gated or private model downloads
+                      and for avoiding rate limits. The token is sent to this local backend, stored in
+                      its configured Hugging Face cache, and is never persisted in the browser.
                       Get your token from{" "}
                       <a
                         href="https://huggingface.co/settings/tokens"
@@ -1233,6 +1236,27 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
                         )}
                       </button>
                     </form>
+                  </div>
+
+                  <div className="border border-border rounded-lg p-4 bg-muted/20">
+                    <div className="flex items-center gap-2 mb-3">
+                      <AlertCircle className="w-5 h-5 text-primary" />
+                      <h4 className="text-lg font-medium">Cloudflare deployment</h4>
+                      <span className="text-xs rounded-full bg-muted px-2 py-0.5 text-muted-foreground">
+                        Explicit setup only
+                      </span>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      DreamGen does not implement Cloudflare OAuth, account linking, or automatic
+                      Worker provisioning from this page. Nothing is deployed or authorized here.
+                      Deploy your own Workers or Pages project explicitly with Wrangler or the
+                      repository workflow after reviewing the requested account and R2 scopes.
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-3">
+                      Keep Cloudflare credentials in your deployment environment; do not enter them
+                      into DreamGen or commit them to the repository. This local API is an operator
+                      surface, not a customer-account login gateway.
+                    </p>
                   </div>
                 </div>
               </div>

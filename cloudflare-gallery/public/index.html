@@ -876,7 +876,7 @@
         const res = await fetch('/api/images');
         if (!res.ok) {
           if (res.status === 401 || res.status === 403) {
-            setLoading('Gallery API authorization failed');
+            setLoading('Cloudflare gallery storage is not authorized for this deployment');
             return;
           }
           setLoading(`Gallery API error ${res.status}`);
