@@ -62,6 +62,12 @@ Docker notes for reviewers:
 - Ollama is expected on `http://host.docker.internal:11434` from inside Docker on this machine.
 - If generated images look like diagnostic noise, the stack is likely on `smoke`; use `auto` or `small` for a real visual check.
 
+### Presentation preview rule
+
+Any DreamGen preview presented for review must come from a fresh Docker rebuild followed by
+container health and affected API/UI checks. Local Next.js dev servers may be used for
+development only and must not be presented as the current Docker/reviewer surface.
+
 ### Post-merge Docker deployment SOP
 
 After a branch is merged to `main`, do not treat a local dev server as the deployed review surface. The Next.js dev server on ports such as `3000` or `3001` is only for hot-reload development. The Docker stack is the reviewer/staging-like surface:
