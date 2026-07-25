@@ -1,0 +1,51 @@
+{
+  "seed": 20260725,
+  "purpose": "Reviewable local prompt-plan samples; no image assets or external models used.",
+  "generation_plan_example": {
+    "resolution": "once_per_job",
+    "enabled_plugins": ["dream_source_mixer"],
+    "plugin_categories": {"dream_source_mixer": "entropy"},
+    "plugin_contributions_reference": "selections[*].prompt and selections[*].provenance"
+  },
+  "selections": [
+    {
+      "level": "calm",
+      "prompt": "A coherent dream fragment with gentle source-world continuity: place=a night market beneath an abandoned space elevator; material=oxidized copper and wet paper; light=low blue dawn filtered through mist; camera=a distant architectural wide shot; era=a forgotten 1970s field station; mood=tender dislocation. Preserve tactile detail and visual continuity.",
+      "motifs": {
+        "place": "a night market beneath an abandoned space elevator",
+        "material": "oxidized copper and wet paper",
+        "light": "low blue dawn filtered through mist",
+        "camera": "a distant architectural wide shot",
+        "era": "a forgotten 1970s field station",
+        "mood": "tender dislocation"
+      },
+      "provenance": {"plugin": "dream_source_mixer", "category": "entropy", "seed": 20260725, "level": "calm"}
+    },
+    {
+      "level": "strange",
+      "prompt": "A dream fragment assembled from a surprising but legible source-world collision: place=a moss-covered train station inside a vast greenhouse; material=charcoal wood, wax, and pearl dust; light=warm sodium lamps interrupted by moonlight; camera=a patient eye-level 50mm view; era=an age that has no agreed calendar; mood=lucid unease. Preserve tactile detail and visual continuity.",
+      "motifs": {
+        "place": "a moss-covered train station inside a vast greenhouse",
+        "material": "charcoal wood, wax, and pearl dust",
+        "light": "warm sodium lamps interrupted by moonlight",
+        "camera": "a patient eye-level 50mm view",
+        "era": "an age that has no agreed calendar",
+        "mood": "lucid unease"
+      },
+      "provenance": {"plugin": "dream_source_mixer", "category": "entropy", "seed": 20260725, "level": "strange"}
+    },
+    {
+      "level": "wild",
+      "prompt": "A volatile dream fragment where distant source-worlds collide while the subject remains readable: place=a flooded observatory at the edge of a salt desert; material=oxidized copper and wet paper; light=a thin eclipse rim with soft interior glow; camera=a high oblique view as if remembered from above; era=a forgotten 1970s field station; mood=homesick curiosity. Preserve tactile detail and visual continuity.",
+      "motifs": {
+        "place": "a flooded observatory at the edge of a salt desert",
+        "material": "oxidized copper and wet paper",
+        "light": "a thin eclipse rim with soft interior glow",
+        "camera": "a high oblique view as if remembered from above",
+        "era": "a forgotten 1970s field station",
+        "mood": "homesick curiosity"
+      },
+      "provenance": {"plugin": "dream_source_mixer", "category": "entropy", "seed": 20260725, "level": "wild"}
+    }
+  ]
+}

@@ -299,6 +299,7 @@ def generation_config_payload() -> Dict[str, Any]:
         "lora_metadata": lora_metadata,
         "lora_application_probability": config.model.lora.application_probability,
         "lora_dir": str(config.model.lora.lora_dir),
+        "entropy_level": config.plugins.entropy_level,
         "zimage_model_path": str(config.model.zimage_model_path),
         "zimage_native_available": zimage_native_source_path().exists(),
         "qwen_image_model": config.model.qwen_image_model,
@@ -655,6 +656,9 @@ class PluginInfo(BaseModel):
     enabled: bool
     description: str
     order: int
+    category: str = "context"
+    kind: str = "prompt"
+    phase: str = "prompt"
 
 
 class PluginOrderRequest(BaseModel):
@@ -1061,20 +1065,18 @@ async def get_status():
 @app.get("/api/plugins", response_model=List[PluginInfo])
 async def get_plugins():
     """Get list of available plugins and their states"""
-    plugins = []
-    sorted_plugins = sorted(
-        plugin_manager.plugins.values(), key=lambda info: (info.order, info.name)
-    )
-    for info in sorted_plugins:
-        plugins.append(
-            PluginInfo(
-                name=info.name,
-                enabled=info.enabled,
-                description=info.description,
-                order=info.order,
-            )
+    return [
+        PluginInfo(
+            name=info.name,
+            enabled=info.enabled,
+            description=info.description,
+            order=info.order,
+            category=info.category,
+            kind=info.kind,
+            phase=info.phase,
         )
-    return plugins
+        for info in plugin_manager.registry_entries()
+    ]
 
 
 @app.get("/api/models/status")
@@ -1402,7 +1404,7 @@ async def get_hf_token_status():
 @app.post("/api/plugins/{plugin_name}/toggle")
 async def toggle_plugin(plugin_name: str):
     """Toggle a plugin on/off"""
-    if plugin_name not in plugin_manager.plugins:
+    if plugin_name not in plugin_manager.plugins and plugin_name not in plugin_manager.guards:
         raise HTTPException(status_code=404, detail=f"Plugin '{plugin_name}' not found")
 
     current_state = plugin_manager.is_enabled(plugin_name)
@@ -1565,6 +1567,11 @@ async def set_generation_config(data: dict):
             if not 0.0 <= probability <= 1.0:
                 raise ValueError("lora_application_probability must be between 0.0 and 1.0")
             config.model.lora.application_probability = probability
+        if "entropy_level" in data:
+            entropy_level = str(data["entropy_level"]).strip().lower()
+            if entropy_level not in {"calm", "strange", "wild"}:
+                raise ValueError("entropy_level must be calm, strange, or wild")
+            config.plugins.entropy_level = entropy_level
 
         runtime_manager.persist_selection()
 

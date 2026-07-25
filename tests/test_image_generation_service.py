@@ -217,7 +217,7 @@ async def test_service_shares_locked_lora_and_snapshots_metadata_before_cleanup(
 
     monkeypatch.setattr(
         "src.services.image_generation.resolve_generation_plan",
-        lambda config, plugins_enabled=True: plan,
+        lambda config, plugins_enabled=True, seed=None: plan,
     )
 
     async def generate_locked_prompt(self, meta_prompt=None):
@@ -281,6 +281,10 @@ async def test_service_shares_locked_lora_and_snapshots_metadata_before_cleanup(
     assert provenance["path"] == str(lora_path.resolve())
     assert provenance["sha256"]
     assert result.metadata["generation_plan"]["resolution"] == "once_per_job"
+    assert {guard["phase"] for guard in result.metadata["operational_guards"]} == {"pre", "post"}
+    assert all(
+        guard["category"] == "operational" for guard in result.metadata["operational_guards"]
+    )
     assert result.metadata["experiment"]["enhancers"]["selected_lora"] == provenance
 
     catalog = load_catalog(tmp_path)

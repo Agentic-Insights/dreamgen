@@ -236,13 +236,14 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
   };
 
   const movePlugin = async (pluginName: string, direction: 'up' | 'down') => {
-    const currentIndex = plugins.findIndex((plugin) => plugin.name === pluginName);
+    const orderedPlugins = plugins.filter((plugin) => plugin.kind !== 'guard');
+    const currentIndex = orderedPlugins.findIndex((plugin) => plugin.name === pluginName);
     if (currentIndex === -1) return;
 
     const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
-    if (targetIndex < 0 || targetIndex >= plugins.length) return;
+    if (targetIndex < 0 || targetIndex >= orderedPlugins.length) return;
 
-    const nextPlugins = [...plugins];
+    const nextPlugins = [...orderedPlugins];
     const [movedPlugin] = nextPlugins.splice(currentIndex, 1);
     nextPlugins.splice(targetIndex, 0, movedPlugin);
 
@@ -366,6 +367,7 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
   };
 
   const loraPluginEnabled = plugins.some((plugin) => plugin.name === "lora" && plugin.enabled);
+  const entropyLevel = generationConfig?.entropy_level ?? "strange";
   const selectedBackend = generationConfig?.image_backend ?? "auto";
   const availableLoras = generationConfig?.available_loras ?? [];
   const enabledLoras = generationConfig?.enabled_loras ?? [];
@@ -1124,6 +1126,14 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
                           <div className="flex items-center gap-2">
                             <h4 className="font-medium">{plugin.name}</h4>
                             <span className="text-xs px-2 py-0.5 bg-muted text-muted-foreground rounded-full">
+                              {plugin.category ?? "context"}
+                            </span>
+                            {plugin.kind === "guard" && (
+                              <span className="text-xs px-2 py-0.5 bg-amber-500/10 text-amber-600 rounded-full">
+                                hook
+                              </span>
+                            )}
+                            <span className="text-xs px-2 py-0.5 bg-muted text-muted-foreground rounded-full">
                               #{plugin.order}
                             </span>
                           </div>
@@ -1133,6 +1143,23 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
                         </div>
 
                         <div className="flex flex-col gap-2 shrink-0">
+                          {plugin.name === "dream_source_mixer" && (
+                            <select
+                              value={entropyLevel}
+                              onChange={(event) =>
+                                updateGenerationConfig({
+                                  entropy_level: event.target.value as "calm" | "strange" | "wild",
+                                })
+                              }
+                              className="rounded border border-border bg-background px-2 py-1 text-xs"
+                              aria-label="Dream Source Mixer entropy level"
+                            >
+                              <option value="calm">calm</option>
+                              <option value="strange">strange</option>
+                              <option value="wild">wild</option>
+                            </select>
+                          )}
+                          {plugin.kind !== "guard" && <>
                           <button
                             type="button"
                             onClick={() => movePlugin(plugin.name, 'up')}
@@ -1151,6 +1178,7 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
                           >
                             <ArrowDown className="w-4 h-4" />
                           </button>
+                          </>}
                         </div>
                       </div>
                     ))}

@@ -141,6 +141,10 @@ def test_plugins_endpoint(client):
 
     data = response.json()
     assert isinstance(data, list)
+    assert any(
+        item["name"] == "dream_source_mixer" and item["category"] == "entropy" for item in data
+    )
+    assert any(item["name"] == "provenance_guard" and item["kind"] == "guard" for item in data)
 
 
 def test_generate_endpoint(client):
@@ -316,7 +320,7 @@ def test_api_job_and_catalog_persist_locked_lora_provenance(client, monkeypatch,
     backend = ApiZImageBackend()
     monkeypatch.setattr(
         "src.services.image_generation.resolve_generation_plan",
-        lambda config, plugins_enabled=True: plan,
+        lambda config, plugins_enabled=True, seed=None: plan,
     )
     monkeypatch.setattr(
         "src.services.image_generation.create_image_generator",
@@ -432,6 +436,7 @@ def test_generation_config_endpoint(client, monkeypatch):
 
     data = response.json()
     assert data["image_backend"] == "mock"
+    assert data["entropy_level"] in {"calm", "strange", "wild"}
     assert data["prompt_model"] == "llama3.2:3b"
     assert data["configured_prompt_model"] == "llama3.2:3b"
     assert data["image_model"] == "mock generator"

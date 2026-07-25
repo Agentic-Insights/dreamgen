@@ -86,6 +86,9 @@ export interface PluginInfo {
   enabled: boolean;
   description: string;
   order: number;
+  category?: 'entropy' | 'context' | 'style' | 'operational' | string;
+  kind?: 'prompt' | 'guard' | string;
+  phase?: string;
 }
 
 export interface SystemStatus {
@@ -199,6 +202,7 @@ export interface GenerationConfig {
   enabled_loras?: string[];
   available_loras?: string[];
   lora_application_probability?: number;
+  entropy_level?: 'calm' | 'strange' | 'wild';
   lora_dir?: string;
   zimage_model_path?: string;
   zimage_native_available?: boolean;

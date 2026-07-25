@@ -1,0 +1,44 @@
+{
+  "place": [
+    "a flooded observatory at the edge of a salt desert",
+    "a night market beneath an abandoned space elevator",
+    "a moss-covered train station inside a vast greenhouse",
+    "a quiet apartment suspended over an unfamiliar coastline",
+    "a library carved into the walls of a volcanic cave"
+  ],
+  "material": [
+    "oxidized copper and wet paper",
+    "milky glass, velvet, and black sand",
+    "translucent amber resin and pale stone",
+    "brushed aluminum, linen, and rainwater",
+    "charcoal wood, wax, and pearl dust"
+  ],
+  "light": [
+    "low blue dawn filtered through mist",
+    "warm sodium lamps interrupted by moonlight",
+    "green bioluminescent reflections under clouded glass",
+    "a thin eclipse rim with soft interior glow",
+    "late-afternoon gold fading into violet shadow"
+  ],
+  "camera": [
+    "a patient eye-level 50mm view",
+    "a distant architectural wide shot",
+    "a low handheld close perspective",
+    "a high oblique view as if remembered from above",
+    "a slow anamorphic tracking frame"
+  ],
+  "era": [
+    "a near-future archive",
+    "a forgotten 1970s field station",
+    "an ancient ritual site reinterpreted by machines",
+    "a post-collapse domestic future",
+    "an age that has no agreed calendar"
+  ],
+  "mood": [
+    "quiet anticipation",
+    "tender dislocation",
+    "lucid unease",
+    "ceremonial wonder",
+    "homesick curiosity"
+  ]
+}

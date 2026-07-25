@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from ..plugins import plugin_manager, register_lora_plugin
+from ..plugins.dream_source_mixer import select_dream_source_mix
 from ..plugins.lora import SelectedLora, select_random_lora
 from .config import Config
 from .plugin_manager import PluginResult
@@ -97,9 +98,12 @@ class GenerationPlan:
                     "name": result.name,
                     "value": result.value,
                     "description": result.description,
+                    "category": result.category,
+                    "provenance": dict(result.provenance),
                 }
                 for result in self.plugin_results
             ],
+            "plugin_categories": {result.name: result.category for result in self.plugin_results},
             "temporal_descriptor": self.temporal_descriptor,
             "selected_lora": (
                 lora_provenance(self.selected_lora, backend=lora_backend)
@@ -109,7 +113,12 @@ class GenerationPlan:
         }
 
 
-def resolve_generation_plan(config: Config, *, plugins_enabled: bool = True) -> GenerationPlan:
+def resolve_generation_plan(
+    config: Config,
+    *,
+    plugins_enabled: bool = True,
+    seed: int | None = None,
+) -> GenerationPlan:
     """Resolve every enabled plugin and the optional LoRA exactly once."""
     register_lora_plugin(config)
     ordered_plugins = sorted(
@@ -122,6 +131,7 @@ def resolve_generation_plan(config: Config, *, plugins_enabled: bool = True) -> 
 
     selected_lora: SelectedLora | None = None
     overrides: dict[str, Any] = {}
+    override_provenance: dict[str, dict[str, Any]] = {}
     if "lora" in enabled_plugins:
         try:
             selected_lora = select_random_lora(config)
@@ -129,7 +139,18 @@ def resolve_generation_plan(config: Config, *, plugins_enabled: bool = True) -> 
             logger.warning("Unable to resolve LoRA selection from this config: %s", exc)
         overrides["lora"] = selected_lora.keyword if selected_lora else None
 
-    results = tuple(plugin_manager.execute_plugins(overrides=overrides))
+    if "dream_source_mixer" in enabled_plugins:
+        entropy_level = getattr(getattr(config, "plugins", None), "entropy_level", "strange")
+        selection = select_dream_source_mix(seed=seed, entropy_level=entropy_level)
+        overrides["dream_source_mixer"] = selection.prompt
+        override_provenance["dream_source_mixer"] = selection.to_provenance()
+
+    results = tuple(
+        plugin_manager.execute_plugins(
+            overrides=overrides,
+            override_provenance=override_provenance,
+        )
+    )
     descriptions = tuple(plugin_manager.get_plugin_descriptions())
     return GenerationPlan(
         plugin_results=results,

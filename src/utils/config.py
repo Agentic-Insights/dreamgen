@@ -64,6 +64,7 @@ class PluginConfig:
 
     enabled_plugins: List[str]
     plugin_order: Dict[str, int]
+    entropy_level: str = "strange"
 
 
 @dataclass
@@ -106,7 +107,16 @@ class Config:
         if not plugin_order and enabled_plugins:
             plugin_order = {name: index for index, name in enumerate(enabled_plugins, start=1)}
 
-        self.plugins = PluginConfig(enabled_plugins=enabled_plugins, plugin_order=plugin_order)
+        entropy_level = os.getenv("DREAM_ENTROPY_LEVEL", os.getenv("ENTROPY_LEVEL", "strange"))
+        entropy_level = entropy_level.strip().lower()
+        if entropy_level not in {"calm", "strange", "wild"}:
+            entropy_level = "strange"
+
+        self.plugins = PluginConfig(
+            enabled_plugins=enabled_plugins,
+            plugin_order=plugin_order,
+            entropy_level=entropy_level,
+        )
 
         # Lora configuration
         enabled_loras_str = os.getenv("ENABLED_LORAS")

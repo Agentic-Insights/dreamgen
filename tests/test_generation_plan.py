@@ -17,6 +17,7 @@ def test_generation_plan_resolves_lora_once_and_hashes_provenance(monkeypatch, t
     config = MagicMock()
     config.plugins.enabled_plugins = ["time_of_day", "lora"]
     config.plugins.plugin_order = {"time_of_day": 1, "lora": 5}
+    config.plugins.entropy_level = "strange"
     config.model.lora.lora_dir = tmp_path / "loras"
     config.model.lora.enabled_loras = ["locked-style"]
     config.model.lora.application_probability = 1.0
@@ -58,6 +59,38 @@ def test_generation_plan_resolves_lora_once_and_hashes_provenance(monkeypatch, t
         assert metadata["selected_lora"]["display_name"] == "locked-style"
         assert metadata["selected_lora"]["path"] == str(lora_path.resolve())
         assert metadata["selected_lora"]["sha256"]
+    finally:
+        plugin_manager.plugins.clear()
+        plugin_manager.plugins.update(original_plugins)
+
+
+def test_generation_plan_records_seeded_entropy_provenance(monkeypatch):
+    original_plugins = dict(plugin_manager.plugins)
+    config = MagicMock()
+    config.plugins.enabled_plugins = ["dream_source_mixer"]
+    config.plugins.plugin_order = {"dream_source_mixer": 1}
+    config.plugins.entropy_level = "wild"
+
+    try:
+        plugin_manager.plugins.clear()
+        from src.plugins.dream_source_mixer import get_dream_source_mixer
+
+        plugin_manager.register(
+            "dream_source_mixer",
+            "dream source",
+            get_dream_source_mixer,
+            enabled=True,
+            order=1,
+            category="entropy",
+        )
+        first = resolve_generation_plan(config, seed=123)
+        second = resolve_generation_plan(config, seed=123)
+
+        assert first.to_metadata() == second.to_metadata()
+        contribution = first.to_metadata()["plugin_contributions"][0]
+        assert contribution["category"] == "entropy"
+        assert contribution["provenance"]["seed"] == 123
+        assert contribution["provenance"]["level"] == "wild"
     finally:
         plugin_manager.plugins.clear()
         plugin_manager.plugins.update(original_plugins)

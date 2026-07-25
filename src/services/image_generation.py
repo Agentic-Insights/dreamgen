@@ -14,6 +14,7 @@ from typing import Any, Protocol, cast, runtime_checkable
 
 from src.generators.factory import create_image_generator
 from src.generators.prompt_generator import PromptGenerator
+from src.plugins import plugin_manager
 from src.plugins.lora import condition_prompt_for_lora
 from src.utils.config import Config
 from src.utils.generation_plan import GenerationPlan, resolve_generation_plan
@@ -191,6 +192,7 @@ class ImageGenService:
         active_plugins: list[str],
         prompt_model: str | None,
         generation_plan_metadata: dict[str, Any],
+        operational_guards: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Capture the reproducibility envelope for one local model probe."""
         width = _metadata_scalar(_config_value(self.config, "image", "width"))
@@ -222,6 +224,11 @@ class ImageGenService:
         )
         if diagnostic and "diagnostic" not in quality_flags:
             quality_flags.append("diagnostic")
+        for guard in operational_guards or []:
+            if guard.get("status") in {"warning", "failed"}:
+                for flag in guard.get("details", {}).get("quality_flags", []):
+                    if flag not in quality_flags:
+                        quality_flags.append(flag)
 
         return {
             "id": _prompt_fingerprint(
@@ -266,6 +273,7 @@ class ImageGenService:
                 "plugin_contributions": generation_plan_metadata["plugin_contributions"],
                 "selected_lora": generation_plan_metadata["selected_lora"],
                 "resolution": generation_plan_metadata["resolution"],
+                "operational_guards": operational_guards or [],
             },
             "timing": {
                 "generation_seconds": generation_time,
@@ -357,7 +365,20 @@ class ImageGenService:
         generation_plan = resolve_generation_plan(
             self.config,
             plugins_enabled=plugins_enabled,
+            seed=request.seed,
         )
+        plan_metadata = generation_plan.to_metadata()
+        pre_guards = plugin_manager.execute_guards(
+            "pre",
+            {
+                "request": request,
+                "seed": request.seed,
+                "generation_plan": plan_metadata,
+            },
+        )
+        failed_pre_guards = [guard for guard in pre_guards if guard["status"] == "failed"]
+        if failed_pre_guards:
+            raise RuntimeError(f"Generation blocked by operational guard: {failed_pre_guards}")
         await self._emit(
             callback,
             GenerationProgressEvent(
@@ -365,7 +386,7 @@ class ImageGenService:
                 progress=16,
                 label="Generation plan ready",
                 detail="Plugin and LoRA choices are locked for this job.",
-                payload=generation_plan.to_metadata(),
+                payload={**plan_metadata, "operational_guards": pre_guards},
             ),
         )
 
@@ -476,6 +497,19 @@ class ImageGenService:
         generation_plan_metadata = generation_plan.to_metadata(
             lora_backend=generation_metadata.get("lora_backend")
         )
+        post_guards = plugin_manager.execute_guards(
+            "post",
+            {
+                "image_path": image_path,
+                "final_prompt": final_prompt,
+                "backend": backend_name,
+                "model_name": model_name,
+                "generation_plan": generation_plan_metadata,
+                "generation_metadata": generation_metadata,
+            },
+        )
+        operational_guards = pre_guards + post_guards
+        generation_metadata["operational_guards"] = operational_guards
         generation_metadata["generation_plan"] = generation_plan_metadata
         if generation_plan_metadata["selected_lora"] is not None:
             generation_metadata["lora_provenance"] = generation_plan_metadata["selected_lora"]
@@ -495,6 +529,7 @@ class ImageGenService:
             active_plugins=active_plugins,
             prompt_model=prompt_resolution.prompt_model,
             generation_plan_metadata=generation_plan_metadata,
+            operational_guards=operational_guards,
         )
 
         existing_metadata = read_image_metadata(image_path)
