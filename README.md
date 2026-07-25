@@ -57,7 +57,8 @@ cp .env.example .env
 # - HF_TOKEN is optional for small/turbo/smoke public models
 # - IMAGE_BACKEND=qwen enables the NF4 Qwen-Image backend for text-heavy posters and signage
 # - IMAGE_BACKEND=ernie enables ERNIE-Image-Turbo for prompt-enhanced multilingual text rendering
-# - IMAGE_BACKEND=auto uses FLUX if cached, otherwise the small public fallback
+# - IMAGE_BACKEND=zimage is the default preference; it uses Z-Image-Turbo when the local checkpoint is ready and reports a Small Stable Diffusion fallback until then
+# - IMAGE_BACKEND=auto prefers ready Z-Image-Turbo, then FLUX, then the small public fallback
 
 # Generate from the CLI
 uv run dreamgen generate

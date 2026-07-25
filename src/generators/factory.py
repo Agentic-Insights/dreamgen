@@ -47,6 +47,31 @@ def is_model_cached(model_id: str) -> bool:
     )
 
 
+def inspect_local_zimage_model(model_path: Path) -> tuple[str, int]:
+    """Return readiness and size for a local Z-Image-Turbo checkpoint."""
+    if not model_path.exists():
+        return ("not_downloaded", 0)
+
+    size = sum(path.stat().st_size for path in model_path.rglob("*") if path.is_file())
+    transformer_files = list((model_path / "transformer").glob("*.safetensors"))
+    text_encoder_files = list((model_path / "text_encoder").glob("*.safetensors"))
+    required_files = [
+        model_path / "model_index.json",
+        model_path / "tokenizer" / "tokenizer.json",
+        model_path / "vae" / "diffusion_pytorch_model.safetensors",
+    ]
+
+    if transformer_files and text_encoder_files and all(path.exists() for path in required_files):
+        return ("ready", size)
+
+    return ("partial", size)
+
+
+def is_local_zimage_ready(config: Config) -> bool:
+    """Return whether the local Z-Image checkpoint is complete enough to run."""
+    return inspect_local_zimage_model(config.model.zimage_model_path)[0] == "ready"
+
+
 def required_model_cache_gb(model_id: str) -> int:
     """Return a conservative free-space guardrail for model downloads."""
     normalized = model_id.lower()
@@ -63,8 +88,17 @@ def resolve_image_backend(config: Config) -> str:
     backend = config.model.image_backend
     if backend == "tiny":
         backend = "smoke"
+
+    # Z-Image is the preferred local model. If it is selected but not ready,
+    # keep generation usable by resolving to the documented public fallback.
+    if backend == "zimage" and not is_local_zimage_ready(config):
+        backend = "auto"
+
     if backend != "auto":
         return backend
+
+    if is_local_zimage_ready(config):
+        return "zimage"
 
     if is_model_cached(config.model.flux_model):
         return "flux"

@@ -11,7 +11,9 @@ from typing import Any
 import psutil
 
 from src.generators.factory import (
+    backend_label,
     incomplete_model_downloads,
+    inspect_local_zimage_model,
     is_model_cached,
     model_cache_path,
     resolve_image_backend,
@@ -55,20 +57,9 @@ class ModelRuntimeManager:
 
     def _local_zimage(self) -> dict[str, Any]:
         path = self.config.model.zimage_model_path
-        complete = (
-            (
-                (path / "model_index.json").exists()
-                and (path / "tokenizer" / "tokenizer.json").exists()
-                and (path / "vae" / "diffusion_pytorch_model.safetensors").exists()
-                and any((path / "transformer").glob("*.safetensors"))
-                and any((path / "text_encoder").glob("*.safetensors"))
-            )
-            if path.exists()
-            else False
-        )
-        size = sum(p.stat().st_size for p in path.rglob("*") if p.is_file()) if path.exists() else 0
+        status, size = inspect_local_zimage_model(path)
         return {
-            "status": "ready" if complete else ("partial" if path.exists() else "not_downloaded"),
+            "status": status,
             "size": size,
             "path": str(path),
         }
@@ -199,9 +190,45 @@ class ModelRuntimeManager:
                 },
             ]
         )
+        resolved_backend = resolve_image_backend(self.config)
+        active_model = next(
+            (item for item in backends if item["backend"] == resolved_backend),
+            None,
+        )
+        preferred_model = next(item for item in backends if item["backend"] == "zimage")
+        fallback_model = next(item for item in backends if item["backend"] == "small")
+        fallback_reason = None
+        if (
+            preferred_model["status"] != "ready"
+            and resolved_backend == "small"
+            and self.config.model.image_backend in {"auto", "zimage"}
+        ):
+            detail = (
+                f"checkpoint not downloaded at {preferred_model['path']}"
+                if preferred_model["status"] == "not_downloaded"
+                else f"checkpoint is incomplete at {preferred_model['path']}"
+            )
+            fallback_reason = (
+                f"Z-Image-Turbo unavailable: {detail}. "
+                f"Using {fallback_model['name']} ({fallback_model['id']}) instead."
+            )
+
         return {
             "configured_backend": self.config.model.image_backend,
-            "resolved_backend": resolve_image_backend(self.config),
+            "resolved_backend": resolved_backend,
+            "active_backend": resolved_backend,
+            "active_backend_label": backend_label(self.config, resolved_backend),
+            "active_model": active_model["name"] if active_model else resolved_backend,
+            "active_model_id": active_model["id"] if active_model else resolved_backend,
+            "active_model_status": active_model["status"] if active_model else "unknown",
+            "preferred_backend": "zimage",
+            "preferred_model": preferred_model["name"],
+            "preferred_model_id": preferred_model["id"],
+            "preferred_model_status": preferred_model["status"],
+            "fallback_backend": "small",
+            "fallback_model": fallback_model["name"],
+            "fallback_model_id": fallback_model["id"],
+            "fallback_reason": fallback_reason,
             "backends": backends,
             "models": backends,
             "cache_dir": str(model_cache_path("x").parent),

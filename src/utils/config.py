@@ -151,7 +151,7 @@ class Config:
         elif legacy_image_model in {"flux", "ollama", "zimage", "qwen", "ernie"}:
             image_backend = legacy_image_model
         else:
-            image_backend = "auto"
+            image_backend = "zimage"
 
         if image_backend == "tiny":
             image_backend = "smoke"

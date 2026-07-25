@@ -72,6 +72,11 @@ def test_status_endpoint(client):
     assert "status" in data
     assert "backend" in data
     assert data["status"] == "ready"
+    assert data["active_model"]
+    assert data["active_model_id"]
+    assert data["preferred_model"] == "Z-Image-Turbo"
+    assert data["preferred_model_status"] in {"ready", "partial", "not_downloaded"}
+    assert data["fallback_model"] == "Small Stable Diffusion"
     assert data["backend"] in [
         "mock",
         "smoke-test",
@@ -81,6 +86,7 @@ def test_status_endpoint(client):
         "flux-dev",
         "qwen-image",
         "ernie-image",
+        "z-image",
     ]
 
 

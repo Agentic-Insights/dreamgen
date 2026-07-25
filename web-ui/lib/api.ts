@@ -98,6 +98,20 @@ export interface SystemStatus {
   active_plugins: string[];
   gpu_available: boolean;
   ollama_available: boolean;
+  configured_backend: string;
+  resolved_backend: string;
+  active_backend_label: string;
+  active_model: string;
+  active_model_id: string;
+  active_model_status: string;
+  preferred_backend: string;
+  preferred_model: string;
+  preferred_model_id: string;
+  preferred_model_status: string;
+  fallback_backend: string;
+  fallback_model: string;
+  fallback_model_id: string;
+  fallback_reason?: string | null;
 }
 
 export interface ModelInfo {
@@ -117,6 +131,19 @@ export interface ModelStatus {
   cache_dir: string;
   configured_backend: string;
   resolved_backend: string;
+  active_backend?: string;
+  active_backend_label?: string;
+  active_model?: string;
+  active_model_id?: string;
+  active_model_status?: string;
+  preferred_backend?: string;
+  preferred_model?: string;
+  preferred_model_id?: string;
+  preferred_model_status?: string;
+  fallback_backend?: string;
+  fallback_model?: string;
+  fallback_model_id?: string;
+  fallback_reason?: string | null;
   memory: {
     system: { total_gb: number; available_gb: number; percent_used: number };
     cuda: { available: boolean; device?: string; total_gb?: number; free_gb?: number; allocated_gb?: number; reserved_gb?: number };
@@ -187,6 +214,12 @@ export interface GenerationConfig {
   configured_prompt_model?: string;
   image_backend?: string;
   image_model?: string;
+  resolved_image_backend?: string;
+  active_image_model?: string;
+  active_image_model_id?: string;
+  preferred_image_model?: string;
+  preferred_image_model_status?: string;
+  fallback_reason?: string | null;
   ollama_image_model?: string;
   pipeline?: {
     prompt: {

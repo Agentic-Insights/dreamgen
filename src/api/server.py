@@ -31,7 +31,8 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel, Field
 
-from src.generators.factory import backend_label, is_model_cached, resolve_image_backend
+from src.generators.factory import inspect_local_zimage_model as inspect_zimage_checkpoint
+from src.generators.factory import is_model_cached, resolve_image_backend
 from src.generators.prompt_generator import PromptGenerator
 from src.plugins import plugin_manager, register_lora_plugin
 from src.plugins.lora import get_available_loras, get_lora_metadata
@@ -168,22 +169,7 @@ def zimage_native_source_path() -> Path:
 
 def inspect_local_zimage_model(model_path: Path) -> tuple[str, int]:
     """Return readiness status and size for a repo-local Z-Image checkpoint directory."""
-    if not model_path.exists():
-        return ("not_downloaded", 0)
-
-    size = sum(path.stat().st_size for path in model_path.rglob("*") if path.is_file())
-    transformer_files = list((model_path / "transformer").glob("*.safetensors"))
-    text_encoder_files = list((model_path / "text_encoder").glob("*.safetensors"))
-    required_files = [
-        model_path / "model_index.json",
-        model_path / "tokenizer" / "tokenizer.json",
-        model_path / "vae" / "diffusion_pytorch_model.safetensors",
-    ]
-
-    if transformer_files and text_encoder_files and all(path.exists() for path in required_files):
-        return ("ready", size)
-
-    return ("partial", size)
+    return inspect_zimage_checkpoint(model_path)
 
 
 def resolved_prompt_model_name() -> str:
@@ -239,6 +225,7 @@ def resolve_prompt_model_from_models(
 def generation_config_payload() -> Dict[str, Any]:
     """Serialize mutable generation/runtime settings for the frontend."""
     image_backend = config.model.image_backend
+    runtime_status = runtime_manager.status()
     configured_prompt_model = config.model.ollama_model
     prompt_model = resolved_prompt_model_name()
 
@@ -282,6 +269,12 @@ def generation_config_payload() -> Dict[str, Any]:
         "configured_prompt_model": configured_prompt_model,
         "image_backend": image_backend,
         "image_model": image_model,
+        "resolved_image_backend": runtime_status["resolved_backend"],
+        "active_image_model": runtime_status["active_model"],
+        "active_image_model_id": runtime_status["active_model_id"],
+        "preferred_image_model": runtime_status["preferred_model"],
+        "preferred_image_model_status": runtime_status["preferred_model_status"],
+        "fallback_reason": runtime_status["fallback_reason"],
         "ollama_image_model": config.model.ollama_image_model,
         "pipeline": {
             "prompt": {
@@ -694,6 +687,20 @@ class SystemStatus(BaseModel):
     active_plugins: List[str]
     gpu_available: bool
     ollama_available: bool
+    configured_backend: str
+    resolved_backend: str
+    active_backend_label: str
+    active_model: str
+    active_model_id: str
+    active_model_status: str
+    preferred_backend: str
+    preferred_model: str
+    preferred_model_id: str
+    preferred_model_status: str
+    fallback_backend: str
+    fallback_model: str
+    fallback_model_id: str
+    fallback_reason: Optional[str] = None
 
 
 # WebSocket connection manager
@@ -1050,7 +1057,8 @@ async def get_status():
     except Exception:
         ollama_available = False
 
-    backend_name = backend_label(config, resolve_image_backend(config))
+    runtime_status = runtime_manager.status()
+    backend_name = runtime_status["active_backend_label"]
 
     return SystemStatus(
         status="ready",
@@ -1059,6 +1067,20 @@ async def get_status():
         active_plugins=[name for name, info in plugin_manager.plugins.items() if info.enabled],
         gpu_available=gpu_available,
         ollama_available=ollama_available,
+        configured_backend=runtime_status["configured_backend"],
+        resolved_backend=runtime_status["resolved_backend"],
+        active_backend_label=runtime_status["active_backend_label"],
+        active_model=runtime_status["active_model"],
+        active_model_id=runtime_status["active_model_id"],
+        active_model_status=runtime_status["active_model_status"],
+        preferred_backend=runtime_status["preferred_backend"],
+        preferred_model=runtime_status["preferred_model"],
+        preferred_model_id=runtime_status["preferred_model_id"],
+        preferred_model_status=runtime_status["preferred_model_status"],
+        fallback_backend=runtime_status["fallback_backend"],
+        fallback_model=runtime_status["fallback_model"],
+        fallback_model_id=runtime_status["fallback_model_id"],
+        fallback_reason=runtime_status["fallback_reason"],
     )
 
 

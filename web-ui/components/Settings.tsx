@@ -380,6 +380,8 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
   );
   const entropyLevel = generationConfig?.entropy_level ?? "strange";
   const selectedBackend = generationConfig?.image_backend ?? "auto";
+  const resolvedBackend =
+    modelStatus?.resolved_backend ?? generationConfig?.resolved_image_backend ?? selectedBackend;
   const availableLoras = generationConfig?.available_loras ?? [];
   const enabledLoras = generationConfig?.enabled_loras ?? [];
   const loraProbability = generationConfig?.lora_application_probability ?? 0;
@@ -392,7 +394,12 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
   const activeImageModelLabel =
     selectedBackend === "ollama"
       ? (activeImageModel ?? configuredImageModel) || "No Ollama image model"
-      : generationConfig?.image_model ?? selectedBackend;
+      : modelStatus?.models.find(
+          (model) => model.backend === resolvedBackend && model.status === "ready"
+        )?.name
+        ?? generationConfig?.active_image_model
+        ?? generationConfig?.image_model
+        ?? resolvedBackend;
   const selectedBackendLabel =
     IMAGE_BACKEND_OPTIONS.find((backend) => backend.id === selectedBackend)?.label ?? selectedBackend;
   const promptModelFallback = generationConfig?.prompt_model ?? configuredPromptModel;
@@ -570,6 +577,11 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
                             Configured {configuredImageModel}; using {activeImageModel}.
                           </div>
                         )}
+                        {selectedBackend !== resolvedBackend && selectedBackend !== "ollama" && (
+                          <div className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+                            Configured {selectedBackend}; using the {resolvedBackend} fallback until the preferred model is ready.
+                          </div>
+                        )}
                         <div className="mt-3 text-xs text-muted-foreground">
                           Use the backend choices below for local Diffusers, Qwen, Z-Image, or Ollama image rendering.
                         </div>
@@ -621,7 +633,8 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
                     ) : (
                       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
                         {IMAGE_BACKEND_OPTIONS.map((backend) => {
-                          const isActive = selectedBackend === backend.id;
+                          const isConfigured = selectedBackend === backend.id;
+                          const isActive = resolvedBackend === backend.id;
                           return (
                             <button
                               key={backend.id}
@@ -634,16 +647,21 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
                               }
                               className={cn(
                                 "rounded-lg border p-3 text-left transition-colors",
-                                isActive
+                                isConfigured || isActive
                                   ? "border-primary bg-primary/5"
                                   : "border-border hover:bg-muted/40"
                               )}
                             >
                               <div className="flex items-center justify-between gap-2">
                                 <span className="font-medium">{backend.label}</span>
-                                {isActive && (
+                                {isConfigured && (
                                   <span className="text-[11px] px-2 py-0.5 rounded-full bg-primary/15 text-primary">
-                                    Active
+                                    {isActive ? "Active" : "Configured"}
+                                  </span>
+                                )}
+                                {!isConfigured && isActive && (
+                                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-green-500/15 text-green-600 dark:text-green-400">
+                                    Active fallback
                                   </span>
                                 )}
                               </div>
@@ -1339,18 +1357,27 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
                   <div className="border border-border rounded-lg p-4">
                     <div className="flex items-center gap-2 mb-2">
                       <Database className="w-4 h-4 text-muted-foreground" />
-                      <span className="text-sm font-medium">Active runtime</span>
+                      <span className="text-sm font-medium">Active model & runtime</span>
                     </div>
                     <div className="text-lg font-semibold text-foreground capitalize">
-                      {modelStatus?.resolved_backend ?? (modelStatusError ? "Unavailable" : "Loading…")}
+                      {systemStatus?.active_model
+                        ?? modelStatus?.models.find((model) => model.backend === modelStatus.resolved_backend && model.status === "ready")?.name
+                        ?? (modelStatusError ? "Unavailable" : "Loading…")}
                     </div>
                     <p className="text-xs text-muted-foreground mt-2">
-                      {modelStatus
-                        ? `${modelStatus.configured_backend} configured → ${activeRuntimeModel?.name ?? "runtime model not identified"}.`
+                      {systemStatus
+                        ? `${systemStatus.active_model_id} · backend ${systemStatus.active_backend_label} · ${systemStatus.active_model_status}.`
+                        : modelStatus
+                          ? `${modelStatus.configured_backend} configured → ${activeRuntimeModel?.name ?? "runtime model not identified"}.`
                         : modelStatusError
                           ? "The /api/models/status response is unavailable."
                           : "Loading /api/models/status…"}
                     </p>
+                    {systemStatus?.fallback_reason && (
+                      <p className="text-xs text-amber-700 dark:text-amber-300 mt-2">
+                        {systemStatus.fallback_reason}
+                      </p>
+                    )}
                   </div>
 
                   <div className="border border-border rounded-lg p-4">

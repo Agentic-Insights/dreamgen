@@ -854,7 +854,7 @@ export default function Home() {
               GPU {status?.gpu_available ? "online" : "offline"}
             </span>
             <span className="status-pill hidden md:inline-flex capitalize">
-              {status?.backend ?? "unknown"}
+              {status?.active_model ?? status?.backend ?? "unknown"}
             </span>
           </div>
         </div>

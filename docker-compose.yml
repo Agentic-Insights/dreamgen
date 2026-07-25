@@ -25,7 +25,7 @@ services:
       - PORT=8000
       - USE_MOCK_GENERATOR=${USE_MOCK_GENERATOR:-false}
       - MOCK_MODE=${MOCK_MODE:-false}
-      - IMAGE_BACKEND=${IMAGE_BACKEND:-auto}
+      - IMAGE_BACKEND=${IMAGE_BACKEND:-zimage}
       - HF_TOKEN=${HF_TOKEN:-}
       - HF_HOME=/app/models
       - TRANSFORMERS_CACHE=/app/models

@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+from src.generators.factory import resolve_image_backend
 from src.services.model_runtime import ModelRuntimeManager
 
 
@@ -58,6 +59,46 @@ def test_runtime_detects_complete_local_zimage(tmp_path):
     status = ModelRuntimeManager(config)._local_zimage()
     assert status["status"] == "ready"
     assert status["size"] > 0
+
+
+def test_auto_prefers_ready_local_zimage(tmp_path, monkeypatch):
+    config = runtime_config(tmp_path)
+    root = config.model.zimage_model_path
+    for relative in (
+        "model_index.json",
+        "tokenizer/tokenizer.json",
+        "vae/diffusion_pytorch_model.safetensors",
+        "transformer/model.safetensors",
+        "text_encoder/model.safetensors",
+    ):
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"ready")
+
+    monkeypatch.setattr("src.generators.factory.is_model_cached", lambda _model_id: False)
+    assert resolve_image_backend(config) == "zimage"
+
+
+def test_unavailable_zimage_resolves_to_small_fallback(tmp_path, monkeypatch):
+    config = runtime_config(tmp_path)
+    config.model.image_backend = "zimage"
+    monkeypatch.setattr("src.generators.factory.is_model_cached", lambda _model_id: False)
+
+    assert resolve_image_backend(config) == "small"
+
+
+def test_runtime_status_explains_zimage_fallback(tmp_path, monkeypatch):
+    config = runtime_config(tmp_path)
+    monkeypatch.setattr("src.services.model_runtime.resolve_image_backend", lambda _config: "small")
+    manager = ModelRuntimeManager(config, tmp_path / "selection.json")
+
+    payload = manager.status()
+
+    assert payload["active_model"] == "Small Stable Diffusion"
+    assert payload["active_model_id"] == "vendor/small"
+    assert payload["preferred_model"] == "Z-Image-Turbo"
+    assert payload["preferred_model_status"] == "not_downloaded"
+    assert "Z-Image-Turbo unavailable" in payload["fallback_reason"]
 
 
 def test_runtime_selection_survives_restart(tmp_path):
