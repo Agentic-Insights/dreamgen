@@ -56,7 +56,9 @@ docker compose --env-file .env.docker down
 ```
 
 Docker notes for reviewers:
-- Default path is `IMAGE_BACKEND=zimage`: use Z-Image-Turbo when its local checkpoint is ready; otherwise report the unavailable preferred model and fall back to the smaller public model.
+- Default path is `IMAGE_BACKEND=auto`: use Mage-Flow only when its isolated runtime
+  and pinned public checkpoint are ready, then ready Z-Image-Turbo, cached FLUX,
+  or the smaller public model.
 - `HF_TOKEN` is optional for `auto`, `small`, `turbo`, and `smoke`; it is required if Docker needs to download gated Hugging Face models such as some FLUX variants.
 - Backend runs on `25800`, frontend runs on `7860`.
 - Ollama is expected on `http://host.docker.internal:11434` from inside Docker on this machine.

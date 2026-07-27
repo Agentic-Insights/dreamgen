@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Tuple
 
 from ..utils.config import Config
+from ..utils.mageflow_runtime import mageflow_runtime_ready
 from .mock_image_generator import MockImageGenerator
 from .stable_diffusion_image_generator import StableDiffusionImageGenerator
 
@@ -84,18 +85,27 @@ def required_model_cache_gb(model_id: str) -> int:
     return 25
 
 
-def resolve_image_backend(config: Config) -> str:
+def resolve_image_backend(config: Config, *, mageflow_ready: bool | None = None) -> str:
     backend = config.model.image_backend
     if backend == "tiny":
         backend = "smoke"
 
-    # Z-Image is the preferred local model. If it is selected but not ready,
-    # keep generation usable by resolving to the documented public fallback.
+    # An explicit unavailable Z-Image selection retains its documented fallback.
+    # Auto separately prefers the verified Mage-Flow runtime, then ready Z-Image.
     if backend == "zimage" and not is_local_zimage_ready(config):
         backend = "auto"
 
     if backend != "auto":
         return backend
+
+    if mageflow_ready is None:
+        mageflow_ready = mageflow_runtime_ready(
+            config.model.mageflow_url,
+            config.model.mageflow_model,
+            config.model.mageflow_revision,
+        )
+    if mageflow_ready:
+        return "mageflow"
 
     if is_local_zimage_ready(config):
         return "zimage"
@@ -122,6 +132,8 @@ def backend_label(config: Config, backend: str) -> str:
         return "ollama"
     if backend == "zimage":
         return "z-image"
+    if backend == "mageflow":
+        return "mage-flow"
     if backend == "qwen":
         return "qwen-image"
     if backend == "ernie":
@@ -175,6 +187,10 @@ def create_image_generator(config: Config) -> Tuple[object, str]:
         from .zimage_generator import ZImageGenerator
 
         return ZImageGenerator(config), backend_label(config, backend)
+    if backend == "mageflow":
+        from .mageflow_image_generator import MageFlowImageGenerator
+
+        return MageFlowImageGenerator(config), backend_label(config, backend)
     if backend == "qwen":
         from .qwen_image_generator import QwenImageGenerator
 

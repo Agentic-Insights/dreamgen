@@ -76,6 +76,7 @@ logger = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ALLOWED_IMAGE_BACKENDS = {
     "auto",
+    "mageflow",
     "flux",
     "ollama",
     "zimage",
@@ -231,6 +232,7 @@ def generation_config_payload() -> Dict[str, Any]:
 
     image_model_by_backend = {
         "auto": "auto resolver",
+        "mageflow": config.model.mageflow_model,
         "flux": config.model.flux_model,
         "ollama": config.model.ollama_image_model,
         "zimage": str(config.model.zimage_model_path),
@@ -295,6 +297,11 @@ def generation_config_payload() -> Dict[str, Any]:
         "entropy_level": config.plugins.entropy_level,
         "zimage_model_path": str(config.model.zimage_model_path),
         "zimage_native_available": zimage_native_source_path().exists(),
+        "mageflow_model": config.model.mageflow_model,
+        "mageflow_revision": config.model.mageflow_revision,
+        "mageflow_url": config.model.mageflow_url,
+        "mageflow_steps": config.model.mageflow_steps,
+        "mageflow_cfg": config.model.mageflow_cfg,
         "qwen_image_model": config.model.qwen_image_model,
         "qwen_prompt_magic": config.model.qwen_prompt_magic,
         "qwen_device_map": config.model.qwen_device_map,
@@ -1119,7 +1126,7 @@ async def unload_model_runtime():
     return runtime_manager.unload()
 
 
-@app.post("/api/models/{model_id}/prefetch")
+@app.post("/api/models/{model_id:path}/prefetch")
 async def prefetch_model(model_id: str):
     """Prefetch alias for the existing asynchronous model download operation."""
     return await download_model(model_id)
@@ -1285,7 +1292,7 @@ async def _legacy_get_model_status():
     return {"models": models, "cache_dir": str(hf_cache_dir)}
 
 
-@app.post("/api/models/{model_id}/download")
+@app.post("/api/models/{model_id:path}/download")
 async def download_model(model_id: str):
     """Start downloading a model"""
     # URL decode the model_id
@@ -1315,7 +1322,24 @@ async def download_model(model_id: str):
                 # Use snapshot_download to get the entire model
                 loop = asyncio.get_event_loop()
                 download_token = configured_hf_token()
-                if local_dir is not None:
+                if resolved_model_id == config.model.mageflow_model:
+                    from urllib import request as urllib_request
+
+                    sidecar_request = urllib_request.Request(
+                        f"{config.model.mageflow_url.rstrip('/')}/download",
+                        data=b"",
+                        method="POST",
+                    )
+
+                    def download_mageflow():
+                        with urllib_request.urlopen(
+                            sidecar_request,
+                            timeout=config.model.mageflow_timeout_seconds,
+                        ) as response:
+                            return response.read()
+
+                    await loop.run_in_executor(None, download_mageflow)
+                elif local_dir is not None:
                     await loop.run_in_executor(
                         None,
                         lambda: snapshot_download(
@@ -1561,6 +1585,14 @@ async def set_generation_config(data: dict):
             config.model.image_backend = backend
         if "ollama_image_model" in data:
             config.model.ollama_image_model = str(data["ollama_image_model"]).strip()
+        if "mageflow_model" in data:
+            config.model.mageflow_model = (
+                str(data["mageflow_model"]).strip() or "microsoft/Mage-Flow"
+            )
+        if "mageflow_steps" in data:
+            config.model.mageflow_steps = int(data["mageflow_steps"])
+        if "mageflow_cfg" in data:
+            config.model.mageflow_cfg = float(data["mageflow_cfg"])
         if "qwen_image_model" in data:
             config.model.qwen_image_model = (
                 str(data["qwen_image_model"]).strip() or "diffusers/qwen-image-nf4"

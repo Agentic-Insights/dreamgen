@@ -169,6 +169,7 @@ def loading_message_for_backend(backend_name: str) -> str:
         "ollama": "Requesting an image from the configured Ollama host.",
         "qwen-image": "Loading Qwen-Image typography model.",
         "ernie-image": "Loading ERNIE-Image Turbo prompt-enhanced model.",
+        "mage-flow": "Loading Microsoft Mage-Flow in the isolated local CUDA runtime.",
     }.get(backend_name, "Loading Flux model (this may take several minutes on first run)...")
 
 

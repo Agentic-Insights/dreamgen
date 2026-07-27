@@ -119,11 +119,38 @@ export interface ModelInfo {
   id: string;
   name: string;
   type: string;
-  status: 'not_downloaded' | 'not_configured' | 'configured' | 'downloading' | 'ready' | 'partial';
+  status:
+    | 'not_downloaded'
+    | 'not_configured'
+    | 'configured'
+    | 'downloading'
+    | 'ready'
+    | 'partial'
+    | 'runtime_unavailable'
+    | 'incompatible_runtime'
+    | 'runtime_error'
+    | 'revision_mismatch';
   size: number;
   incomplete_files: number;
   path?: string;
   downloadable?: boolean;
+  reason?: string;
+  source_url?: string;
+  implementation_url?: string;
+  license?: string;
+  research_only?: boolean;
+  verified_revision?: string;
+  runtime?: {
+    reachable?: boolean;
+    ready?: boolean;
+    loaded?: boolean;
+    status?: string;
+    reason?: string;
+    source_sha?: string;
+    model_revision?: string;
+    verified_model_revision?: string;
+    attention?: string;
+  };
 }
 
 export interface ModelStatus {
@@ -239,6 +266,11 @@ export interface GenerationConfig {
   lora_dir?: string;
   zimage_model_path?: string;
   zimage_native_available?: boolean;
+  mageflow_model?: string;
+  mageflow_revision?: string;
+  mageflow_url?: string;
+  mageflow_steps?: number;
+  mageflow_cfg?: number;
   qwen_image_model?: string;
   qwen_prompt_magic?: boolean;
   qwen_device_map?: string;
@@ -711,7 +743,11 @@ export class ImageGenAPI {
     return response.json();
   }
 
-  async unloadModels(): Promise<{ message: string; memory: ModelStatus['memory'] }> {
+  async unloadModels(): Promise<{
+    message: string;
+    memory: ModelStatus['memory'];
+    mageflow?: { status: string; unloaded: boolean; was_loaded?: boolean; reason?: string };
+  }> {
     const response = await fetch(`${this.baseUrl}/api/models/unload`, { method: 'POST' });
     if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to unload models'));
     return response.json();

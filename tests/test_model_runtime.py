@@ -12,6 +12,9 @@ def runtime_config(tmp_path):
             small_sd_model="vendor/small",
             turbo_model="vendor/turbo",
             smoke_test_model="vendor/smoke",
+            mageflow_model="microsoft/Mage-Flow",
+            mageflow_revision="faca09c18c1c19458e7fbc3f7bce6f7a7d4d01a9",
+            mageflow_url="http://mageflow.invalid",
             zimage_model_path=tmp_path / "zimage",
             ollama_model="prompt:latest",
             ollama_image_model="",
@@ -22,7 +25,18 @@ def runtime_config(tmp_path):
 
 def test_runtime_status_resolves_auto_and_reports_all_required_backends(tmp_path, monkeypatch):
     config = runtime_config(tmp_path)
-    monkeypatch.setattr("src.services.model_runtime.resolve_image_backend", lambda _config: "small")
+    monkeypatch.setattr(
+        "src.services.model_runtime.resolve_image_backend",
+        lambda _config, **_kwargs: "small",
+    )
+    monkeypatch.setattr(
+        "src.services.model_runtime.probe_mageflow_runtime",
+        lambda _url: {
+            "ready": False,
+            "status": "runtime_unavailable",
+            "reason": "test runtime absent",
+        },
+    )
     manager = ModelRuntimeManager(config, tmp_path / "selection.json")
 
     payload = manager.status()
@@ -30,6 +44,7 @@ def test_runtime_status_resolves_auto_and_reports_all_required_backends(tmp_path
     assert payload["configured_backend"] == "auto"
     assert payload["resolved_backend"] == "small"
     assert {item["backend"] for item in payload["backends"]} >= {
+        "mageflow",
         "flux",
         "small",
         "turbo",
@@ -39,7 +54,64 @@ def test_runtime_status_resolves_auto_and_reports_all_required_backends(tmp_path
         "mock",
     }
     assert "system" in payload["memory"]
-    assert payload["recommended"]["backend"] in {"zimage", "flux", "small"}
+    assert payload["recommended"]["backend"] in {"mageflow", "zimage", "flux", "small"}
+
+
+def test_runtime_requires_both_mageflow_checkpoint_and_sidecar(tmp_path, monkeypatch):
+    config = runtime_config(tmp_path)
+    manager = ModelRuntimeManager(config, tmp_path / "selection.json")
+    monkeypatch.setattr(
+        manager,
+        "_hf_model",
+        lambda _model_id: {
+            "status": "ready",
+            "size": 17_507_371_519,
+            "incomplete_files": 0,
+            "path": "cached",
+        },
+    )
+    monkeypatch.setattr(
+        "src.services.model_runtime.probe_mageflow_runtime",
+        lambda _url: {
+            "ready": False,
+            "status": "runtime_unavailable",
+            "reason": "sidecar unavailable",
+        },
+    )
+
+    status = manager._mageflow()
+
+    assert status["status"] == "runtime_unavailable"
+    assert status["reason"] == "sidecar unavailable"
+
+
+def test_runtime_rejects_unverified_mageflow_revision(tmp_path, monkeypatch):
+    config = runtime_config(tmp_path)
+    manager = ModelRuntimeManager(config, tmp_path / "selection.json")
+    monkeypatch.setattr(
+        manager,
+        "_hf_model",
+        lambda _model_id: {
+            "status": "ready",
+            "size": 17_507_371_519,
+            "incomplete_files": 0,
+            "path": "cached",
+        },
+    )
+    monkeypatch.setattr(
+        "src.services.model_runtime.probe_mageflow_runtime",
+        lambda _url: {
+            "ready": True,
+            "status": "ready",
+            "model_id": "microsoft/Mage-Flow",
+            "model_revision": "unverified",
+        },
+    )
+
+    status = manager._mageflow()
+
+    assert status["status"] == "revision_mismatch"
+    assert config.model.mageflow_revision in status["reason"]
 
 
 def test_runtime_detects_complete_local_zimage(tmp_path):
@@ -87,18 +159,29 @@ def test_unavailable_zimage_resolves_to_small_fallback(tmp_path, monkeypatch):
     assert resolve_image_backend(config) == "small"
 
 
-def test_runtime_status_explains_zimage_fallback(tmp_path, monkeypatch):
+def test_runtime_status_explains_mageflow_fallback(tmp_path, monkeypatch):
     config = runtime_config(tmp_path)
-    monkeypatch.setattr("src.services.model_runtime.resolve_image_backend", lambda _config: "small")
+    monkeypatch.setattr(
+        "src.services.model_runtime.resolve_image_backend",
+        lambda _config, **_kwargs: "small",
+    )
+    monkeypatch.setattr(
+        "src.services.model_runtime.probe_mageflow_runtime",
+        lambda _url: {
+            "ready": False,
+            "status": "runtime_unavailable",
+            "reason": "test runtime absent",
+        },
+    )
     manager = ModelRuntimeManager(config, tmp_path / "selection.json")
 
     payload = manager.status()
 
     assert payload["active_model"] == "Small Stable Diffusion"
     assert payload["active_model_id"] == "vendor/small"
-    assert payload["preferred_model"] == "Z-Image-Turbo"
+    assert payload["preferred_model"] == "Microsoft Mage-Flow"
     assert payload["preferred_model_status"] == "not_downloaded"
-    assert "Z-Image-Turbo unavailable" in payload["fallback_reason"]
+    assert "Mage-Flow unavailable" in payload["fallback_reason"]
 
 
 def test_runtime_selection_survives_restart(tmp_path):

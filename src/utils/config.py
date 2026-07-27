@@ -28,6 +28,12 @@ class ModelConfig:
     smoke_test_model: str
     small_sd_model: str
     turbo_model: str
+    mageflow_model: str
+    mageflow_revision: str
+    mageflow_url: str
+    mageflow_steps: int
+    mageflow_cfg: float
+    mageflow_timeout_seconds: float
     zimage_model_path: Path
     zimage_attention: str
     zimage_compile: bool
@@ -161,6 +167,15 @@ class Config:
         )
         small_sd_model = os.getenv("SMALL_SD_MODEL", "segmind/tiny-sd")
         turbo_model = os.getenv("TURBO_MODEL", "stabilityai/sd-turbo")
+        mageflow_model = os.getenv("MAGEFLOW_MODEL", "microsoft/Mage-Flow")
+        mageflow_revision = os.getenv(
+            "MAGEFLOW_MODEL_REVISION",
+            "faca09c18c1c19458e7fbc3f7bce6f7a7d4d01a9",
+        )
+        mageflow_url = os.getenv("MAGEFLOW_URL", "http://localhost:25801").rstrip("/")
+        mageflow_steps = int(os.getenv("MAGEFLOW_STEPS", "20"))
+        mageflow_cfg = float(os.getenv("MAGEFLOW_CFG", "5.0"))
+        mageflow_timeout_seconds = float(os.getenv("MAGEFLOW_TIMEOUT_SECONDS", "1800"))
         zimage_model_path = Path(os.getenv("ZIMAGE_MODEL_PATH", "ckpts/Z-Image-Turbo"))
         zimage_attention = os.getenv("ZIMAGE_ATTENTION", "_sdpa")
         zimage_compile = os.getenv("ZIMAGE_COMPILE", "false").lower() in (
@@ -225,6 +240,12 @@ class Config:
             smoke_test_model=smoke_test_model,
             small_sd_model=small_sd_model,
             turbo_model=turbo_model,
+            mageflow_model=mageflow_model,
+            mageflow_revision=mageflow_revision,
+            mageflow_url=mageflow_url,
+            mageflow_steps=mageflow_steps,
+            mageflow_cfg=mageflow_cfg,
+            mageflow_timeout_seconds=mageflow_timeout_seconds,
             zimage_model_path=zimage_model_path,
             zimage_attention=zimage_attention,
             zimage_compile=zimage_compile,
@@ -358,6 +379,7 @@ class Config:
         # Validate model parameters
         if self.model.image_backend not in {
             "auto",
+            "mageflow",
             "flux",
             "ollama",
             "zimage",
@@ -370,7 +392,16 @@ class Config:
         }:
             errors.append(
                 f"Invalid image backend: {self.model.image_backend} "
-                "(must be one of auto, flux, ollama, zimage, qwen, ernie, small, turbo, smoke, mock)"
+                "(must be one of auto, mageflow, flux, ollama, zimage, qwen, ernie, "
+                "small, turbo, smoke, mock)"
+            )
+        if not (1 <= self.model.mageflow_steps <= 50):
+            errors.append(
+                f"Invalid Mage-Flow steps: {self.model.mageflow_steps} (must be between 1 and 50)"
+            )
+        if not (0.0 <= self.model.mageflow_cfg <= 20.0):
+            errors.append(
+                f"Invalid Mage-Flow CFG: {self.model.mageflow_cfg} (must be between 0.0 and 20.0)"
             )
         if not (1 <= self.image.num_inference_steps <= 150):
             errors.append(

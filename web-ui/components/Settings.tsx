@@ -43,6 +43,7 @@ interface SettingsProps {
 
 const IMAGE_BACKEND_OPTIONS = [
   { id: "auto", label: "Auto", description: "Use the best ready local backend." },
+  { id: "mageflow", label: "Mage-Flow", description: "Use Microsoft's public 4B research image model in its isolated local CUDA runtime." },
   { id: "zimage", label: "Z-Image", description: "Use the Z-Image stack and local LoRAs." },
   { id: "qwen", label: "Qwen-Image", description: "Use Qwen-Image for text-rich posters, signs, and bilingual typography." },
   { id: "ernie", label: "ERNIE-Image", description: "Use ERNIE-Image-Turbo for 8-step prompt-enhanced multilingual text rendering." },
@@ -351,6 +352,11 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
       case 'ready': return 'text-green-500';
       case 'downloading': return 'text-yellow-500';
       case 'partial': return 'text-orange-500';
+      case 'runtime_unavailable':
+      case 'incompatible_runtime':
+      case 'runtime_error':
+      case 'revision_mismatch':
+        return 'text-red-500';
       case 'not_downloaded': return 'text-gray-400';
       default: return 'text-gray-400';
     }
@@ -367,6 +373,11 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
       case 'ready': return <CheckCircle className="w-4 h-4 text-green-500" />;
       case 'downloading': return <Loader2 className="w-4 h-4 text-yellow-500 animate-spin" />;
       case 'partial': return <AlertCircle className="w-4 h-4 text-orange-500" />;
+      case 'runtime_unavailable':
+      case 'incompatible_runtime':
+      case 'runtime_error':
+      case 'revision_mismatch':
+        return <AlertCircle className="w-4 h-4 text-red-500" />;
       case 'not_downloaded': return <Download className="w-4 h-4 text-gray-400" />;
       default: return <AlertCircle className="w-4 h-4 text-gray-400" />;
     }
@@ -577,11 +588,13 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
                             Configured {configuredImageModel}; using {activeImageModel}.
                           </div>
                         )}
-                        {selectedBackend !== resolvedBackend && selectedBackend !== "ollama" && (
+                        {selectedBackend !== "auto" &&
+                          selectedBackend !== resolvedBackend &&
+                          selectedBackend !== "ollama" && (
                           <div className="mt-2 text-xs text-amber-700 dark:text-amber-300">
                             Configured {selectedBackend}; using the {resolvedBackend} fallback until the preferred model is ready.
                           </div>
-                        )}
+                          )}
                         <div className="mt-3 text-xs text-muted-foreground">
                           Use the backend choices below for local Diffusers, Qwen, Z-Image, or Ollama image rendering.
                         </div>
@@ -654,16 +667,23 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
                             >
                               <div className="flex items-center justify-between gap-2">
                                 <span className="font-medium">{backend.label}</span>
-                                {isConfigured && (
-                                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-primary/15 text-primary">
-                                    {isActive ? "Active" : "Configured"}
-                                  </span>
-                                )}
-                                {!isConfigured && isActive && (
-                                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-green-500/15 text-green-600 dark:text-green-400">
-                                    Active fallback
-                                  </span>
-                                )}
+                                <div className="flex items-center gap-1">
+                                  {backend.id === "mageflow" && (
+                                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-600 dark:text-violet-300">
+                                      Featured
+                                    </span>
+                                  )}
+                                  {isConfigured && (
+                                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-primary/15 text-primary">
+                                      {isActive ? "Active" : "Configured"}
+                                    </span>
+                                  )}
+                                  {!isConfigured && isActive && (
+                                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-green-500/15 text-green-600 dark:text-green-400">
+                                      {selectedBackend === "auto" ? "Active" : "Active fallback"}
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                               <p className="mt-2 text-xs text-muted-foreground">
                                 {backend.description}
@@ -686,6 +706,26 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
                             No image-capable Ollama model is currently available.
                           </span>
                         )}
+                      </div>
+                    )}
+
+                    {selectedBackend === "mageflow" && (
+                      <div className="mt-4 grid gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
+                        <div className="font-medium text-foreground">Microsoft Mage-Flow research runtime</div>
+                        <div className="text-muted-foreground">
+                          Public MIT checkpoint, isolated from DreamGen&apos;s existing model stack.
+                          Microsoft describes the family as research-only and not intended for product/service deployment.
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {generationConfig?.mageflow_model ?? "microsoft/Mage-Flow"} ·{" "}
+                          {generationConfig?.mageflow_steps ?? 20} steps · CFG{" "}
+                          {generationConfig?.mageflow_cfg ?? 5}
+                        </div>
+                        <div className="break-all text-xs text-muted-foreground">
+                          Verified checkpoint:{" "}
+                          {generationConfig?.mageflow_revision ??
+                            "faca09c18c1c19458e7fbc3f7bce6f7a7d4d01a9"}
+                        </div>
                       </div>
                     )}
 
@@ -841,7 +881,14 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
                           <div className="flex items-center gap-3">
                             {getModelStatusIcon(model)}
                             <div>
-                              <h4 className="font-medium">{model.name}</h4>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <h4 className="font-medium">{model.name}</h4>
+                                {model.backend === "mageflow" && (
+                                  <span className="rounded-full bg-violet-500/15 px-2 py-0.5 text-[11px] text-violet-600 dark:text-violet-300">
+                                    Featured RL checkpoint
+                                  </span>
+                                )}
+                              </div>
                               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                                 <span className="capitalize">{model.type.replace('-', ' ')}</span>
                                 <span>•</span>
@@ -863,6 +910,39 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
                               {model.path && model.id === "local:zimage" && (
                                 <div className="text-xs text-muted-foreground mt-1 break-all">
                                   {model.path}
+                                </div>
+                              )}
+                              {model.reason && (
+                                <div className="mt-1 max-w-2xl text-xs text-muted-foreground">
+                                  {model.reason}
+                                </div>
+                              )}
+                              {model.runtime && (
+                                <div className="mt-1 text-xs text-muted-foreground">
+                                  Runtime: {model.runtime.loaded ? "loaded" : "not loaded"}
+                                  {model.runtime.attention ? ` · ${model.runtime.attention}` : ""}
+                                  {model.runtime.source_sha ? ` · ${model.runtime.source_sha.slice(0, 12)}` : ""}
+                                </div>
+                              )}
+                              {model.verified_revision && (
+                                <div className="mt-1 break-all text-xs text-muted-foreground">
+                                  Verified checkpoint: {model.verified_revision}
+                                </div>
+                              )}
+                              {(model.source_url || model.license || model.research_only) && (
+                                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                  {model.source_url && (
+                                    <a
+                                      href={model.source_url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="text-primary hover:underline"
+                                    >
+                                      Official model
+                                    </a>
+                                  )}
+                                  {model.license && <span>{model.license}</span>}
+                                  {model.research_only && <span>Research-only guidance</span>}
                                 </div>
                               )}
                             </div>

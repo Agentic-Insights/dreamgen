@@ -57,8 +57,9 @@ cp .env.example .env
 # - HF_TOKEN is optional for small/turbo/smoke public models
 # - IMAGE_BACKEND=qwen enables the NF4 Qwen-Image backend for text-heavy posters and signage
 # - IMAGE_BACKEND=ernie enables ERNIE-Image-Turbo for prompt-enhanced multilingual text rendering
-# - IMAGE_BACKEND=zimage is the default preference; it uses Z-Image-Turbo when the local checkpoint is ready and reports a Small Stable Diffusion fallback until then
-# - IMAGE_BACKEND=auto prefers ready Z-Image-Turbo, then FLUX, then the small public fallback
+# - IMAGE_BACKEND=auto uses verified Mage-Flow when ready, then ready Z-Image-Turbo, cached FLUX, or Small SD
+# - IMAGE_BACKEND=zimage forces Z-Image-Turbo with truthful Small SD fallback until ready
+# - Mage-Flow is public but research-only and runs in an isolated CUDA sidecar
 
 # Generate from the CLI
 uv run dreamgen generate
@@ -96,6 +97,14 @@ For Z-Image review in Docker:
 - put LoRAs under `./loras/<name>/*.safetensors`
 - use **Settings → Models** to download `Z-Image-Turbo`
 - use **Settings → Models** to switch the active backend to `Z-Image`
+
+For Microsoft Mage-Flow review:
+
+- read [the verified availability/runtime note](docs/MAGE_FLOW.md)
+- use **Settings → Models** to download the pinned RL checkpoint
+  `microsoft/Mage-Flow@faca09c18c1c19458e7fbc3f7bce6f7a7d4d01a9`
+- wait for both checkpoint and isolated runtime readiness
+- select `Mage-Flow`, or leave `Auto` enabled once its card reports `READY`
 - use **Settings → Plugins** to enable `lora` and then select active LoRAs in the Models panel
 
 For Ollama-backed image generation:

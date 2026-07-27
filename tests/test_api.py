@@ -74,7 +74,7 @@ def test_status_endpoint(client):
     assert data["status"] == "ready"
     assert data["active_model"]
     assert data["active_model_id"]
-    assert data["preferred_model"] == "Z-Image-Turbo"
+    assert data["preferred_model"] == "Microsoft Mage-Flow"
     assert data["preferred_model_status"] in {"ready", "partial", "not_downloaded"}
     assert data["fallback_model"] == "Small Stable Diffusion"
     assert data["backend"] in [
@@ -87,6 +87,7 @@ def test_status_endpoint(client):
         "qwen-image",
         "ernie-image",
         "z-image",
+        "mage-flow",
     ]
 
 
@@ -100,13 +101,24 @@ def test_hf_token_status_ignores_placeholder_environment_value(client, monkeypat
     assert response.json() == {"configured": False, "source": None}
 
 
-def test_model_runtime_status_and_cleanup_endpoints(client):
+def test_model_runtime_status_and_cleanup_endpoints(client, monkeypatch):
+    class FakeUnloadResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'{"status":"ready","unloaded":true}'
+
     status = client.get("/api/models/status")
     assert status.status_code == 200
     payload = status.json()
     assert payload["configured_backend"]
     assert payload["resolved_backend"]
     assert {item["backend"] for item in payload["backends"]} >= {
+        "mageflow",
         "flux",
         "small",
         "turbo",
@@ -119,11 +131,38 @@ def test_model_runtime_status_and_cleanup_endpoints(client):
 
     recommended = client.get("/api/models/recommended")
     assert recommended.status_code == 200
-    assert recommended.json()["backend"] in {"zimage", "flux", "small"}
+    assert recommended.json()["backend"] in {"mageflow", "zimage", "flux", "small"}
 
+    monkeypatch.setattr(
+        "src.services.model_runtime.request.urlopen",
+        lambda *_args, **_kwargs: FakeUnloadResponse(),
+    )
     unloaded = client.post("/api/models/unload")
     assert unloaded.status_code == 200
-    assert unloaded.json()["message"] == "Runtime caches released"
+    assert unloaded.json()["message"] == "Runtime caches and Mage-Flow sidecar released"
+    assert unloaded.json()["mageflow"]["unloaded"] is True
+
+
+def test_model_download_route_accepts_encoded_hugging_face_repo_ids(client, monkeypatch):
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'{"status":"ready"}'
+
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda *_args, **_kwargs: FakeResponse(),
+    )
+
+    response = client.post("/api/models/microsoft%2FMage-Flow/download")
+
+    assert response.status_code == 200
+    assert response.json()["model_id"] == "microsoft/Mage-Flow"
 
 
 def test_cors_allows_local_review_ports(client):
@@ -456,6 +495,8 @@ def test_generation_config_endpoint(client, monkeypatch):
         assert all("trigger_placement" in item for item in data["lora_metadata"])
     assert "lora_application_probability" in data
     assert "zimage_model_path" in data
+    assert data["mageflow_model"] == "microsoft/Mage-Flow"
+    assert data["mageflow_revision"] == "faca09c18c1c19458e7fbc3f7bce6f7a7d4d01a9"
     assert data["qwen_image_model"] == "diffusers/qwen-image-nf4"
     assert data["qwen_prompt_magic"] is True
     assert data["qwen_device_map"] == "balanced"
