@@ -52,6 +52,16 @@ class ReusableBackend:
         self.calls += 1
         self.last_generation_metadata["force_reinit"] = force_reinit
         self.last_generation_metadata["seed"] = seed
+        self.last_generation_metadata.update(
+            {
+                "width": 512,
+                "height": 768,
+                "steps": 20,
+                "guidance_scale": 5.0,
+                "model_revision": "verified-model-revision",
+                "implementation_revision": "verified-source-revision",
+            }
+        )
         Image.new("RGB", (8, 8), color=(20, 40, 60)).save(output_path)
         return output_path, 0.25, "reusable-test-backend"
 
@@ -147,6 +157,19 @@ async def test_service_can_reuse_caller_owned_backend(mock_service_config, tmp_p
     assert result.metadata["backend_double"] is True
     assert result.metadata["force_reinit"] is True
     assert result.metadata["seed"] == 99
+    assert result.metadata["experiment"]["parameters"] == {
+        "seed": 99,
+        "width": 512,
+        "height": 768,
+        "steps": 20,
+        "guidance_scale": 5.0,
+        "true_cfg_scale": None,
+    }
+    assert result.metadata["experiment"]["pipeline"]["model_revision"] == "verified-model-revision"
+    assert (
+        result.metadata["experiment"]["pipeline"]["implementation_revision"]
+        == "verified-source-revision"
+    )
 
 
 @pytest.mark.asyncio

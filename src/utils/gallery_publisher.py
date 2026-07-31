@@ -3,22 +3,29 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from src.utils.publication_catalog import (
     IMAGE_EXTENSIONS,
     PUBLIC_GALLERY_STATES,
+    PUBLICATION_BLOCKING_QUALITY_FLAGS,
     catalog_path_for,
     load_catalog,
 )
 
 DEFAULT_BUCKET = "dreamgen-gallery"
+CURRENT_MANIFEST_KEY = "_dreamgen/current.json"
+RELEASE_MANIFEST_PREFIX = "_dreamgen/releases"
+MANIFEST_SCHEMA_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -50,6 +57,22 @@ class PublishPlan:
     @property
     def file_count(self) -> int:
         return len(self.assets)
+
+
+@dataclass(frozen=True)
+class PublishRelease:
+    """An ordered, rollback-linked public gallery release."""
+
+    manifest: dict[str, Any]
+    current_key: str = CURRENT_MANIFEST_KEY
+
+    @property
+    def release_id(self) -> str:
+        return str(self.manifest["release_id"])
+
+    @property
+    def release_key(self) -> str:
+        return f"{RELEASE_MANIFEST_PREFIX}/{self.release_id}.json"
 
 
 def parse_args() -> argparse.Namespace:
@@ -105,6 +128,23 @@ def parse_args() -> argparse.Namespace:
         default="wrangler@4",
         help="Package passed to npx, for example wrangler@4.",
     )
+    parser.add_argument(
+        "--transport",
+        choices=("auto", "rclone", "wrangler"),
+        default="auto",
+        help="Upload transport. Auto prefers rclone and falls back to Wrangler.",
+    )
+    parser.add_argument(
+        "--rclone-remote",
+        default="r2",
+        help="Configured rclone remote name used by the rclone transport.",
+    )
+    parser.add_argument(
+        "--transfers",
+        type=int,
+        default=8,
+        help="Parallel file transfers used by rclone.",
+    )
     return parser.parse_args()
 
 
@@ -132,6 +172,28 @@ def _add_sidecar(
         assets.append(PublishAsset(sidecar_path, object_key(sidecar_path, output_dir), reason))
 
 
+def _entry_sort_key(entry: dict[str, Any]) -> tuple[str, str]:
+    """Return a stable newest-first ordering key with a path tie-breaker."""
+    return (str(entry.get("created_at", "")), str(entry.get("path", "")))
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _json_hash(payload: Any) -> str:
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
 def build_publish_plan(
     output_dir: Path,
     since: float | None,
@@ -155,11 +217,7 @@ def build_publish_plan(
     skipped: list[SkippedAsset] = []
     included_images = 0
 
-    entries = sorted(
-        catalog["assets"].values(),
-        key=lambda entry: str(entry.get("created_at", "")),
-        reverse=True,
-    )
+    entries = sorted(catalog["assets"].values(), key=_entry_sort_key, reverse=True)
 
     for entry in entries:
         key = str(entry.get("path", ""))
@@ -172,8 +230,10 @@ def build_publish_plan(
         if not bool(entry.get("publishable", True)):
             skipped.append(SkippedAsset(key, "not publishable"))
             continue
-        if entry.get("quality_flags"):
-            skipped.append(SkippedAsset(key, f"quality_flags={','.join(entry['quality_flags'])}"))
+        quality_flags = {str(flag) for flag in entry.get("quality_flags", [])}
+        blocking_flags = sorted(quality_flags & PUBLICATION_BLOCKING_QUALITY_FLAGS)
+        if blocking_flags:
+            skipped.append(SkippedAsset(key, f"quality_flags={','.join(blocking_flags)}"))
             continue
         if image_path.suffix.lower() not in IMAGE_EXTENSIONS or not image_path.exists():
             skipped.append(SkippedAsset(key, "missing image file"))
@@ -192,6 +252,113 @@ def build_publish_plan(
             break
 
     return PublishPlan(assets=assets, skipped=skipped, image_count=included_images, delete_count=0)
+
+
+def build_release_manifest(
+    output_dir: Path,
+    plan: PublishPlan,
+    *,
+    published_at: str | None = None,
+    previous_release: dict[str, Any] | None = None,
+) -> PublishRelease:
+    """Build the exact ordered public view represented by a publish plan."""
+    catalog = load_catalog(output_dir)
+    entries = catalog["assets"]
+    image_assets = [asset for asset in plan.assets if asset.path.suffix.lower() in IMAGE_EXTENSIONS]
+    items: list[dict[str, Any]] = []
+
+    for position, asset in enumerate(image_assets):
+        entry = entries.get(asset.key)
+        if not isinstance(entry, dict):
+            raise SystemExit(f"Catalog entry disappeared while building release: {asset.key}")
+        digest = _sha256(asset.path)
+        caption_path = asset.path.with_suffix(".txt")
+        metadata_path = asset.path.with_suffix(".meta.json")
+        caption_version = _sha256(caption_path)[:20] if caption_path.exists() else None
+        metadata_version = _sha256(metadata_path)[:20] if metadata_path.exists() else None
+        state = str(entry.get("publication_state", "published"))
+        metadata = entry.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = {}
+        metadata = {
+            **metadata,
+            "publication": {
+                "state": state,
+                "approved_at": entry.get("published_at") or entry.get("updated_at"),
+            },
+        }
+        items.append(
+            {
+                "position": position,
+                "key": asset.key,
+                "asset_version": digest[:20],
+                "sha256": digest,
+                "size": asset.path.stat().st_size,
+                "created_at": entry.get("created_at"),
+                "approved_at": entry.get("published_at") or entry.get("updated_at"),
+                "publication_state": state,
+                "featured": state == "featured",
+                "caption_key": (
+                    object_key(caption_path, output_dir) if caption_path.exists() else None
+                ),
+                "caption_version": caption_version,
+                "metadata_key": (
+                    object_key(metadata_path, output_dir) if metadata_path.exists() else None
+                ),
+                "metadata_version": metadata_version,
+                "metadata": metadata,
+            }
+        )
+
+    release_time = published_at or utc_now()
+    previous_id = None
+    previous_key = None
+    if isinstance(previous_release, dict):
+        previous_id = previous_release.get("release_id")
+        previous_key = previous_release.get("release_key")
+        if not previous_key and previous_id:
+            previous_key = f"{RELEASE_MANIFEST_PREFIX}/{previous_id}.json"
+
+    source_catalog = {
+        "version": catalog.get("version"),
+        "updated_at": catalog.get("updated_at"),
+        "sha256": _sha256(catalog_path_for(output_dir)),
+    }
+    identity = {
+        "schema_version": MANIFEST_SCHEMA_VERSION,
+        "published_at": release_time,
+        "source_catalog": source_catalog,
+        "items": [
+            {
+                "position": item["position"],
+                "key": item["key"],
+                "asset_version": item["asset_version"],
+                "caption_version": item["caption_version"],
+                "metadata_version": item["metadata_version"],
+                "publication_state": item["publication_state"],
+                "created_at": item["created_at"],
+                "approved_at": item["approved_at"],
+            }
+            for item in items
+        ],
+    }
+    release_id = f"{release_time[:10].replace('-', '')}-{_json_hash(identity)[:16]}"
+    release_key = f"{RELEASE_MANIFEST_PREFIX}/{release_id}.json"
+    manifest = {
+        "schema_version": MANIFEST_SCHEMA_VERSION,
+        "release_id": release_id,
+        "release_key": release_key,
+        "published_at": release_time,
+        "image_count": len(items),
+        "leading_key": items[0]["key"] if items else None,
+        "source_catalog": source_catalog,
+        "rollback": {
+            "previous_release_id": previous_id,
+            "previous_release_key": previous_key,
+        },
+        "items": items,
+    }
+    return PublishRelease(manifest=manifest)
 
 
 def build_publish_status(
@@ -306,6 +473,24 @@ def run_wrangler(args: list[str], *, bucket: str, key: str) -> None:
         )
 
 
+def try_get_wrangler_object(
+    package: str,
+    bucket: str,
+    key: str,
+    destination: Path,
+    remote: bool,
+) -> bool:
+    args = [*wrangler_base_args(package), "get", f"{bucket}/{key}", "--file", str(destination)]
+    if remote:
+        args.append("--remote")
+    env = os.environ.copy()
+    r2_token = env.get("CLOUDFLARE_R2_API_TOKEN")
+    if r2_token:
+        env["CLOUDFLARE_API_TOKEN"] = r2_token
+    result = subprocess.run(args, check=False, text=True, capture_output=True, env=env)
+    return result.returncode == 0 and destination.exists()
+
+
 def put_object(package: str, bucket: str, asset: PublishAsset, remote: bool) -> None:
     args = [
         *wrangler_base_args(package),
@@ -326,6 +511,144 @@ def delete_object(package: str, bucket: str, key: str, remote: bool) -> None:
     run_wrangler(args, bucket=bucket, key=key)
 
 
+def resolve_transport(transport: str, *, remote: bool) -> str:
+    if transport != "auto":
+        if transport == "rclone" and not remote:
+            raise SystemExit("The rclone transport is only available for remote publishing.")
+        return transport
+    if remote and shutil.which("rclone"):
+        return "rclone"
+    return "wrangler"
+
+
+def rclone_target(remote_name: str, bucket: str, key: str | None = None) -> str:
+    base = f"{remote_name.rstrip(':')}:{bucket}"
+    return f"{base}/{key}" if key else base
+
+
+def run_rclone(args: list[str], *, target: str) -> None:
+    rclone = shutil.which("rclone")
+    if not rclone:
+        raise SystemExit("rclone is required for the selected publish transport.")
+    result = subprocess.run([rclone, *args], check=False, text=True)
+    if result.returncode != 0:
+        raise SystemExit(f"rclone gallery publishing failed for {target}.")
+
+
+def rclone_copy_assets(
+    plan: PublishPlan,
+    *,
+    output_dir: Path,
+    bucket: str,
+    remote_name: str,
+    transfers: int,
+) -> None:
+    """Copy exactly the approved plan without mirroring or deleting remote objects."""
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as file:
+        for asset in plan.assets:
+            file.write(f"{asset.key}\n")
+        files_from = Path(file.name)
+    try:
+        target = rclone_target(remote_name, bucket)
+        run_rclone(
+            [
+                "copy",
+                str(output_dir),
+                target,
+                "--files-from",
+                str(files_from),
+                "--no-traverse",
+                "--transfers",
+                str(max(1, transfers)),
+                "--checkers",
+                str(max(2, transfers * 2)),
+            ],
+            target=target,
+        )
+    finally:
+        try:
+            files_from.unlink()
+        except OSError:
+            pass
+
+
+def rclone_put_object(path: Path, *, bucket: str, key: str, remote_name: str) -> None:
+    target = rclone_target(remote_name, bucket, key)
+    run_rclone(["copyto", str(path), target], target=target)
+
+
+def try_get_rclone_object(*, bucket: str, key: str, destination: Path, remote_name: str) -> bool:
+    rclone = shutil.which("rclone")
+    if not rclone:
+        return False
+    target = rclone_target(remote_name, bucket, key)
+    result = subprocess.run(
+        [rclone, "copyto", target, str(destination)],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    return result.returncode == 0 and destination.exists()
+
+
+def load_previous_release(
+    *,
+    transport: str,
+    package: str,
+    bucket: str,
+    remote: bool,
+    remote_name: str,
+    temp_dir: Path,
+) -> dict[str, Any] | None:
+    destination = temp_dir / "previous-current.json"
+    if transport == "rclone":
+        found = try_get_rclone_object(
+            bucket=bucket,
+            key=CURRENT_MANIFEST_KEY,
+            destination=destination,
+            remote_name=remote_name,
+        )
+    else:
+        found = try_get_wrangler_object(
+            package,
+            bucket,
+            CURRENT_MANIFEST_KEY,
+            destination,
+            remote,
+        )
+    if not found:
+        return None
+    try:
+        payload = json.loads(destination.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def publish_release_manifests(
+    release: PublishRelease,
+    *,
+    transport: str,
+    package: str,
+    bucket: str,
+    remote: bool,
+    remote_name: str,
+    temp_dir: Path,
+) -> None:
+    """Publish the immutable release first and move the current pointer last."""
+    release_path = temp_dir / "release.json"
+    current_path = temp_dir / "current.json"
+    payload = json.dumps(release.manifest, indent=2, sort_keys=True)
+    release_path.write_text(payload, encoding="utf-8")
+    current_path.write_text(payload, encoding="utf-8")
+
+    for path, key in ((release_path, release.release_key), (current_path, release.current_key)):
+        if transport == "rclone":
+            rclone_put_object(path, bucket=bucket, key=key, remote_name=remote_name)
+        else:
+            put_object(package, bucket, PublishAsset(path, key, "release manifest"), remote)
+
+
 def smoke_test(package: str, bucket: str, remote: bool) -> None:
     key = f".smoke/publish-validation-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}.txt"
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as file:
@@ -342,14 +665,9 @@ def smoke_test(package: str, bucket: str, remote: bool) -> None:
             pass
 
 
-def validate_remote_environment(remote: bool) -> None:
-    if not remote:
+def validate_remote_environment(remote: bool, transport: str) -> None:
+    if not remote or transport == "rclone":
         return
-    if not (os.getenv("CLOUDFLARE_R2_API_TOKEN") or os.getenv("CLOUDFLARE_API_TOKEN")):
-        raise SystemExit(
-            "CLOUDFLARE_R2_API_TOKEN or CLOUDFLARE_API_TOKEN is required "
-            "for remote R2 publishing."
-        )
     if not os.getenv("CLOUDFLARE_ACCOUNT_ID"):
         raise SystemExit("CLOUDFLARE_ACCOUNT_ID is required for remote R2 publishing.")
 
@@ -364,6 +682,7 @@ def print_plan(plan: PublishPlan, *, bucket: str, remote: bool, execute: bool, p
     print(f"skipped_assets={len(plan.skipped)}")
     print(f"delete_objects={plan.delete_count if prune else 0}")
     print(f"prune={'enabled' if prune else 'disabled'}")
+    print(f"release_manifest={CURRENT_MANIFEST_KEY}")
 
     for asset in plan.assets[:50]:
         action = "UPLOAD" if execute else "DRY-RUN UPLOAD"
@@ -391,6 +710,9 @@ def publish_gallery(
     smoke_only: bool = False,
     local: bool = False,
     wrangler_package: str = "wrangler@4",
+    transport: str = "auto",
+    rclone_remote: str = "r2",
+    transfers: int = 8,
 ) -> PublishPlan:
     """Build and optionally execute the gallery publishing workflow."""
     since_timestamp = parse_since(since)
@@ -403,18 +725,66 @@ def publish_gallery(
         prune=prune,
     )
     print_plan(plan, bucket=bucket, remote=remote, execute=execute, prune=prune)
+    selected_transport = resolve_transport(transport, remote=remote)
+    print(f"transport={selected_transport}")
 
     if not execute:
+        preview = build_release_manifest(output_dir, plan)
+        print(f"release_id={preview.release_id}")
+        print(f"release_images={preview.manifest['image_count']}")
+        print(f"leading_key={preview.manifest['leading_key']}")
         return plan
 
-    validate_remote_environment(remote)
+    validate_remote_environment(remote, selected_transport)
     if smoke:
         smoke_test(wrangler_package, bucket, remote)
         if smoke_only:
             return plan
 
-    for asset in plan.assets:
-        put_object(wrangler_package, bucket, asset, remote)
+    with tempfile.TemporaryDirectory(prefix="dreamgen-gallery-release-") as temp_name:
+        temp_dir = Path(temp_name)
+        previous_release = load_previous_release(
+            transport=selected_transport,
+            package=wrangler_package,
+            bucket=bucket,
+            remote=remote,
+            remote_name=rclone_remote,
+            temp_dir=temp_dir,
+        )
+
+        if selected_transport == "rclone":
+            rclone_copy_assets(
+                plan,
+                output_dir=output_dir,
+                bucket=bucket,
+                remote_name=rclone_remote,
+                transfers=transfers,
+            )
+        else:
+            for asset in plan.assets:
+                put_object(wrangler_package, bucket, asset, remote)
+
+        release = build_release_manifest(
+            output_dir,
+            plan,
+            previous_release=previous_release,
+        )
+        publish_release_manifests(
+            release,
+            transport=selected_transport,
+            package=wrangler_package,
+            bucket=bucket,
+            remote=remote,
+            remote_name=rclone_remote,
+            temp_dir=temp_dir,
+        )
+        print(f"release_id={release.release_id}")
+        print(f"release_key={release.release_key}")
+        print(f"leading_key={release.manifest['leading_key']}")
+        print(
+            "previous_release_id="
+            f"{release.manifest['rollback']['previous_release_id'] or 'none'}"
+        )
 
     return plan
 
@@ -433,4 +803,7 @@ def main() -> None:
         smoke_only=args.smoke_test_only,
         local=args.local,
         wrangler_package=args.wrangler_package,
+        transport=args.transport,
+        rclone_remote=args.rclone_remote,
+        transfers=args.transfers,
     )

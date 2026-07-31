@@ -889,7 +889,9 @@
           return;
         }
 
-        state.allImages = imagesList.map(normalizeImage).sort((a, b) => b.sortTime - a.sortTime);
+        // The API response order is the signed-off release order. Do not re-sort it
+        // client-side and accidentally revive stale bucket objects.
+        state.allImages = imagesList.map(normalizeImage);
 
         if (state.allImages.length === 0) {
           setLoading('No published images yet');
@@ -925,8 +927,10 @@
       return {
         ...item,
         key: item.key,
-        imageUrl: `/api/images/${encodeKey(item.key)}`,
-        captionUrl: item.captionKey ? `/api/images/${encodeKey(item.captionKey)}` : null,
+        imageUrl: item.imageUrl || versionedAssetUrl(item.key, item.assetVersion),
+        captionUrl: item.captionUrl || (
+          item.captionKey ? versionedAssetUrl(item.captionKey, item.assetVersion) : null
+        ),
         createdDate,
         sortTime: createdDate && !Number.isNaN(createdDate.getTime())
           ? createdDate.getTime()
@@ -946,6 +950,11 @@
 
     function encodeKey(key) {
       return String(key).split('/').map(encodeURIComponent).join('/');
+    }
+
+    function versionedAssetUrl(key, version) {
+      const url = `/api/images/${encodeKey(key)}`;
+      return version ? `${url}?v=${encodeURIComponent(version)}` : url;
     }
 
     function setupFilters() {
@@ -1121,9 +1130,16 @@
     }
 
     function parseDate(filename) {
-      const match = filename.match(/(\d{4})(\d{2})(\d{2})/);
+      const match = filename.match(/(\d{4})(\d{2})(\d{2})(?:_(\d{2})(\d{2})(\d{2}))?/);
       if (!match) return null;
-      return new Date(match[1], parseInt(match[2]) - 1, match[3]);
+      return new Date(Date.UTC(
+        Number(match[1]),
+        Number(match[2]) - 1,
+        Number(match[3]),
+        Number(match[4] || 0),
+        Number(match[5] || 0),
+        Number(match[6] || 0)
+      ));
     }
 
     function formatDate(date) {

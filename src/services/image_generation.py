@@ -196,11 +196,27 @@ class ImageGenService:
         operational_guards: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Capture the reproducibility envelope for one local model probe."""
-        width = _metadata_scalar(_config_value(self.config, "image", "width"))
-        height = _metadata_scalar(_config_value(self.config, "image", "height"))
-        steps = _metadata_scalar(_config_value(self.config, "image", "num_inference_steps"))
-        guidance_scale = _metadata_scalar(_config_value(self.config, "image", "guidance_scale"))
-        true_cfg_scale = _metadata_scalar(_config_value(self.config, "image", "true_cfg_scale"))
+        width = _metadata_scalar(
+            generation_metadata.get("width", _config_value(self.config, "image", "width"))
+        )
+        height = _metadata_scalar(
+            generation_metadata.get("height", _config_value(self.config, "image", "height"))
+        )
+        steps = _metadata_scalar(
+            generation_metadata.get(
+                "steps", _config_value(self.config, "image", "num_inference_steps")
+            )
+        )
+        guidance_scale = _metadata_scalar(
+            generation_metadata.get(
+                "guidance_scale", _config_value(self.config, "image", "guidance_scale")
+            )
+        )
+        true_cfg_scale = _metadata_scalar(
+            generation_metadata.get(
+                "true_cfg_scale", _config_value(self.config, "image", "true_cfg_scale")
+            )
+        )
         configured_backend = _metadata_scalar(
             _config_value(self.config, "model", "image_backend", default=backend_name)
         )
@@ -256,6 +272,9 @@ class ImageGenService:
                 "configured_backend": configured_backend,
                 "resolved_backend": backend_name,
                 "model": model_name,
+                "model_revision": generation_metadata.get("model_revision"),
+                "verified_model_revision": generation_metadata.get("verified_model_revision"),
+                "implementation_revision": generation_metadata.get("implementation_revision"),
                 "prompt_model": prompt_model,
                 "configured_prompt_model": configured_prompt_model,
             },

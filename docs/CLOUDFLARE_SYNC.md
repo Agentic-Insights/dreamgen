@@ -116,12 +116,29 @@ and upload only assets whose publication state is `published` or `featured`.
 Mock/test placeholders are marked unpublishable by the catalog unless explicitly
 overridden through the backend API. The workflow uploads image files with matching
 `.txt` prompt sidecars and `.meta.json` metadata sidecars, reports skipped catalog
-entries with reasons, and never deletes remote objects unless a future `--prune`
-implementation is enabled.
+entries with reasons, and never deletes source or remote image objects.
+Explicit approval clears the workflow-only `draft` and `provisional` flags. Descriptive
+flags such as `nightly` remain in metadata, while safety/diagnostic flags continue to
+block publication.
 
-The publisher uses remote R2 by default through Wrangler; pass `--local` only when
-intentionally testing Wrangler's local R2 simulation. The legacy Just targets still
-work as wrappers:
+Every successful publish now finishes by writing two metadata objects **after** all
+approved assets are present:
+
+- `_dreamgen/releases/<release-id>.json` is an immutable rollback target.
+- `_dreamgen/current.json` is the pointer consumed by the Pages API.
+
+The manifest contains the exact approval-filtered order, a SHA-256-derived version for
+each asset, the catalog revision, and a pointer to the previous release. The Pages API
+does not infer the public gallery from every object left in the bucket once this
+manifest exists. That means stale objects remain recoverable without remaining eligible
+for the leading image. Versioned image and caption URLs invalidate old browser/CDN
+entries while retaining immutable caching for a specific asset version.
+
+The publisher uses remote R2 by default. `--transport auto` prefers the configured
+`r2:` rclone remote for a fast non-deleting copy and falls back to Wrangler. Use
+`--transport wrangler` to force Wrangler, or pass `--local` only when intentionally
+testing Wrangler's local R2 simulation. Wrangler can use either a scoped token or an
+existing `wrangler login` OAuth session. The legacy Just targets still work as wrappers:
 
 ```bash
 just publish-gallery-smoke
@@ -147,8 +164,8 @@ for scoped bucket object access. The R2 token must be able to write objects in t
 
 ### Gallery not updating
 ```bash
-just sync-gallery       # Force sync to gallery bucket
-just deploy-gallery     # Redeploy Pages app
+just -- publish-gallery --execute  # Publish approved assets + release manifest
+just deploy-gallery                 # Redeploy Pages code when functions/UI changed
 ```
 
 ### Latest image not updating
