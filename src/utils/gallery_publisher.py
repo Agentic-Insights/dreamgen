@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import hashlib
 import json
 import os
@@ -462,12 +463,15 @@ def run_wrangler(args: list[str], *, bucket: str, key: str) -> None:
     if r2_token:
         env["CLOUDFLARE_API_TOKEN"] = r2_token
 
-    result = subprocess.run(args, check=False, text=True, env=env)
+    result = subprocess.run(args, check=False, text=True, capture_output=True, env=env)
     if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip().splitlines()
+        detail_line = detail[-1] if detail else "unknown Wrangler error"
         raise SystemExit(
             "Wrangler R2 command failed.\n"
             f"Bucket: {bucket}\n"
             f"Key: {key}\n"
+            f"Detail: {detail_line}\n"
             "Confirm CLOUDFLARE_R2_API_TOKEN has Workers R2 Storage Write or "
             "Workers R2 Storage Bucket Item Write for this bucket, then rerun."
         )
@@ -502,6 +506,34 @@ def put_object(package: str, bucket: str, asset: PublishAsset, remote: bool) -> 
     if remote:
         args.append("--remote")
     run_wrangler(args, bucket=bucket, key=asset.key)
+
+
+def wrangler_put_assets(
+    plan: PublishPlan,
+    *,
+    package: str,
+    bucket: str,
+    remote: bool,
+    transfers: int,
+) -> None:
+    """Upload the exact approved plan with bounded Wrangler concurrency."""
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, transfers)) as executor:
+        futures = {
+            executor.submit(put_object, package, bucket, asset, remote): asset
+            for asset in plan.assets
+        }
+        for future in concurrent.futures.as_completed(futures):
+            asset = futures[future]
+            try:
+                future.result()
+            except BaseException as exc:
+                for pending in futures:
+                    pending.cancel()
+                raise SystemExit(
+                    "Wrangler gallery publishing failed. The release pointer was not updated.\n"
+                    f"Bucket: {bucket}\n"
+                    f"Key: {asset.key}"
+                ) from exc
 
 
 def delete_object(package: str, bucket: str, key: str, remote: bool) -> None:
@@ -753,16 +785,43 @@ def publish_gallery(
         )
 
         if selected_transport == "rclone":
-            rclone_copy_assets(
+            try:
+                rclone_copy_assets(
+                    plan,
+                    output_dir=output_dir,
+                    bucket=bucket,
+                    remote_name=rclone_remote,
+                    transfers=transfers,
+                )
+            except SystemExit:
+                if transport != "auto":
+                    raise
+                selected_transport = "wrangler"
+                print("rclone_write_failed=fallback_to_wrangler")
+                validate_remote_environment(remote, selected_transport)
+                previous_release = load_previous_release(
+                    transport=selected_transport,
+                    package=wrangler_package,
+                    bucket=bucket,
+                    remote=remote,
+                    remote_name=rclone_remote,
+                    temp_dir=temp_dir,
+                )
+                wrangler_put_assets(
+                    plan,
+                    package=wrangler_package,
+                    bucket=bucket,
+                    remote=remote,
+                    transfers=transfers,
+                )
+        else:
+            wrangler_put_assets(
                 plan,
-                output_dir=output_dir,
+                package=wrangler_package,
                 bucket=bucket,
-                remote_name=rclone_remote,
+                remote=remote,
                 transfers=transfers,
             )
-        else:
-            for asset in plan.assets:
-                put_object(wrangler_package, bucket, asset, remote)
 
         release = build_release_manifest(
             output_dir,

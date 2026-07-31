@@ -3,7 +3,13 @@ import json
 import pytest
 
 from scripts.publish_gallery import discover_assets
-from src.utils.gallery_publisher import build_publish_plan, build_release_manifest
+from src.utils import gallery_publisher
+from src.utils.gallery_publisher import (
+    PublishAsset,
+    PublishPlan,
+    build_publish_plan,
+    build_release_manifest,
+)
 from src.utils.publication_catalog import (
     backfill_catalog,
     load_catalog,
@@ -210,3 +216,66 @@ def test_publication_state_records_approval_and_rollback_history(tmp_path):
     assert hidden["unpublished_at"]
     assert hidden["publication_history"][-2]["to"] == "published"
     assert hidden["publication_history"][-1]["to"] == "hidden"
+
+
+def test_auto_transport_falls_back_to_wrangler_without_moving_pointer(tmp_path, monkeypatch):
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    image = output_dir / "approved.png"
+    image.write_bytes(b"approved")
+    plan = PublishPlan(
+        assets=[PublishAsset(image, "approved.png", "state=published")],
+        skipped=[],
+        image_count=1,
+    )
+    events = []
+
+    monkeypatch.setattr(gallery_publisher, "build_publish_plan", lambda *args, **kwargs: plan)
+    monkeypatch.setattr(gallery_publisher, "print_plan", lambda *args, **kwargs: None)
+    monkeypatch.setattr(gallery_publisher, "resolve_transport", lambda *args, **kwargs: "rclone")
+    monkeypatch.setattr(gallery_publisher, "validate_remote_environment", lambda *args: None)
+    monkeypatch.setattr(
+        gallery_publisher,
+        "load_previous_release",
+        lambda **kwargs: events.append(("load", kwargs["transport"])),
+    )
+    monkeypatch.setattr(
+        gallery_publisher,
+        "rclone_copy_assets",
+        lambda *args, **kwargs: (_ for _ in ()).throw(SystemExit("403")),
+    )
+    monkeypatch.setattr(
+        gallery_publisher,
+        "wrangler_put_assets",
+        lambda *args, **kwargs: events.append(("upload", kwargs["transfers"])),
+    )
+    release = gallery_publisher.PublishRelease(
+        {
+            "release_id": "release",
+            "release_key": "_dreamgen/releases/release.json",
+            "leading_key": "approved.png",
+            "rollback": {"previous_release_id": None},
+        }
+    )
+    monkeypatch.setattr(
+        gallery_publisher, "build_release_manifest", lambda *args, **kwargs: release
+    )
+    monkeypatch.setattr(
+        gallery_publisher,
+        "publish_release_manifests",
+        lambda *args, **kwargs: events.append(("manifest", kwargs["transport"])),
+    )
+
+    gallery_publisher.publish_gallery(
+        output_dir=output_dir,
+        execute=True,
+        transport="auto",
+        transfers=4,
+    )
+
+    assert events == [
+        ("load", "rclone"),
+        ("load", "wrangler"),
+        ("upload", 4),
+        ("manifest", "wrangler"),
+    ]
