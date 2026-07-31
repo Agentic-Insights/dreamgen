@@ -16,6 +16,17 @@ from src.utils.publication_catalog import load_catalog
 runner = CliRunner()
 
 
+def test_generation_validation_accepts_resolved_mageflow():
+    """Auto may resolve to the already-supported Mage-Flow backend."""
+
+    class ValidConfig:
+        @staticmethod
+        def validate():
+            return []
+
+    assert cli.validate_generation_config(ValidConfig(), "mageflow") == []
+
+
 def test_generate_mock_prints_lifecycle_status(tmp_path, monkeypatch):
     """Mock generation should still expose the lifecycle messages users rely on."""
     monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
