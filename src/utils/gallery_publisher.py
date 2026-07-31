@@ -463,7 +463,15 @@ def run_wrangler(args: list[str], *, bucket: str, key: str) -> None:
     if r2_token:
         env["CLOUDFLARE_API_TOKEN"] = r2_token
 
-    result = subprocess.run(args, check=False, text=True, capture_output=True, env=env)
+    result = subprocess.run(
+        args,
+        check=False,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+        env=env,
+    )
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip().splitlines()
         detail_line = detail[-1] if detail else "unknown Wrangler error"
