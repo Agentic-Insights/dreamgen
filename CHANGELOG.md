@@ -2,6 +2,31 @@
 
 <!-- version list -->
 
+## v1.9.0 (2026-08-02)
+
+### Chores
+
+- Remove obsolete local automation hooks
+  ([`d8d7c10`](https://github.com/Agentic-Insights/dreamgen/commit/d8d7c10697f4149a514553bddb1b96c3c9f637db))
+
+- Remove obsolete local automation hooks
+  ([`e213c41`](https://github.com/Agentic-Insights/dreamgen/commit/e213c41da251c2ea0d6301a4f4065905d7df24d2))
+
+- **release**: 1.8.0 [skip ci] [skip ci]
+  ([`16c4f3f`](https://github.com/Agentic-Insights/dreamgen/commit/16c4f3f2b965f6ac73a8d18e23df63c64a44d118))
+
+### Documentation
+
+- Add concise project vision
+  ([`6067f77`](https://github.com/Agentic-Insights/dreamgen/commit/6067f7730dcc8ac84f5d80af369f609c0d408d86))
+
+### Features
+
+- **runtime**: Release candidate with verified Mage-Flow
+  ([#72](https://github.com/Agentic-Insights/dreamgen/pull/72),
+  [`fd216d8`](https://github.com/Agentic-Insights/dreamgen/commit/fd216d8128be6aea452b50f8ad1f459fcab63f34))
+
+
 ## v1.8.0 (2026-06-01)
 
 ### Features
