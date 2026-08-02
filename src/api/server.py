@@ -56,6 +56,7 @@ from src.services.mage_edit_runtime import run_edit as run_mage_edit
 from src.services.model_runtime import ModelRuntimeManager
 from src.utils.config import Config
 from src.utils.gallery_publisher import DEFAULT_BUCKET, build_publish_status
+from src.utils.image_engine_catalog import image_engine_catalog
 from src.utils.mage_edit import capability_document, get_variant
 from src.utils.observability import read_lifecycle_events, write_lifecycle_event
 from src.utils.ollama import (
@@ -1244,6 +1245,12 @@ async def get_plugins():
 async def get_model_status():
     """Get status of available models and their download progress"""
     return runtime_manager.status()
+
+
+@app.get("/api/models/catalog")
+async def get_image_engine_catalog():
+    """Expose verified model identities separately from runtime readiness."""
+    return image_engine_catalog()
 
 
 @app.get("/api/models/recommended")

@@ -67,6 +67,20 @@ def test_health_check(client):
     assert response.status_code in [200, 404]  # May return 404 if no root route
 
 
+def test_model_catalog_returns_provider_neutral_contract(client):
+    response = client.get("/api/models/catalog")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["target_default"] == "flux2-klein-4b"
+    assert payload["target_default_selectable"] is False
+    assert [engine["role"] for engine in payload["engines"]] == [
+        "target_default",
+        "benchmark_lane",
+        "benchmark_lane",
+    ]
+
+
 def test_mage_edit_capabilities_are_truthfully_unavailable(client, monkeypatch):
     monkeypatch.setattr(api_server, "probe_edit_runtime", lambda: None)
     response = client.get("/api/edit/capabilities")
