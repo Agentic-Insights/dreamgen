@@ -1,0 +1,154 @@
+{
+  "schema_version": 1,
+  "checked_at": "2026-08-02T13:47:21.1092904Z",
+  "lead": "https://huggingface.co/mage-flow-community",
+  "decision": "not_accepted_as_canonical",
+  "decision_reason": "The public repositories are internally complete according to their own manifests and are labeled as Hugging Face duplicates, but the inaccessible Microsoft weights prevent an independent equality check and no primary source provides an explicit authorized-transfer statement.",
+  "canonical_source": {
+    "repository": "https://github.com/microsoft/Mage",
+    "dreamgen_pinned_revision": "6cefeb40e4c8ecc404ecb73732a91878939f27e0",
+    "current_revision": "8c94a0ac905167f40b05b09332b78752b7f9fbef",
+    "comparison": {
+      "ahead_by": 2,
+      "changed_paths": [
+        "README.md",
+        "assets/mage_vl_tech_report.pdf",
+        "mage_vl/README.md"
+      ],
+      "mage_flow_changed": false
+    },
+    "community_namespace_mentions": 0,
+    "checkpoint_namespace_still_documented": "microsoft/Mage-Flow*",
+    "license": "MIT",
+    "intended_use": "Microsoft's root README says research purposes only, not intended for product or service deployment, with controlled settings, human oversight, moderation, validation, and compliance safeguards."
+  },
+  "organization": {
+    "id": "mage-flow-community",
+    "display_name": "Mage Flow Community",
+    "declared_type": "community",
+    "visible_team_member_count": 1,
+    "visible_team_member": "brimo",
+    "microsoft_affiliation_declared": false,
+    "authorization_statement_present": false,
+    "note": "multimodalart created the duplicate commits but is not the live organization member. Xinjie-Q appears as duplicate-source co-author on these copies and on unrelated users' Duplicate from microsoft commits; neither fact establishes organization ownership or authorization."
+  },
+  "official_hugging_face_state": {
+    "repositories": [
+      "microsoft/Mage-Flow-Edit-Base",
+      "microsoft/Mage-Flow-Edit",
+      "microsoft/Mage-Flow-Edit-Turbo"
+    ],
+    "anonymous_api_status": 401,
+    "browser_status": 404,
+    "standard_gate_present": false,
+    "microsoft_collection_public_models": [
+      "microsoft/Mage-VL",
+      "microsoft/Mage-ViT"
+    ]
+  },
+  "community_repositories": [
+    {
+      "id": "mage-flow-community/Mage-Flow-Edit-Base",
+      "variant": "base",
+      "revision": "6883a38b33f11d67d42e84554fecf0621b3f70f1",
+      "commit_title": "Duplicate from microsoft/Mage-Flow-Edit-Base",
+      "commit_authors": ["multimodalart", "Xinjie-Q"],
+      "private": false,
+      "gated": false,
+      "license": "mit",
+      "repository_files": 43,
+      "lfs_files": 24,
+      "lfs_bytes": 17495714677,
+      "safetensors_bytes": 17452309184,
+      "readme_sha256": "05176c7c3eddd4e911f6d5c7db6b7cf6316fdb6e4805d92eae90cf9b6b495647",
+      "transformer_sha256": "9d93faa75963ba4a2ef1b64bed4fe94c2554b82e8f3fb2dbb267604a634d450d"
+    },
+    {
+      "id": "mage-flow-community/Mage-Flow-Edit",
+      "variant": "aligned",
+      "revision": "fd7119d80fff2e5be21178edf2a93877955540b9",
+      "commit_title": "Duplicate from microsoft/Mage-Flow-Edit",
+      "commit_authors": ["multimodalart", "Xinjie-Q"],
+      "private": false,
+      "gated": false,
+      "license": "mit",
+      "repository_files": 43,
+      "lfs_files": 24,
+      "lfs_bytes": 17495714677,
+      "safetensors_bytes": 17452309184,
+      "readme_sha256": "a5780f7d9b84d63a79ed1962185dcef787402b07b9029833822c1a9325ec04e2",
+      "transformer_sha256": "09cee4afa95239d850af02c9b1c006bffc71dca4a984a2a1f56edff9282d53d3"
+    },
+    {
+      "id": "mage-flow-community/Mage-Flow-Edit-Turbo",
+      "variant": "turbo",
+      "revision": "66df6fa1aba5b40cd4120739134292eab9779da3",
+      "commit_title": "Duplicate from microsoft/Mage-Flow-Edit-Turbo",
+      "commit_authors": ["multimodalart", "Xinjie-Q"],
+      "private": false,
+      "gated": false,
+      "license": "mit",
+      "repository_files": 43,
+      "lfs_files": 24,
+      "lfs_bytes": 17495714653,
+      "safetensors_bytes": 17452309160,
+      "readme_sha256": "f8de31f661ceb77b0d5880e5d9075e4dabed9e2ffdff957977c8431a42cb580d",
+      "transformer_sha256": "29c3726ecd64afe149eef28af3e27b6b40de52646bfd16757a37da4b6fbcf288"
+    }
+  ],
+  "lfs_inventory": {
+    "representation": "Each repository has the following 23 shared LFS objects plus its one transformer object recorded above, for an exact total of 24 LFS objects.",
+    "shared_objects": [
+      {"path":"assets/cuisine.jpg","bytes":2182758,"sha256":"a1fabb7558f74bf3dfa66bbaffb12b654510feb8f049d4c1e5d6ded5241a3793"},
+      {"path":"assets/dog.jpg","bytes":525201,"sha256":"164d8dfe707fb854e288ad2eea65c2db87e90af11f689c85502860eeaf3f4794"},
+      {"path":"assets/edit_gallery_appearance.jpg","bytes":3449652,"sha256":"cb5ee8fd3157483aa4f766892e968c6bf6bf06f1c944b04298755f258446d1f5"},
+      {"path":"assets/edit_gallery_content.jpg","bytes":3226041,"sha256":"493d9362bfe16246da6851762fc863a56f5131bb9cc7dd70ca181fb888fdc885"},
+      {"path":"assets/edit_gallery_human_creative.jpg","bytes":3307499,"sha256":"4accce02b8460946a4f7c6e4d6ac74a29a04b4cbdcac01c5ec6a878d391155ad"},
+      {"path":"assets/edit_gallery_lowlevel.jpg","bytes":2735850,"sha256":"b2796b15234934522a89f47b08725a95dce0d9beb8520f1515c14e2af89dd54f"},
+      {"path":"assets/edit_gallery_restoration.jpg","bytes":3443743,"sha256":"77207d09e6c489781424c9e5b756d1b2949eda24c34c431d803c79101cc4ef78"},
+      {"path":"assets/edit_gallery_scene_subject.jpg","bytes":3460184,"sha256":"acd40223465f051ad97d3ac618819d365e8c4c92c7a16e65812544868f0d8091"},
+      {"path":"assets/edit_gallery_showcase_1.jpg","bytes":3473559,"sha256":"18b04ac991809a0cebddeec915b01b94fae5a94c00c3055a94dbeb7ad20b4b52"},
+      {"path":"assets/edit_gallery_showcase_2.jpg","bytes":3983759,"sha256":"0422949b4dc8c82c7172adb837744c2bff9e48b009b47e9f6dd3136f3d29cfe9"},
+      {"path":"assets/general.jpg","bytes":2252562,"sha256":"f3bcdcc89b69a604e82c58cf29d472c8cc7fc56f0b4a88e2c8fe1172e173a5ef"},
+      {"path":"assets/mage-flow-cover.png","bytes":2551049,"sha256":"38c0e930ccd4f6169d644cf350d2ed99503c5aca98a96049d2dc755c3e5c8292"},
+      {"path":"assets/mage_vae.jpg","bytes":254985,"sha256":"5f5d152b9f049bc6c0d7601f448456c1834747ee06c713f7b9856b6b219d43ae"},
+      {"path":"assets/multiref_000000_1.png","bytes":824404,"sha256":"c58549bd7fc1992f84615df9128cbc6cf24e8b2b8aba55f2521b6f278d144ca9"},
+      {"path":"assets/nr_mmdit.jpg","bytes":470704,"sha256":"11d128f23e121e6eb4a228c5d848ba986d78c989205971ca8e8b8f93369b878c"},
+      {"path":"assets/one_to_many_editing_diversity.jpg","bytes":259747,"sha256":"33b3b590596193c0b7fdb32bd5139696924d3d38829ab78a4eefa127f9f91e90"},
+      {"path":"assets/portrait.jpg","bytes":1827782,"sha256":"599eacf83cd0a8bb19cc3cc79fd6a94b38891917bfcf27bb278ae7a4bcb33d0e"},
+      {"path":"assets/t2i_teaser.jpg","bytes":1150108,"sha256":"a94ad93cb9d77344da044f0b9a48c326771cc93d5bf689986d31674ace42ccc2"},
+      {"path":"assets/text_en.jpg","bytes":2088960,"sha256":"24b4c332bfa239f5e6ef2c31c85f7e51c70d31c59b5cf23a81a710af1f441d11"},
+      {"path":"assets/text_zh.jpg","bytes":1936946,"sha256":"b79d49a353176b4b14a40ee371d2444f9cdeb45e54d877c4730180443af395d7"},
+      {"path":"text_encoder/model-00001-of-00002.safetensors","bytes":4967229296,"sha256":"30a01a0556622645a3cce87b655bbbbbc1f170c196099f1b666c93202c3339a9"},
+      {"path":"text_encoder/model-00002-of-00002.safetensors","bytes":3908490048,"sha256":"046296a2a387efb43b0c997d5833c789604d168834f6e0d3064bf7bb13d002a6"},
+      {"path":"vae/diffusion_pytorch_model.safetensors","bytes":345053056,"sha256":"34e076dc1e8a15321e1e07be5111d59cf16dd10b804b7c7e20b4de29013427e0"}
+    ],
+    "variant_transformers": [
+      {"variant":"base","path":"transformer/diffusion_pytorch_model.safetensors","bytes":8231536784,"sha256":"9d93faa75963ba4a2ef1b64bed4fe94c2554b82e8f3fb2dbb267604a634d450d"},
+      {"variant":"aligned","path":"transformer/diffusion_pytorch_model.safetensors","bytes":8231536784,"sha256":"09cee4afa95239d850af02c9b1c006bffc71dca4a984a2a1f56edff9282d53d3"},
+      {"variant":"turbo","path":"transformer/diffusion_pytorch_model.safetensors","bytes":8231536760,"sha256":"29c3726ecd64afe149eef28af3e27b6b40de52646bfd16757a37da4b6fbcf288"}
+    ]
+  },
+  "model_card_continuity": {
+    "source_repository": "https://github.com/microsoft/Mage",
+    "community_namespace_named_in_cards": false,
+    "cards_still_link_to_microsoft_repositories": true,
+    "cards_include_mit_license": true,
+    "cards_include_root_research_only_notice": false,
+    "model_index_class": "MageFlowPipeline",
+    "model_index_version": "0.1.0"
+  },
+  "storage": {
+    "weights_downloaded": false,
+    "bytes_added": 0,
+    "duplicates_created": false,
+    "reason": "Canonical authorization was not established, so DreamGen's managed cache was not mutated.",
+    "c_drive_free_bytes_at_check": 123616849920
+  },
+  "runtime": {
+    "adapter_activated": false,
+    "rtx_4090_benchmark_run": false,
+    "visual_output_claimed": false,
+    "blocker": "An explicit Microsoft/Mage-Flow-author endorsement of mage-flow-community, or restored access to microsoft/Mage-Flow-Edit*, is required."
+  }
+}

@@ -10,6 +10,11 @@ from typing import Any
 OFFICIAL_SOURCE_REPOSITORY = "https://github.com/microsoft/Mage"
 OFFICIAL_SOURCE_REVISION = "6cefeb40e4c8ecc404ecb73732a91878939f27e0"
 OFFICIAL_LICENSE = "MIT"
+UNVERIFIED_COMMUNITY_REPOSITORIES = (
+    "mage-flow-community/Mage-Flow-Edit-Base",
+    "mage-flow-community/Mage-Flow-Edit",
+    "mage-flow-community/Mage-Flow-Edit-Turbo",
+)
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 
 
@@ -100,10 +105,14 @@ def capability_document() -> dict[str, Any]:
         ],
         "variants": variants,
         "available": any(variant["available"] for variant in variants),
+        "provenance_status": "official_repositories_withdrawn",
+        "unverified_community_repositories": list(UNVERIFIED_COMMUNITY_REPOSITORIES),
         "access_note": (
             "The official Microsoft Hugging Face repositories currently return 404 in a "
-            "signed-in session rather than presenting a standard access agreement. DreamGen "
-            "will not substitute a mirror or another checkpoint."
+            "signed-in session rather than presenting a standard access agreement. Public "
+            "mage-flow-community copies are unendorsed duplicates: Microsoft's current source "
+            "still names only the withdrawn Microsoft repositories. DreamGen will not present "
+            "those copies or another checkpoint as official Mage-Flow-Edit."
         ),
     }
 

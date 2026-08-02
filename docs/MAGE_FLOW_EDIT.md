@@ -51,6 +51,40 @@ Then run `hf auth login` in the local terminal, verify each official repository 
 pin its full 40-character commit SHA in the corresponding `MAGEFLOW_EDIT_*_REVISION`
 variable, and set `MAGEFLOW_EDIT_ENABLED=true`. Never paste a token into logs or source.
 
+### `mage-flow-community` provenance lead (rechecked 2026-08-02)
+
+The public `mage-flow-community` organization is a useful preservation lead, but it is
+not currently defensible as Microsoft's authorized or canonical continuation:
+
+- its three edit repositories are internally complete according to their own manifests
+  and have one Hugging Face commit titled `Duplicate from microsoft/...`, created by
+  `multimodalart` with duplicate-source attribution to `Xinjie-Q`; the inaccessible
+  Microsoft weights prevent an independent byte-for-byte comparison;
+- the live organization member API exposes one team member, `brimo`, and no Microsoft
+  ownership or affiliation statement;
+- identical duplicate attribution appears on unrelated users' copies, so the inherited
+  `Xinjie-Q` co-author is evidence of the Hub duplication operation, not authorization;
+- the copied cards do not name `mage-flow-community`; they still link every model and
+  usage example to the withdrawn `microsoft/Mage-Flow*` repositories;
+- Microsoft's current source HEAD
+  `8c94a0ac905167f40b05b09332b78752b7f9fbef` contains no community-namespace reference
+  and still defaults to the Microsoft repositories; compared with DreamGen's pinned
+  `6cefeb40e4c8ecc404ecb73732a91878939f27e0`, the intervening changes do not touch
+  `mage_flow/`;
+- Microsoft's live Mage collection now contains only Mage-VL and Mage-ViT.
+
+The community weights are public, ungated, internally complete according to their own
+manifests, and labeled MIT, but the copied cards omit the root Microsoft README's
+research-only Responsible AI notice. That notice is an intended-use caveat rather than
+a change to the MIT license, and DreamGen continues to show it.
+
+No community weights were downloaded, aliased, or activated. The exact revisions, full
+24-object LFS inventories, weight hashes, source comparisons, browser/API results, and
+zero-byte storage decision are recorded in
+`docs/proof/mage-edit/community-provenance-audit.json`. Activation requires an explicit
+statement from Microsoft or the Mage-Flow authors that this namespace is the authorized
+checkpoint home, or restoration of the canonical Microsoft repositories.
+
 ## Supported operation
 
 The official API accepts one natural-language instruction plus one or more reference
