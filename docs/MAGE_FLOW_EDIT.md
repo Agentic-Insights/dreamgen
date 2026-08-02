@@ -28,13 +28,16 @@ at 30 steps. A generic parameter note in the same source says “RL 20”; that 
 appears for the text-to-image RL model. DreamGen follows the edit-specific table and
 benchmark and keeps the user free to change steps.
 
-## Availability boundary (checked 2026-08-01)
+## Availability boundary (rechecked 2026-08-02)
 
-Anonymous Hugging Face API, resolve, and git requests return HTTP 401. The local
-Hugging Face CLI is not authenticated. More importantly, a signed-in browser session
-shows HTTP 404 for all three official edit repositories, and Microsoft's live Mage
-collection no longer lists them. No standard gated-model agreement or request-access
-control is offered.
+Anonymous Hugging Face API, resolve, and git requests return HTTP 401. A clean run with
+the current available `huggingface_hub` CLI (0.35.0) produces the same result, and the
+local CLI is not authenticated. More importantly, an authenticated browser session
+shows HTTP 404 for all three official edit repositories, none appears in the account's
+gated-repository requests, and Microsoft's live Mage collection lists only `Mage-VL`
+and `Mage-ViT`. No standard gated-model agreement or request-access control is offered.
+The credential-free audit is recorded in
+`docs/proof/mage-edit/huggingface-access-audit.json`.
 
 This distinguishes the current state from an ordinary license gate: the repositories
 are withdrawn, private, or otherwise unavailable to this account. Therefore DreamGen

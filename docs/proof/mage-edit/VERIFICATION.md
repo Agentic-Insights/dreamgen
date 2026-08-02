@@ -20,6 +20,9 @@ after PR #72 merged.
 - `/api/edit/capabilities`: official name `Mage-Flow-Edit`; exact Base, aligned,
   and Turbo Microsoft repositories; `available=false`; no verified checkpoint
   revisions configured; no fallback.
+- `huggingface-access-audit.json`: current CLI plus an authenticated browser recheck
+  confirms 401/404 for the exact repositories, no Mage-Flow-Edit gated request, and
+  no edit checkpoint in Microsoft's live Mage collection. No credential is recorded.
 - The empty-state screenshots show the truthful unavailable boundary.
 - The staged screenshots use the legacy mock editor only to exercise responsive
   compare/history/action layout. Both views label it **diagnostic fixture**, state
