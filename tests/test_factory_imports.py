@@ -16,6 +16,12 @@ def make_config(image_backend: str = "small"):
     config.model.small_sd_model = "segmind/tiny-sd"
     config.model.smoke_test_model = "hf-internal-testing/tiny-stable-diffusion-torch"
     config.model.turbo_model = "stabilityai/sd-turbo"
+    config.model.mageflow_model = "microsoft/Mage-Flow"
+    config.model.mageflow_revision = "faca09c18c1c19458e7fbc3f7bce6f7a7d4d01a9"
+    config.model.mageflow_url = "http://localhost:25801"
+    config.model.mageflow_steps = 20
+    config.model.mageflow_cfg = 5.0
+    config.model.mageflow_timeout_seconds = 30
     config.model.zimage_model_path = Path("/tmp/fake_zimage_model")
     config.model.zimage_attention = "_sdpa"
     config.model.zimage_compile = False
@@ -138,3 +144,22 @@ def test_factory_imports_ernie_when_requested():
 
     assert generator.backend_name == "ernie"
     assert backend_name == "ernie-image"
+
+
+def test_auto_prefers_mageflow_only_when_runtime_is_ready(monkeypatch):
+    from src.generators import factory
+
+    config = make_config("auto")
+    monkeypatch.setattr(factory, "mageflow_runtime_ready", lambda *_args: True)
+
+    assert factory.resolve_image_backend(config) == "mageflow"
+
+
+def test_auto_safely_falls_back_when_mageflow_is_not_ready(monkeypatch):
+    from src.generators import factory
+
+    config = make_config("auto")
+    monkeypatch.setattr(factory, "mageflow_runtime_ready", lambda *_args: False)
+    monkeypatch.setattr(factory, "is_model_cached", lambda _model_id: False)
+
+    assert factory.resolve_image_backend(config) == "small"

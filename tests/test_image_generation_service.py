@@ -6,7 +6,10 @@ from unittest.mock import MagicMock
 import pytest
 from PIL import Image
 
+from src.plugins.lora import SelectedLora
 from src.services import GenerationServiceRequest, ImageGenService
+from src.utils.generation_plan import GenerationPlan
+from src.utils.plugin_manager import PluginResult
 from src.utils.publication_catalog import load_catalog
 from src.utils.storage import read_image_metadata
 
@@ -18,6 +21,12 @@ def mock_service_config(tmp_path):
     config.model.image_backend = "mock"
     config.model.flux_model = "black-forest-labs/FLUX.1-schnell"
     config.model.small_sd_model = "segmind/tiny-sd"
+    config.model.ollama_model = "prompt-model"
+    config.model.lora.lora_dir = tmp_path / "loras"
+    config.model.lora.enabled_loras = []
+    config.model.lora.application_probability = 0.0
+    config.plugins.enabled_plugins = []
+    config.plugins.plugin_order = {}
     config.image.width = 64
     config.image.height = 64
     config.system.output_dir = tmp_path
@@ -43,6 +52,16 @@ class ReusableBackend:
         self.calls += 1
         self.last_generation_metadata["force_reinit"] = force_reinit
         self.last_generation_metadata["seed"] = seed
+        self.last_generation_metadata.update(
+            {
+                "width": 512,
+                "height": 768,
+                "steps": 20,
+                "guidance_scale": 5.0,
+                "model_revision": "verified-model-revision",
+                "implementation_revision": "verified-source-revision",
+            }
+        )
         Image.new("RGB", (8, 8), color=(20, 40, 60)).save(output_path)
         return output_path, 0.25, "reusable-test-backend"
 
@@ -104,6 +123,7 @@ async def test_service_emits_generation_lifecycle_events(mock_service_config, tm
     event_names = [event.name for event in events]
     assert event_names == [
         "generation_preparing",
+        "generation_plan_resolved",
         "prompt_ready",
         "backend_ready",
         "model_loading",
@@ -111,7 +131,7 @@ async def test_service_emits_generation_lifecycle_events(mock_service_config, tm
         "finalizing_output",
         "generation_completed",
     ]
-    assert events[4].payload["output_path"].suffix == ".png"
+    assert events[5].payload["output_path"].suffix == ".png"
     assert events[-1].payload["image_path"].startswith("/images/")
 
 
@@ -137,6 +157,19 @@ async def test_service_can_reuse_caller_owned_backend(mock_service_config, tmp_p
     assert result.metadata["backend_double"] is True
     assert result.metadata["force_reinit"] is True
     assert result.metadata["seed"] == 99
+    assert result.metadata["experiment"]["parameters"] == {
+        "seed": 99,
+        "width": 512,
+        "height": 768,
+        "steps": 20,
+        "guidance_scale": 5.0,
+        "true_cfg_scale": None,
+    }
+    assert result.metadata["experiment"]["pipeline"]["model_revision"] == "verified-model-revision"
+    assert (
+        result.metadata["experiment"]["pipeline"]["implementation_revision"]
+        == "verified-source-revision"
+    )
 
 
 @pytest.mark.asyncio
@@ -185,3 +218,100 @@ async def test_service_records_resolved_prompt_model(mock_service_config, tmp_pa
     assert experiment["prompt"]["source"] == "generated"
     assert experiment["prompt"]["model"] == "qwen3.5:9b"
     assert experiment["pipeline"]["prompt_model"] == "qwen3.5:9b"
+
+
+@pytest.mark.asyncio
+async def test_service_shares_locked_lora_and_snapshots_metadata_before_cleanup(
+    mock_service_config,
+    tmp_path,
+    monkeypatch,
+):
+    lora_path = tmp_path / "loras" / "locked-style" / "epoch-1.safetensors"
+    lora_path.parent.mkdir(parents=True)
+    lora_path.write_bytes(b"service locked lora")
+    selection = SelectedLora("locked-style", lora_path, "locked-trigger")
+    plan = GenerationPlan(
+        plugin_results=(PluginResult("lora", "locked-trigger", "locked adapter"),),
+        plugin_descriptions=("lora: locked adapter",),
+        enabled_plugins=("lora",),
+        temporal_descriptor="",
+        selected_lora=selection,
+    )
+
+    monkeypatch.setattr(
+        "src.services.image_generation.resolve_generation_plan",
+        lambda config, plugins_enabled=True, seed=None: plan,
+    )
+
+    async def generate_locked_prompt(self, meta_prompt=None):
+        assert self.generation_plan is plan
+        assert meta_prompt == "draft with the locked style"
+        return "A moonlit local model lab filled with precise instruments"
+
+    monkeypatch.setattr(
+        "src.services.image_generation.PromptGenerator.generate_prompt",
+        generate_locked_prompt,
+    )
+
+    class CleanupClearingBackend:
+        def __init__(self):
+            self.plan = None
+            self.last_generation_metadata = {}
+            self.cleaned = False
+
+        def set_generation_plan(self, received_plan):
+            self.plan = received_plan
+
+        async def generate_image(self, prompt, output_path, force_reinit=False, seed=None):
+            assert self.plan is plan
+            assert "locked-trigger" in prompt
+            assert prompt.endswith(", locked-trigger")
+            assert "'locked-trigger'" not in prompt
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            Image.new("RGB", (8, 8), color=(40, 60, 80)).save(output_path)
+            self.last_generation_metadata = {
+                "selected_lora": "locked-style",
+                "selected_lora_path": str(lora_path.resolve()),
+                "selected_lora_keyword": "locked-trigger",
+                "lora_backend": "diffsynth",
+                "seed": seed,
+            }
+            return output_path, 0.5, "Z-Image-Turbo"
+
+        def cleanup(self):
+            self.cleaned = True
+            self.last_generation_metadata = {}
+
+    backend = CleanupClearingBackend()
+    service = ImageGenService(mock_service_config, output_dir=tmp_path)
+    result = await service.generate(
+        GenerationServiceRequest(
+            meta_prompt="draft with the locked style",
+            seed=17,
+            cleanup=True,
+        ),
+        backend=backend,
+        backend_name="z-image",
+    )
+
+    provenance = result.metadata["lora_provenance"]
+    assert backend.cleaned is True
+    assert result.metadata["selected_lora"] == "locked-style"
+    assert result.metadata["selected_lora_keyword"] == "locked-trigger"
+    assert result.metadata["selected_lora_kind"] == "style"
+    assert result.prompt.endswith(", locked-trigger")
+    assert result.metadata["lora_backend"] == "diffsynth"
+    assert provenance["path"] == str(lora_path.resolve())
+    assert provenance["sha256"]
+    assert result.metadata["generation_plan"]["resolution"] == "once_per_job"
+    assert {guard["phase"] for guard in result.metadata["operational_guards"]} == {"pre", "post"}
+    assert all(
+        guard["category"] == "operational" for guard in result.metadata["operational_guards"]
+    )
+    assert result.metadata["experiment"]["enhancers"]["selected_lora"] == provenance
+
+    catalog = load_catalog(tmp_path)
+    relative_key = result.image_path.relative_to(tmp_path).as_posix()
+    catalog_metadata = catalog["assets"][relative_key]["metadata"]
+    assert catalog_metadata["selected_lora"] == "locked-style"
+    assert catalog_metadata["lora_provenance"] == provenance

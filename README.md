@@ -2,6 +2,12 @@
 
 Generate unlimited AI images locally with no subscriptions, no cloud APIs, and complete privacy. Your machine dreams with you! ✨
 
+DreamGen is an independent research and artistic hobby project for exploring
+what local image models "dream," how their behavior changes, and where their
+boundaries appear. It is not a hosted production image service. Model names and
+upstream projects are identified for reproducibility; their inclusion does not
+imply sponsorship, endorsement, or affiliation.
+
 ![Do androids dream of electric sheep?](https://host-image.agentic.workers.dev/)
 
 ## ✨ Modern Web Interface
@@ -57,7 +63,9 @@ cp .env.example .env
 # - HF_TOKEN is optional for small/turbo/smoke public models
 # - IMAGE_BACKEND=qwen enables the NF4 Qwen-Image backend for text-heavy posters and signage
 # - IMAGE_BACKEND=ernie enables ERNIE-Image-Turbo for prompt-enhanced multilingual text rendering
-# - IMAGE_BACKEND=auto uses FLUX if cached, otherwise the small public fallback
+# - IMAGE_BACKEND=auto uses verified Mage-Flow when ready, then ready Z-Image-Turbo, cached FLUX, or Small SD
+# - IMAGE_BACKEND=zimage forces Z-Image-Turbo with truthful Small SD fallback until ready
+# - Mage-Flow is public but research-only and runs in an isolated CUDA sidecar
 
 # Generate from the CLI
 uv run dreamgen generate
@@ -95,6 +103,16 @@ For Z-Image review in Docker:
 - put LoRAs under `./loras/<name>/*.safetensors`
 - use **Settings → Models** to download `Z-Image-Turbo`
 - use **Settings → Models** to switch the active backend to `Z-Image`
+
+For Microsoft Mage-Flow review:
+
+- read [the verified availability/runtime note](docs/MAGE_FLOW.md)
+- treat it as a local research probe consistent with Microsoft's published
+  research-only guidance, not as a production-service backend
+- use **Settings → Models** to download the pinned RL checkpoint
+  `microsoft/Mage-Flow@faca09c18c1c19458e7fbc3f7bce6f7a7d4d01a9`
+- wait for both checkpoint and isolated runtime readiness
+- select `Mage-Flow`, or leave `Auto` enabled once its card reports `READY`
 - use **Settings → Plugins** to enable `lora` and then select active LoRAs in the Models panel
 
 For Ollama-backed image generation:

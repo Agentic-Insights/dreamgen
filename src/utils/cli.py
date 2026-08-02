@@ -148,6 +148,7 @@ def validate_generation_config(config: Config, resolved_backend: str) -> list[st
     errors = config.validate()
     valid_backends = {
         "auto",
+        "mageflow",
         "flux",
         "ollama",
         "zimage",
@@ -162,7 +163,8 @@ def validate_generation_config(config: Config, resolved_backend: str) -> list[st
     if resolved_backend not in valid_backends:
         errors.append(
             f"Invalid image backend: {resolved_backend} "
-            "(must be one of auto, flux, ollama, zimage, qwen, ernie, small, turbo, smoke, mock)"
+            "(must be one of auto, mageflow, flux, ollama, zimage, qwen, ernie, "
+            "small, turbo, smoke, mock)"
         )
 
     if (
@@ -420,7 +422,7 @@ def generate(
         None,
         "--backend",
         "--model",
-        help="Override the image backend for this run (flux, ollama, zimage, qwen, ernie, small, turbo, smoke, mock)",
+        help="Override the image backend for this run (mageflow, flux, ollama, zimage, qwen, ernie, small, turbo, smoke, mock)",
     ),
     recipe: Optional[str] = typer.Option(
         None,
@@ -780,7 +782,7 @@ def loop(
         None,
         "--backend",
         "--model",
-        help="Override the image backend for this run (flux, ollama, zimage, qwen, ernie, small, turbo, smoke, mock)",
+        help="Override the image backend for this run (mageflow, flux, ollama, zimage, qwen, ernie, small, turbo, smoke, mock)",
     ),
     mock: bool = typer.Option(
         False,

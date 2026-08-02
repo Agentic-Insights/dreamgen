@@ -17,13 +17,23 @@ from src.plugins import (
 
 
 @pytest.fixture
-def mock_config():
+def mock_config(tmp_path):
     """Create a mock configuration for testing."""
     config = MagicMock()
     config.model.image_backend = "zimage"
     config.model.flux_model = "black-forest-labs/FLUX.1-schnell"
     config.model.small_sd_model = "segmind/tiny-sd"
-    config.model.zimage_model_path = Path("/tmp/fake_zimage_model")
+    config.model.zimage_model_path = tmp_path / "fake_zimage_model"
+    for relative in (
+        "model_index.json",
+        "tokenizer/tokenizer.json",
+        "vae/diffusion_pytorch_model.safetensors",
+        "transformer/model.safetensors",
+        "text_encoder/model.safetensors",
+    ):
+        checkpoint_file = config.model.zimage_model_path / relative
+        checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
+        checkpoint_file.write_bytes(b"ready")
     config.model.zimage_attention = "_sdpa"
     config.model.zimage_compile = False
     config.image.height = 1024
@@ -131,7 +141,7 @@ class TestZImagePromptEnhancement:
         with patch("torch.cuda.is_available", return_value=False):
             gen = ZImageGenerator(mock_config)
             # Verify generator can be created with bilingual prompt support
-            assert gen.model_path == Path("/tmp/fake_zimage_model")
+            assert gen.model_path == mock_config.model.zimage_model_path
 
             # These should all be valid prompts for Z-Image
             for prompt in prompts:
@@ -150,7 +160,7 @@ class TestZImageModelInfo:
 
             # Check required fields
             assert info["model_name"] == "Z-Image-Turbo"
-            assert info["model_path"] == str(Path("/tmp/fake_zimage_model"))
+            assert info["model_path"] == str(mock_config.model.zimage_model_path)
             assert info["parameters"] == "6B"
             assert info["architecture"] == "Single-Stream DiT (S3-DiT)"
             assert info["inference_steps"] == 8

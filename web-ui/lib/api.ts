@@ -86,6 +86,9 @@ export interface PluginInfo {
   enabled: boolean;
   description: string;
   order: number;
+  category?: 'entropy' | 'context' | 'style' | 'operational' | string;
+  kind?: 'prompt' | 'guard' | string;
+  phase?: string;
 }
 
 export interface SystemStatus {
@@ -95,6 +98,20 @@ export interface SystemStatus {
   active_plugins: string[];
   gpu_available: boolean;
   ollama_available: boolean;
+  configured_backend: string;
+  resolved_backend: string;
+  active_backend_label: string;
+  active_model: string;
+  active_model_id: string;
+  active_model_status: string;
+  preferred_backend: string;
+  preferred_model: string;
+  preferred_model_id: string;
+  preferred_model_status: string;
+  fallback_backend: string;
+  fallback_model: string;
+  fallback_model_id: string;
+  fallback_reason?: string | null;
 }
 
 export interface ModelInfo {
@@ -102,11 +119,38 @@ export interface ModelInfo {
   id: string;
   name: string;
   type: string;
-  status: 'not_downloaded' | 'not_configured' | 'configured' | 'downloading' | 'ready' | 'partial';
+  status:
+    | 'not_downloaded'
+    | 'not_configured'
+    | 'configured'
+    | 'downloading'
+    | 'ready'
+    | 'partial'
+    | 'runtime_unavailable'
+    | 'incompatible_runtime'
+    | 'runtime_error'
+    | 'revision_mismatch';
   size: number;
   incomplete_files: number;
   path?: string;
   downloadable?: boolean;
+  reason?: string;
+  source_url?: string;
+  implementation_url?: string;
+  license?: string;
+  research_only?: boolean;
+  verified_revision?: string;
+  runtime?: {
+    reachable?: boolean;
+    ready?: boolean;
+    loaded?: boolean;
+    status?: string;
+    reason?: string;
+    source_sha?: string;
+    model_revision?: string;
+    verified_model_revision?: string;
+    attention?: string;
+  };
 }
 
 export interface ModelStatus {
@@ -114,6 +158,19 @@ export interface ModelStatus {
   cache_dir: string;
   configured_backend: string;
   resolved_backend: string;
+  active_backend?: string;
+  active_backend_label?: string;
+  active_model?: string;
+  active_model_id?: string;
+  active_model_status?: string;
+  preferred_backend?: string;
+  preferred_model?: string;
+  preferred_model_id?: string;
+  preferred_model_status?: string;
+  fallback_backend?: string;
+  fallback_model?: string;
+  fallback_model_id?: string;
+  fallback_reason?: string | null;
   memory: {
     system: { total_gb: number; available_gb: number; percent_used: number };
     cuda: { available: boolean; device?: string; total_gb?: number; free_gb?: number; allocated_gb?: number; reserved_gb?: number };
@@ -130,6 +187,8 @@ export interface HFTokenStatus {
 export interface EditRequest {
   prompt: string;
   strength?: number;
+  backend?: 'auto' | 'mock' | 'qwen';
+  source_path?: string;
 }
 
 export interface EditResponse {
@@ -137,10 +196,7 @@ export interface EditResponse {
   prompt: string;
   original_path: string;
   edited_path: string;
-  metadata: {
-    model: string;
-    strength: number;
-  };
+  metadata: Record<string, unknown>;
   created_at: string;
 }
 
@@ -185,6 +241,12 @@ export interface GenerationConfig {
   configured_prompt_model?: string;
   image_backend?: string;
   image_model?: string;
+  resolved_image_backend?: string;
+  active_image_model?: string;
+  active_image_model_id?: string;
+  preferred_image_model?: string;
+  preferred_image_model_status?: string;
+  fallback_reason?: string | null;
   ollama_image_model?: string;
   pipeline?: {
     prompt: {
@@ -200,9 +262,15 @@ export interface GenerationConfig {
   enabled_loras?: string[];
   available_loras?: string[];
   lora_application_probability?: number;
+  entropy_level?: 'calm' | 'strange' | 'wild';
   lora_dir?: string;
   zimage_model_path?: string;
   zimage_native_available?: boolean;
+  mageflow_model?: string;
+  mageflow_revision?: string;
+  mageflow_url?: string;
+  mageflow_steps?: number;
+  mageflow_cfg?: number;
   qwen_image_model?: string;
   qwen_prompt_magic?: boolean;
   qwen_device_map?: string;
@@ -229,6 +297,14 @@ export interface GenerationEventsResponse {
   events: GenerationEvent[];
   total: number;
   limit: number;
+}
+
+export interface GenerationMetricsResponse {
+  events: number;
+  completed_generations: number;
+  phase_averages_ms: Record<string, Record<string, number>>;
+  otel_enabled: boolean;
+  jsonl_path: string;
 }
 
 export type GenerationJobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
@@ -282,6 +358,7 @@ export interface CreateGenerationJobRequest {
   quality_flags?: string[];
   client_request_id?: string;
   metadata?: Record<string, unknown>;
+  config_overrides?: Record<string, unknown>;
 }
 
 export type PublicationState = 'draft' | 'published' | 'hidden' | 'featured' | 'rejected';
@@ -344,6 +421,7 @@ export interface GalleryCatalogFilters {
   model?: string;
   prompt_family?: string;
   quality_flag?: string;
+  search?: string;
 }
 
 const extractErrorMessage = async (response: Response, fallback: string) => {
@@ -491,6 +569,7 @@ export class ImageGenAPI {
     if (filters.model) params.set('model', filters.model);
     if (filters.prompt_family) params.set('prompt_family', filters.prompt_family);
     if (filters.quality_flag) params.set('quality_flag', filters.quality_flag);
+    if (filters.search) params.set('search', filters.search);
 
     try {
       const response = await fetch(`${this.baseUrl}/api/gallery/catalog?${params.toString()}`, {
@@ -664,9 +743,32 @@ export class ImageGenAPI {
     return response.json();
   }
 
-  async unloadModels(): Promise<{ message: string; memory: ModelStatus['memory'] }> {
+  async unloadModels(): Promise<{
+    message: string;
+    memory: ModelStatus['memory'];
+    mageflow?: { status: string; unloaded: boolean; was_loaded?: boolean; reason?: string };
+  }> {
     const response = await fetch(`${this.baseUrl}/api/models/unload`, { method: 'POST' });
     if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to unload models'));
+    return response.json();
+  }
+
+  async getGenerationMetrics(limit: number = 500): Promise<GenerationMetricsResponse> {
+    const response = await fetch(`${this.baseUrl}/api/generation/metrics?limit=${limit}`);
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to get generation metrics'));
+    return response.json();
+  }
+
+  async bulkUpdatePublicationState(
+    imagePaths: string[],
+    state: PublicationState
+  ): Promise<{ updated: GalleryCatalogEntry[]; failures: Array<{ path: string; error: string }>; state: string }> {
+    const response = await fetch(`${this.baseUrl}/api/gallery/publication/bulk`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image_paths: imagePaths, state }),
+    });
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to update publication states'));
     return response.json();
   }
 
@@ -695,12 +797,20 @@ export class ImageGenAPI {
     if (request.strength !== undefined) {
       formData.append('strength', request.strength.toString());
     }
+    if (request.backend) formData.append('backend', request.backend);
+    if (request.source_path) formData.append('source_path', request.source_path);
 
     const response = await fetch(`${this.baseUrl}/api/edit`, {
       method: 'POST',
       body: formData,
     });
     if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to edit image'));
+    return response.json();
+  }
+
+  async getEditJob(jobId: string): Promise<Record<string, unknown>> {
+    const response = await fetch(`${this.baseUrl}/api/edit/jobs/${encodeURIComponent(jobId)}`);
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to get edit job'));
     return response.json();
   }
 

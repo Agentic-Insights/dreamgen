@@ -9,9 +9,11 @@ from ..utils.config import Config
 from ..utils.plugin_manager import PluginManager
 from ..utils.plugin_manager import PluginResult as PluginResult
 from .art_style import get_art_style
+from .dream_source_mixer import get_dream_source_mixer
 from .holiday_fact import get_holiday_fact
 from .lora import apply_lora
 from .nearest_holiday import get_nearest_holiday
+from .provenance_guard import provenance_guard_post, provenance_guard_pre
 from .time_of_day import get_time_of_day
 
 # Initialize plugin manager
@@ -28,6 +30,7 @@ def register_base_plugins():
         "Provides temporal context based on the current time of day",
         get_time_of_day,
         order=1,
+        category="context",
     )
 
     plugin_manager.register(
@@ -35,6 +38,7 @@ def register_base_plugins():
         "Adds context about upcoming or current holidays",
         get_nearest_holiday,
         order=2,
+        category="context",
     )
 
     plugin_manager.register(
@@ -42,10 +46,30 @@ def register_base_plugins():
         "Enriches holiday context with interesting facts",
         get_holiday_fact,
         order=3,
+        category="context",
     )
 
     plugin_manager.register(
-        "art_style", "Suggests an artistic style for the image", get_art_style, order=4
+        "art_style",
+        "Suggests an artistic style for the image",
+        get_art_style,
+        order=4,
+        category="style",
+    )
+
+    plugin_manager.register(
+        "dream_source_mixer",
+        "Mixes bounded place, material, light, camera, era, and mood motifs",
+        get_dream_source_mixer,
+        enabled=False,
+        order=6,
+        category="entropy",
+    )
+    plugin_manager.register_guard(
+        "provenance_guard",
+        "Checks that generation plans and saved outputs retain reviewable provenance",
+        pre_hook=provenance_guard_pre,
+        post_hook=provenance_guard_post,
     )
 
 
@@ -78,6 +102,7 @@ def register_lora_plugin(config: Config):
         lora_plugin,
         enabled=enabled,
         order=order,
+        category="style",
     )
 
 

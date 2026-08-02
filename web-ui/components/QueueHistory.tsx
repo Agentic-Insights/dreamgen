@@ -1,6 +1,6 @@
 "use client";
 
-import { Clock3, Copy, Play, RefreshCcw, RotateCcw, XCircle } from "lucide-react";
+import { Clock3, Copy, Play, RefreshCcw, RotateCcw, Settings2, XCircle } from "lucide-react";
 
 import { API_BASE, type GenerationJob } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -10,6 +10,7 @@ interface QueueHistoryProps {
   isLoading?: boolean;
   onRefresh: () => void;
   onCopyPrompt: (prompt: string) => void;
+  onBranch: (job: GenerationJob) => void;
   onRerun: (job: GenerationJob) => void;
 }
 
@@ -33,11 +34,17 @@ const jobPrompt = (job: GenerationJob) => job.prompt || job.request.prompt || ""
 const truncate = (value: string, max = 86) =>
   value.length > max ? `${value.slice(0, max).trim()}...` : value;
 
+const formatDuration = (seconds?: number | null) => {
+  if (seconds === null || seconds === undefined) return "timing pending";
+  return seconds < 60 ? `${seconds.toFixed(2)}s` : `${Math.floor(seconds / 60)}m ${(seconds % 60).toFixed(0)}s`;
+};
+
 export default function QueueHistory({
   jobs,
   isLoading = false,
   onRefresh,
   onCopyPrompt,
+  onBranch,
   onRerun,
 }: QueueHistoryProps) {
   const activeJobs = jobs.filter(isActiveJob);
@@ -146,6 +153,8 @@ export default function QueueHistory({
                       </p>
                       <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
                         <span>{job.backend ?? "backend pending"}</span>
+                        <span>{job.model_name ?? "model pending"}</span>
+                        <span>{formatDuration(job.generation_time)}</span>
                         {job.request.seed !== null && job.request.seed !== undefined ? (
                           <span>seed {job.request.seed}</span>
                         ) : null}
@@ -154,7 +163,14 @@ export default function QueueHistory({
                     </div>
                   </div>
 
-                  <div className="mt-3 grid grid-cols-2 gap-2">
+                  <div className="mt-3 grid grid-cols-3 gap-2">
+                    <button
+                      onClick={() => onBranch(job)}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl border border-border/70 px-3 py-2 text-xs text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
+                    >
+                      <Settings2 className="h-3.5 w-3.5" />
+                      Branch settings
+                    </button>
                     <button
                       onClick={() => onCopyPrompt(prompt)}
                       disabled={!prompt}

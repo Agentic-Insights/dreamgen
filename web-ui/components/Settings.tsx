@@ -43,6 +43,7 @@ interface SettingsProps {
 
 const IMAGE_BACKEND_OPTIONS = [
   { id: "auto", label: "Auto", description: "Use the best ready local backend." },
+  { id: "mageflow", label: "Mage-Flow", description: "Use Microsoft's public 4B research image model in its isolated local CUDA runtime." },
   { id: "zimage", label: "Z-Image", description: "Use the Z-Image stack and local LoRAs." },
   { id: "qwen", label: "Qwen-Image", description: "Use Qwen-Image for text-rich posters, signs, and bilingual typography." },
   { id: "ernie", label: "ERNIE-Image", description: "Use ERNIE-Image-Turbo for 8-step prompt-enhanced multilingual text rendering." },
@@ -57,6 +58,7 @@ const IMAGE_BACKEND_OPTIONS = [
 export default function Settings({ systemStatus, onRuntimeChange }: SettingsProps) {
   const [activeSection, setActiveSection] = useState("models");
   const [modelStatus, setModelStatus] = useState<ModelStatus | null>(null);
+  const [modelStatusError, setModelStatusError] = useState(false);
   const [generationConfig, setGenerationConfig] = useState<GenerationConfig | null>(null);
   const [loadingGenerationConfig, setLoadingGenerationConfig] = useState(false);
   const [hfTokenStatus, setHFTokenStatus] = useState<HFTokenStatus | null>(null);
@@ -69,12 +71,18 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
   const [loadingOllama, setLoadingOllama] = useState(false);
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [loadingPlugins, setLoadingPlugins] = useState(false);
+  const [pluginsError, setPluginsError] = useState(false);
 
   const notifyRuntimeChange = useCallback(async () => {
     await onRuntimeChange?.();
   }, [onRuntimeChange]);
 
   useEffect(() => {
+    // Older builds briefly mirrored the HF token into browser storage. Remove
+    // that stale copy and keep the browser out of credential persistence.
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem("hf_token");
+    }
     loadModelStatus();
     loadGenerationConfig();
     loadHFTokenStatus();
@@ -109,11 +117,13 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
   }, []);
 
   const loadModelStatus = async () => {
+    setModelStatusError(false);
     try {
       const status = await api.getModelStatus();
       setModelStatus(status);
     } catch (error) {
       console.error('Failed to load model status:', error);
+      setModelStatusError(true);
     }
   };
 
@@ -154,11 +164,13 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
 
   const loadPlugins = async () => {
     setLoadingPlugins(true);
+    setPluginsError(false);
     try {
       const pluginList = await api.getPlugins();
       setPlugins(pluginList);
     } catch (error) {
       console.error('Failed to load plugins:', error);
+      setPluginsError(true);
       setMessage({ type: 'error', text: 'Failed to load plugins' });
     } finally {
       setLoadingPlugins(false);
@@ -231,13 +243,14 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
   };
 
   const movePlugin = async (pluginName: string, direction: 'up' | 'down') => {
-    const currentIndex = plugins.findIndex((plugin) => plugin.name === pluginName);
+    const orderedPlugins = plugins.filter((plugin) => plugin.kind !== 'guard');
+    const currentIndex = orderedPlugins.findIndex((plugin) => plugin.name === pluginName);
     if (currentIndex === -1) return;
 
     const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
-    if (targetIndex < 0 || targetIndex >= plugins.length) return;
+    if (targetIndex < 0 || targetIndex >= orderedPlugins.length) return;
 
-    const nextPlugins = [...plugins];
+    const nextPlugins = [...orderedPlugins];
     const [movedPlugin] = nextPlugins.splice(currentIndex, 1);
     nextPlugins.splice(targetIndex, 0, movedPlugin);
 
@@ -264,10 +277,7 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
     setIsSubmitting(true);
     try {
       await api.setHFToken(hfToken.trim());
-      setMessage({ type: 'success', text: 'HuggingFace token saved successfully!' });
-
-      // Store in localStorage as well (like agenticinsights.com pattern)
-      localStorage.setItem('hf_token', hfToken.trim());
+      setMessage({ type: 'success', text: 'Hugging Face token saved to the local backend.' });
 
       setHFToken("");
       await loadHFTokenStatus();
@@ -342,6 +352,11 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
       case 'ready': return 'text-green-500';
       case 'downloading': return 'text-yellow-500';
       case 'partial': return 'text-orange-500';
+      case 'runtime_unavailable':
+      case 'incompatible_runtime':
+      case 'runtime_error':
+      case 'revision_mismatch':
+        return 'text-red-500';
       case 'not_downloaded': return 'text-gray-400';
       default: return 'text-gray-400';
     }
@@ -358,13 +373,26 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
       case 'ready': return <CheckCircle className="w-4 h-4 text-green-500" />;
       case 'downloading': return <Loader2 className="w-4 h-4 text-yellow-500 animate-spin" />;
       case 'partial': return <AlertCircle className="w-4 h-4 text-orange-500" />;
+      case 'runtime_unavailable':
+      case 'incompatible_runtime':
+      case 'runtime_error':
+      case 'revision_mismatch':
+        return <AlertCircle className="w-4 h-4 text-red-500" />;
       case 'not_downloaded': return <Download className="w-4 h-4 text-gray-400" />;
       default: return <AlertCircle className="w-4 h-4 text-gray-400" />;
     }
   };
 
   const loraPluginEnabled = plugins.some((plugin) => plugin.name === "lora" && plugin.enabled);
+  const enabledPromptPlugins = plugins.filter((plugin) => plugin.enabled && plugin.kind !== "guard");
+  const enabledGuardPlugins = plugins.filter((plugin) => plugin.enabled && plugin.kind === "guard");
+  const activeRuntimeModel = modelStatus?.models.find(
+    (model) => model.backend === modelStatus.resolved_backend && model.status === "ready"
+  );
+  const entropyLevel = generationConfig?.entropy_level ?? "strange";
   const selectedBackend = generationConfig?.image_backend ?? "auto";
+  const resolvedBackend =
+    modelStatus?.resolved_backend ?? generationConfig?.resolved_image_backend ?? selectedBackend;
   const availableLoras = generationConfig?.available_loras ?? [];
   const enabledLoras = generationConfig?.enabled_loras ?? [];
   const loraProbability = generationConfig?.lora_application_probability ?? 0;
@@ -377,7 +405,12 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
   const activeImageModelLabel =
     selectedBackend === "ollama"
       ? (activeImageModel ?? configuredImageModel) || "No Ollama image model"
-      : generationConfig?.image_model ?? selectedBackend;
+      : modelStatus?.models.find(
+          (model) => model.backend === resolvedBackend && model.status === "ready"
+        )?.name
+        ?? generationConfig?.active_image_model
+        ?? generationConfig?.image_model
+        ?? resolvedBackend;
   const selectedBackendLabel =
     IMAGE_BACKEND_OPTIONS.find((backend) => backend.id === selectedBackend)?.label ?? selectedBackend;
   const promptModelFallback = generationConfig?.prompt_model ?? configuredPromptModel;
@@ -555,6 +588,13 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
                             Configured {configuredImageModel}; using {activeImageModel}.
                           </div>
                         )}
+                        {selectedBackend !== "auto" &&
+                          selectedBackend !== resolvedBackend &&
+                          selectedBackend !== "ollama" && (
+                          <div className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+                            Configured {selectedBackend}; using the {resolvedBackend} fallback until the preferred model is ready.
+                          </div>
+                          )}
                         <div className="mt-3 text-xs text-muted-foreground">
                           Use the backend choices below for local Diffusers, Qwen, Z-Image, or Ollama image rendering.
                         </div>
@@ -606,7 +646,8 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
                     ) : (
                       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
                         {IMAGE_BACKEND_OPTIONS.map((backend) => {
-                          const isActive = selectedBackend === backend.id;
+                          const isConfigured = selectedBackend === backend.id;
+                          const isActive = resolvedBackend === backend.id;
                           return (
                             <button
                               key={backend.id}
@@ -619,18 +660,30 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
                               }
                               className={cn(
                                 "rounded-lg border p-3 text-left transition-colors",
-                                isActive
+                                isConfigured || isActive
                                   ? "border-primary bg-primary/5"
                                   : "border-border hover:bg-muted/40"
                               )}
                             >
                               <div className="flex items-center justify-between gap-2">
                                 <span className="font-medium">{backend.label}</span>
-                                {isActive && (
-                                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-primary/15 text-primary">
-                                    Active
-                                  </span>
-                                )}
+                                <div className="flex items-center gap-1">
+                                  {backend.id === "mageflow" && (
+                                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-600 dark:text-violet-300">
+                                      Featured
+                                    </span>
+                                  )}
+                                  {isConfigured && (
+                                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-primary/15 text-primary">
+                                      {isActive ? "Active" : "Configured"}
+                                    </span>
+                                  )}
+                                  {!isConfigured && isActive && (
+                                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-green-500/15 text-green-600 dark:text-green-400">
+                                      {selectedBackend === "auto" ? "Active" : "Active fallback"}
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                               <p className="mt-2 text-xs text-muted-foreground">
                                 {backend.description}
@@ -653,6 +706,26 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
                             No image-capable Ollama model is currently available.
                           </span>
                         )}
+                      </div>
+                    )}
+
+                    {selectedBackend === "mageflow" && (
+                      <div className="mt-4 grid gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
+                        <div className="font-medium text-foreground">Microsoft Mage-Flow research runtime</div>
+                        <div className="text-muted-foreground">
+                          Public MIT checkpoint, isolated from DreamGen&apos;s existing model stack.
+                          Microsoft describes the family as research-only and not intended for product/service deployment.
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {generationConfig?.mageflow_model ?? "microsoft/Mage-Flow"} ·{" "}
+                          {generationConfig?.mageflow_steps ?? 20} steps · CFG{" "}
+                          {generationConfig?.mageflow_cfg ?? 5}
+                        </div>
+                        <div className="break-all text-xs text-muted-foreground">
+                          Verified checkpoint:{" "}
+                          {generationConfig?.mageflow_revision ??
+                            "faca09c18c1c19458e7fbc3f7bce6f7a7d4d01a9"}
+                        </div>
                       </div>
                     )}
 
@@ -808,7 +881,14 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
                           <div className="flex items-center gap-3">
                             {getModelStatusIcon(model)}
                             <div>
-                              <h4 className="font-medium">{model.name}</h4>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <h4 className="font-medium">{model.name}</h4>
+                                {model.backend === "mageflow" && (
+                                  <span className="rounded-full bg-violet-500/15 px-2 py-0.5 text-[11px] text-violet-600 dark:text-violet-300">
+                                    Featured RL checkpoint
+                                  </span>
+                                )}
+                              </div>
                               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                                 <span className="capitalize">{model.type.replace('-', ' ')}</span>
                                 <span>•</span>
@@ -830,6 +910,39 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
                               {model.path && model.id === "local:zimage" && (
                                 <div className="text-xs text-muted-foreground mt-1 break-all">
                                   {model.path}
+                                </div>
+                              )}
+                              {model.reason && (
+                                <div className="mt-1 max-w-2xl text-xs text-muted-foreground">
+                                  {model.reason}
+                                </div>
+                              )}
+                              {model.runtime && (
+                                <div className="mt-1 text-xs text-muted-foreground">
+                                  Runtime: {model.runtime.loaded ? "loaded" : "not loaded"}
+                                  {model.runtime.attention ? ` · ${model.runtime.attention}` : ""}
+                                  {model.runtime.source_sha ? ` · ${model.runtime.source_sha.slice(0, 12)}` : ""}
+                                </div>
+                              )}
+                              {model.verified_revision && (
+                                <div className="mt-1 break-all text-xs text-muted-foreground">
+                                  Verified checkpoint: {model.verified_revision}
+                                </div>
+                              )}
+                              {(model.source_url || model.license || model.research_only) && (
+                                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                  {model.source_url && (
+                                    <a
+                                      href={model.source_url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="text-primary hover:underline"
+                                    >
+                                      Official model
+                                    </a>
+                                  )}
+                                  {model.license && <span>{model.license}</span>}
+                                  {model.research_only && <span>Research-only guidance</span>}
                                 </div>
                               )}
                             </div>
@@ -1122,6 +1235,14 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
                           <div className="flex items-center gap-2">
                             <h4 className="font-medium">{plugin.name}</h4>
                             <span className="text-xs px-2 py-0.5 bg-muted text-muted-foreground rounded-full">
+                              {plugin.category ?? "context"}
+                            </span>
+                            {plugin.kind === "guard" && (
+                              <span className="text-xs px-2 py-0.5 bg-amber-500/10 text-amber-600 rounded-full">
+                                hook
+                              </span>
+                            )}
+                            <span className="text-xs px-2 py-0.5 bg-muted text-muted-foreground rounded-full">
                               #{plugin.order}
                             </span>
                           </div>
@@ -1131,6 +1252,23 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
                         </div>
 
                         <div className="flex flex-col gap-2 shrink-0">
+                          {plugin.name === "dream_source_mixer" && (
+                            <select
+                              value={entropyLevel}
+                              onChange={(event) =>
+                                updateGenerationConfig({
+                                  entropy_level: event.target.value as "calm" | "strange" | "wild",
+                                })
+                              }
+                              className="rounded border border-border bg-background px-2 py-1 text-xs"
+                              aria-label="Dream Source Mixer entropy level"
+                            >
+                              <option value="calm">calm</option>
+                              <option value="strange">strange</option>
+                              <option value="wild">wild</option>
+                            </select>
+                          )}
+                          {plugin.kind !== "guard" && <>
                           <button
                             type="button"
                             onClick={() => movePlugin(plugin.name, 'up')}
@@ -1149,6 +1287,7 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
                           >
                             <ArrowDown className="w-4 h-4" />
                           </button>
+                          </>}
                         </div>
                       </div>
                     ))}
@@ -1185,8 +1324,9 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
                     </div>
 
                     <p className="text-sm text-muted-foreground mb-4">
-                      Optional for the tiny public fallback model. Still useful for gated or private
-                      model downloads and for avoiding rate limits.
+                      Optional for public fallback models. Useful for gated or private model downloads
+                      and for avoiding rate limits. The token is sent to this local backend, stored in
+                      its configured Hugging Face cache, and is never persisted in the browser.
                       Get your token from{" "}
                       <a
                         href="https://huggingface.co/settings/tokens"
@@ -1234,6 +1374,27 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
                       </button>
                     </form>
                   </div>
+
+                  <div className="border border-border rounded-lg p-4 bg-muted/20">
+                    <div className="flex items-center gap-2 mb-3">
+                      <AlertCircle className="w-5 h-5 text-primary" />
+                      <h4 className="text-lg font-medium">Cloudflare deployment</h4>
+                      <span className="text-xs rounded-full bg-muted px-2 py-0.5 text-muted-foreground">
+                        Explicit setup only
+                      </span>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      DreamGen does not implement Cloudflare OAuth, account linking, or automatic
+                      Worker provisioning from this page. Nothing is deployed or authorized here.
+                      Deploy your own Workers or Pages project explicitly with Wrangler or the
+                      repository workflow after reviewing the requested account and R2 scopes.
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-3">
+                      Keep Cloudflare credentials in your deployment environment; do not enter them
+                      into DreamGen or commit them to the repository. This local API is an operator
+                      surface, not a customer-account login gateway.
+                    </p>
+                  </div>
                 </div>
               </div>
             </motion.div>
@@ -1248,76 +1409,106 @@ export default function Settings({ systemStatus, onRuntimeChange }: SettingsProp
               exit={{ opacity: 0, y: -10 }}
               className="p-4 sm:p-6 lg:p-8"
             >
-              <div className="max-w-2xl">
-                <h3 className="text-xl font-semibold mb-6">System Information</h3>
+              <div className="max-w-3xl">
+                <h3 className="text-xl font-semibold">System Information</h3>
+                <p className="text-sm text-muted-foreground mt-1 mb-6">
+                  Live readiness, runtime, resource, and plugin guard state from the backend.
+                </p>
 
-                {systemStatus && (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div className="border border-border rounded-lg p-4">
-                        <div className="flex items-center gap-2 mb-2">
-                          <Server className="w-4 h-4 text-muted-foreground" />
-                          <span className="text-sm font-medium">API Status</span>
-                        </div>
-                        <div className={cn(
-                          "text-lg font-semibold",
-                          systemStatus.status === 'ready' ? 'text-green-500' : 'text-orange-500'
-                        )}>
-                          {systemStatus.status === 'ready' ? 'Ready' : 'Not Ready'}
-                        </div>
-                      </div>
-
-                      <div className="border border-border rounded-lg p-4">
-                        <div className="flex items-center gap-2 mb-2">
-                          <Cpu className="w-4 h-4 text-muted-foreground" />
-                          <span className="text-sm font-medium">GPU</span>
-                        </div>
-                        <div className={cn(
-                          "text-lg font-semibold",
-                          systemStatus.gpu_available ? 'text-green-500' : 'text-orange-500'
-                        )}>
-                          {systemStatus.gpu_available ? 'Available' : 'Not Available'}
-                        </div>
-                      </div>
-
-                      <div className="border border-border rounded-lg p-4">
-                        <div className="flex items-center gap-2 mb-2">
-                          <Database className="w-4 h-4 text-muted-foreground" />
-                          <span className="text-sm font-medium">Backend</span>
-                        </div>
-                        <div className="text-lg font-semibold text-foreground capitalize">
-                          {systemStatus.backend}
-                        </div>
-                      </div>
-
-                      <div className="border border-border rounded-lg p-4">
-                        <div className="flex items-center gap-2 mb-2">
-                          <SettingsIcon className="w-4 h-4 text-muted-foreground" />
-                          <span className="text-sm font-medium">Plugins</span>
-                        </div>
-                        <div className="text-lg font-semibold text-foreground">
-                          {systemStatus.active_plugins.length} Active
-                        </div>
-                      </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="border border-border rounded-lg p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Server className="w-4 h-4 text-muted-foreground" />
+                      <span className="text-sm font-medium">Backend readiness</span>
                     </div>
+                    <div className={cn(
+                      "text-lg font-semibold",
+                      systemStatus?.status === "ready" ? "text-green-500" : "text-orange-500"
+                    )}>
+                      {systemStatus ? (systemStatus.status === "ready" ? "Ready" : systemStatus.status) : "Unavailable"}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-2">
+                      {systemStatus
+                        ? `Image backend: ${systemStatus.backend}. Prompt service: ${systemStatus.ollama_available ? "online" : "unavailable"}.`
+                        : "The /api/status response has not loaded."}
+                    </p>
+                  </div>
 
-                    {systemStatus.active_plugins.length > 0 && (
-                      <div className="border border-border rounded-lg p-4">
-                        <h4 className="text-sm font-medium mb-3">Active Plugins</h4>
-                        <div className="flex flex-wrap gap-2">
-                          {systemStatus.active_plugins.map((plugin) => (
-                            <span
-                              key={plugin}
-                              className="px-2 py-1 bg-primary/10 text-primary text-xs rounded-md"
-                            >
-                              {plugin}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
+                  <div className="border border-border rounded-lg p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Database className="w-4 h-4 text-muted-foreground" />
+                      <span className="text-sm font-medium">Active model & runtime</span>
+                    </div>
+                    <div className="text-lg font-semibold text-foreground capitalize">
+                      {systemStatus?.active_model
+                        ?? modelStatus?.models.find((model) => model.backend === modelStatus.resolved_backend && model.status === "ready")?.name
+                        ?? (modelStatusError ? "Unavailable" : "Loading…")}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-2">
+                      {systemStatus
+                        ? `${systemStatus.active_model_id} · backend ${systemStatus.active_backend_label} · ${systemStatus.active_model_status}.`
+                        : modelStatus
+                          ? `${modelStatus.configured_backend} configured → ${activeRuntimeModel?.name ?? "runtime model not identified"}.`
+                        : modelStatusError
+                          ? "The /api/models/status response is unavailable."
+                          : "Loading /api/models/status…"}
+                    </p>
+                    {systemStatus?.fallback_reason && (
+                      <p className="text-xs text-amber-700 dark:text-amber-300 mt-2">
+                        {systemStatus.fallback_reason}
+                      </p>
                     )}
                   </div>
-                )}
+
+                  <div className="border border-border rounded-lg p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Cpu className="w-4 h-4 text-muted-foreground" />
+                      <span className="text-sm font-medium">Device & resources</span>
+                    </div>
+                    <div className={cn(
+                      "text-lg font-semibold",
+                      modelStatus?.memory.cuda.available || systemStatus?.gpu_available
+                        ? "text-green-500"
+                        : "text-orange-500"
+                    )}>
+                      {modelStatus
+                        ? (modelStatus.memory.cuda.available
+                          ? modelStatus.memory.cuda.device ?? "CUDA available"
+                          : "CPU only")
+                        : systemStatus
+                          ? (systemStatus.gpu_available ? "GPU available" : "CPU only")
+                          : "Unavailable"}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-2">
+                      {modelStatus
+                        ? (modelStatus.memory.cuda.available && modelStatus.memory.cuda.free_gb !== undefined
+                          ? `${modelStatus.memory.cuda.free_gb.toFixed(1)} / ${modelStatus.memory.cuda.total_gb?.toFixed(1) ?? "?"} GB VRAM free.`
+                          : `${modelStatus.memory.system.available_gb.toFixed(1)} / ${modelStatus.memory.system.total_gb.toFixed(1)} GB RAM free.`)
+                        : "Resource details are unavailable until the model status loads."}
+                    </p>
+                  </div>
+
+                  <div className="border border-border rounded-lg p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <SettingsIcon className="w-4 h-4 text-muted-foreground" />
+                      <span className="text-sm font-medium">Plugins & guards</span>
+                    </div>
+                    <div className="text-lg font-semibold text-foreground">
+                      {pluginsError
+                        ? "Unavailable"
+                        : loadingPlugins
+                          ? "Loading…"
+                          : `${enabledPromptPlugins.length} prompt · ${enabledGuardPlugins.length} guard`}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-2">
+                      {pluginsError
+                        ? "The /api/plugins response is unavailable."
+                        : loadingPlugins
+                          ? "Loading plugin state…"
+                          : `Prompt: ${enabledPromptPlugins.map((plugin) => plugin.name.replaceAll("_", " ")).join(", ") || "none"}. Guard: ${enabledGuardPlugins.map((plugin) => plugin.name.replaceAll("_", " ")).join(", ") || "none"}.`}
+                    </p>
+                  </div>
+                </div>
               </div>
             </motion.div>
           )}

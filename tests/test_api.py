@@ -12,7 +12,10 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
 
+from src.plugins.lora import SelectedLora
+from src.utils.generation_plan import GenerationPlan
 from src.utils.ollama import OllamaModelInfo
+from src.utils.plugin_manager import PluginResult
 from src.utils.publication_catalog import load_catalog
 from src.utils.storage import metadata_path_for, write_image_metadata
 
@@ -69,6 +72,11 @@ def test_status_endpoint(client):
     assert "status" in data
     assert "backend" in data
     assert data["status"] == "ready"
+    assert data["active_model"]
+    assert data["active_model_id"]
+    assert data["preferred_model"] == "Microsoft Mage-Flow"
+    assert data["preferred_model_status"] in {"ready", "partial", "not_downloaded"}
+    assert data["fallback_model"] == "Small Stable Diffusion"
     assert data["backend"] in [
         "mock",
         "smoke-test",
@@ -78,27 +86,83 @@ def test_status_endpoint(client):
         "flux-dev",
         "qwen-image",
         "ernie-image",
+        "z-image",
+        "mage-flow",
     ]
 
 
-def test_model_runtime_status_and_cleanup_endpoints(client):
+def test_hf_token_status_ignores_placeholder_environment_value(client, monkeypatch, tmp_path):
+    """A template value must not make the authentication page report a token."""
+    monkeypatch.setenv("HF_TOKEN", "your_hugging_face_token_here")
+    monkeypatch.setenv("HF_HOME", str(tmp_path))
+    response = client.get("/api/config/hf-token-status")
+
+    assert response.status_code == 200
+    assert response.json() == {"configured": False, "source": None}
+
+
+def test_model_runtime_status_and_cleanup_endpoints(client, monkeypatch):
+    class FakeUnloadResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'{"status":"ready","unloaded":true}'
+
     status = client.get("/api/models/status")
     assert status.status_code == 200
     payload = status.json()
     assert payload["configured_backend"]
     assert payload["resolved_backend"]
     assert {item["backend"] for item in payload["backends"]} >= {
-        "flux", "small", "turbo", "zimage", "ollama", "smoke", "mock"
+        "mageflow",
+        "flux",
+        "small",
+        "turbo",
+        "zimage",
+        "ollama",
+        "smoke",
+        "mock",
     }
     assert "system" in payload["memory"]
 
     recommended = client.get("/api/models/recommended")
     assert recommended.status_code == 200
-    assert recommended.json()["backend"] in {"zimage", "flux", "small"}
+    assert recommended.json()["backend"] in {"mageflow", "zimage", "flux", "small"}
 
+    monkeypatch.setattr(
+        "src.services.model_runtime.request.urlopen",
+        lambda *_args, **_kwargs: FakeUnloadResponse(),
+    )
     unloaded = client.post("/api/models/unload")
     assert unloaded.status_code == 200
-    assert unloaded.json()["message"] == "Runtime caches released"
+    assert unloaded.json()["message"] == "Runtime caches and Mage-Flow sidecar released"
+    assert unloaded.json()["mageflow"]["unloaded"] is True
+
+
+def test_model_download_route_accepts_encoded_hugging_face_repo_ids(client, monkeypatch):
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'{"status":"ready"}'
+
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda *_args, **_kwargs: FakeResponse(),
+    )
+
+    response = client.post("/api/models/microsoft%2FMage-Flow/download")
+
+    assert response.status_code == 200
+    assert response.json()["model_id"] == "microsoft/Mage-Flow"
 
 
 def test_cors_allows_local_review_ports(client):
@@ -122,6 +186,10 @@ def test_plugins_endpoint(client):
 
     data = response.json()
     assert isinstance(data, list)
+    assert any(
+        item["name"] == "dream_source_mixer" and item["category"] == "entropy" for item in data
+    )
+    assert any(item["name"] == "provenance_guard" and item["kind"] == "guard" for item in data)
 
 
 def test_generate_endpoint(client):
@@ -257,6 +325,86 @@ def test_generate_endpoint_records_durable_job(client):
     assert any(event["name"] == "generation_completed" for event in job["events"])
 
 
+def test_api_job_and_catalog_persist_locked_lora_provenance(client, monkeypatch, tmp_path):
+    """One resolved LoRA should survive API response, job state, and catalog persistence."""
+    lora_path = tmp_path / "loras" / "api-style" / "epoch-1.safetensors"
+    lora_path.parent.mkdir(parents=True)
+    lora_path.write_bytes(b"api locked lora")
+    plan = GenerationPlan(
+        plugin_results=(PluginResult("lora", "api-trigger", "API adapter"),),
+        plugin_descriptions=("lora: API adapter",),
+        enabled_plugins=("lora",),
+        temporal_descriptor="",
+        selected_lora=SelectedLora("api-style", lora_path, "api-trigger"),
+    )
+
+    class ApiZImageBackend:
+        def __init__(self):
+            self.plan = None
+            self.last_generation_metadata = {}
+
+        def set_generation_plan(self, received_plan):
+            self.plan = received_plan
+
+        async def generate_image(self, prompt, output_path, force_reinit=False, seed=None):
+            assert self.plan is plan
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            Image.new("RGB", (16, 16), color=(20, 50, 90)).save(output_path)
+            self.last_generation_metadata = {
+                "selected_lora": "api-style",
+                "selected_lora_path": str(lora_path.resolve()),
+                "selected_lora_keyword": "api-trigger",
+                "lora_backend": "diffsynth",
+                "seed": seed,
+            }
+            return output_path, 0.25, "Z-Image-Turbo"
+
+        def cleanup(self):
+            self.last_generation_metadata = {}
+
+    backend = ApiZImageBackend()
+    monkeypatch.setattr(
+        "src.services.image_generation.resolve_generation_plan",
+        lambda config, plugins_enabled=True, seed=None: plan,
+    )
+    monkeypatch.setattr(
+        "src.services.image_generation.create_image_generator",
+        lambda config: (backend, "z-image"),
+    )
+
+    response = client.post(
+        "/api/generate",
+        json={"prompt": "A blue model lab with floating geometric instruments", "seed": 88},
+    )
+    assert response.status_code == 200
+    generation = response.json()
+    response_metadata = generation["metadata"]
+    provenance = response_metadata["lora_provenance"]
+    assert response_metadata["selected_lora"] == "api-style"
+    assert response_metadata["lora_backend"] == "diffsynth"
+    assert response_metadata["selected_lora_kind"] == "style"
+    assert generation["prompt"].endswith(", api-trigger")
+    assert "'api-trigger'" not in generation["prompt"]
+    assert provenance["path"] == str(lora_path.resolve())
+    assert provenance["kind"] == "style"
+    assert provenance["sha256"]
+
+    job_response = client.get(f"/api/jobs/{generation['id']}")
+    assert job_response.status_code == 200
+    job = job_response.json()
+    assert job["metadata"]["lora_provenance"] == provenance
+    plan_event = next(
+        event for event in job["events"] if event["name"] == "generation_plan_resolved"
+    )
+    assert plan_event["payload"]["selected_lora"]["name"] == "api-style"
+
+    catalog = load_catalog(Path(_TEST_OUTPUT_DIR))
+    relative_key = generation["image_path"].replace("/images/", "")
+    catalog_metadata = catalog["assets"][relative_key]["metadata"]
+    assert catalog_metadata["generation_plan"]["resolution"] == "once_per_job"
+    assert catalog_metadata["lora_provenance"] == provenance
+
+
 def test_jobs_endpoint_creates_and_lists_generation_job(client):
     """Durable job endpoints should create, run, fetch, and list jobs."""
     response = client.post(
@@ -333,6 +481,7 @@ def test_generation_config_endpoint(client, monkeypatch):
 
     data = response.json()
     assert data["image_backend"] == "mock"
+    assert data["entropy_level"] in {"calm", "strange", "wild"}
     assert data["prompt_model"] == "llama3.2:3b"
     assert data["configured_prompt_model"] == "llama3.2:3b"
     assert data["image_model"] == "mock generator"
@@ -340,8 +489,14 @@ def test_generation_config_endpoint(client, monkeypatch):
     assert data["pipeline"]["image"]["backend"] == "mock"
     assert isinstance(data["enabled_loras"], list)
     assert isinstance(data["available_loras"], list)
+    assert isinstance(data["lora_metadata"], list)
+    if data["lora_metadata"]:
+        assert {item["kind"] for item in data["lora_metadata"]} <= {"style", "object"}
+        assert all("trigger_placement" in item for item in data["lora_metadata"])
     assert "lora_application_probability" in data
     assert "zimage_model_path" in data
+    assert data["mageflow_model"] == "microsoft/Mage-Flow"
+    assert data["mageflow_revision"] == "faca09c18c1c19458e7fbc3f7bce6f7a7d4d01a9"
     assert data["qwen_image_model"] == "diffusers/qwen-image-nf4"
     assert data["qwen_prompt_magic"] is True
     assert data["qwen_device_map"] == "balanced"

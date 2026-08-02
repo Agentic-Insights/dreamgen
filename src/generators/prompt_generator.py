@@ -8,26 +8,24 @@ import logging
 import time
 from typing import Optional
 
-from ..plugins import get_context_with_descriptions, get_temporal_descriptor
+from ..plugins.lora import condition_prompt_for_lora
 from ..utils.config import Config
 from ..utils.error_handler import PromptError, handle_errors
+from ..utils.generation_plan import GenerationPlan, resolve_generation_plan
 from ..utils.metrics import GenerationMetrics
 from ..utils.ollama import list_ollama_models, resolve_ollama_model
 
 
 class PromptGenerator:
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, generation_plan: Optional[GenerationPlan] = None):
         """Initialize prompt generator with configuration."""
         self.config = config
+        self.generation_plan = generation_plan
         self.model_name = config.model.ollama_model
         # Regular example prompts (no Lora)
         self.regular_example_prompts = [
             "Cozy cafe: Steam from coffee cups, readers in corners, frost patterns on windows cast golden morning light, prismatic reflections dance.",
             "Futuristic market: Holographic stalls mix with traditional ones, sci-fi foods under crystal dome, rainbow light filters through.",
-        ]
-        # Lora-specific example prompts
-        self.lora_example_prompts = [
-            "Magical post office with '<lora_name>' as the postmaster: Sorting letters on floating belts, mechanical reindeer power machines, fiber-optic antlers glow."
         ]
         self.conversation_history = []
         self.logger = logging.getLogger(__name__)
@@ -62,21 +60,30 @@ class PromptGenerator:
                 self.model_name = resolved_model
                 metrics.model_name = resolved_model
 
-            # Get context with plugin descriptions
-            context_data = get_context_with_descriptions()
-            temporal_context = get_temporal_descriptor()
+            # A service job supplies an immutable plan. Standalone prompt calls
+            # resolve the same plan locally so adapter metadata is available and
+            # no plugin is executed more than once.
+            generation_plan = self.generation_plan or resolve_generation_plan(self.config)
+            context_data = {
+                "results": list(generation_plan.plugin_results),
+                "descriptions": list(generation_plan.plugin_descriptions),
+            }
+            temporal_context = generation_plan.temporal_descriptor
+            selected_lora = generation_plan.selected_lora
 
             # Log plugin contributions
             self.logger.info("Plugin contributions:")
             for result in context_data["results"]:
                 self.logger.info(f"  {result.name}: {result.value} - {result.description}")
 
-            # Extract Lora keyword if present
-            lora_keyword = None
-            for result in context_data["results"]:
-                if result.name == "lora" and result.value:
-                    lora_keyword = result.value
-                    break
+            # LoRA triggers are conditioning metadata. Style triggers must not
+            # leak into the prose Ollama drafts, where the image model may treat
+            # an opaque token as a character name or visible lettering.
+            prompt_descriptions = [
+                description
+                for description in context_data["descriptions"]
+                if not description.lower().startswith("lora:")
+            ]
 
             base_system_prompt = (
                 meta_prompt.strip()
@@ -96,38 +103,37 @@ class PromptGenerator:
             system_context_parts = [
                 base_system_prompt,
                 "\nAvailable context from plugins:",
-                *[f"- {desc}" for desc in context_data["descriptions"]],
+                *[f"- {desc}" for desc in prompt_descriptions],
                 f"\nCurrent temporal context: {temporal_context}",
                 "Begin the prompt with this temporal context, then add a concise but vivid scene description.",
                 "Keep the final combined prompt (including context) within the 77 token limit.",
                 "You may choose which context elements to incorporate based on relevance.",
             ]
 
-            # Only add Lora-specific instructions if a Lora keyword is available
-            if lora_keyword:
+            if selected_lora and selected_lora.kind == "object":
                 system_context_parts.extend(
                     [
-                        "\nIMPORTANT: You MUST make the Lora keyword a central subject or character in the scene.",
-                        "The Lora keyword should be in single quotes and be an active participant in the scene.",
-                        "Example format: '[temporal/style context]: [scene with Lora as subject]'",
-                        "For example: 'scene with '<keyword>' as the main character doing something'",
+                        "\nAn object LoRA adapter is loaded for the primary depicted subject.",
+                        "Use its exact subject token once, unquoted, as a visual entity rather than signage or written text.",
+                        f"Exact object subject token: {selected_lora.keyword}",
+                    ]
+                )
+            elif selected_lora:
+                system_context_parts.extend(
+                    [
+                        "\nA style LoRA adapter is already loaded.",
+                        "Describe only the natural visual scene and style; do not mention, quote, personify, spell, label, or render the adapter name or trigger token.",
+                        "DreamGen appends any required style trigger after drafting.",
                     ]
                 )
 
             system_context = "\n".join(system_context_parts)
 
-            if lora_keyword:
-                system_context += f"\nCurrent Lora keyword that MUST be used as a subject in single quotes: '{lora_keyword}'"
-                system_context += "\nMake sure the Lora keyword is a central character or subject in the scene, not just mentioned."
-
             self.logger.info(f"Generated temporal context: {temporal_context}")
 
             # Initialize conversation if empty
             if not self.conversation_history:
-                # Select appropriate example prompts based on whether a Lora keyword is available
                 example_prompts = self.regular_example_prompts.copy()
-                if lora_keyword:
-                    example_prompts.extend(self.lora_example_prompts)
 
                 # Create user message with examples
                 user_message_parts = [
@@ -136,10 +142,9 @@ class PromptGenerator:
                     "\nGenerate a new prompt that is different from these examples but equally creative.",
                 ]
 
-                # Add Lora-specific instruction if a Lora keyword is available
-                if lora_keyword:
+                if selected_lora and selected_lora.kind == "object":
                     user_message_parts.append(
-                        "Make the Lora keyword the central subject or character in the scene."
+                        "Depict the declared object token as the primary visual subject, unquoted and not as text."
                     )
 
                 self.conversation_history = [
@@ -169,27 +174,28 @@ class PromptGenerator:
             content = (
                 message.get("content") if isinstance(message, dict) else getattr(message, "content")
             )
-            new_prompt = content.strip()
+            draft_prompt = content.strip()
             # Clean up Unicode characters that cause Windows console issues
-            new_prompt = (
-                new_prompt.replace("\u2011", "-").replace("\u2013", "-").replace("\u2014", "--")
+            draft_prompt = (
+                draft_prompt.replace("\u2011", "-").replace("\u2013", "-").replace("\u2014", "--")
             )
-            new_prompt = (
-                new_prompt.replace("\u2018", "'")
+            draft_prompt = (
+                draft_prompt.replace("\u2018", "'")
                 .replace("\u2019", "'")
                 .replace("\u201c", '"')
                 .replace("\u201d", '"')
             )
-            self.logger.info(f"Raw generated prompt: {new_prompt}")
+            self.logger.info(f"Raw generated prompt: {draft_prompt}")
+            new_prompt = condition_prompt_for_lora(draft_prompt, selected_lora)
+            if new_prompt != draft_prompt:
+                self.logger.info(f"LoRA-conditioned prompt: {new_prompt}")
 
             # Add new prompt to conversation history
-            self.conversation_history.append({"role": "assistant", "content": new_prompt})
+            self.conversation_history.append({"role": "assistant", "content": draft_prompt})
             # Create next user message
             next_message = "Generate another unique prompt, different from previous ones."
-            if lora_keyword:
-                next_message += (
-                    " Remember to make the Lora keyword the central subject in the scene."
-                )
+            if selected_lora and selected_lora.kind == "object":
+                next_message += " Keep the declared object token as the unquoted visual subject."
 
             self.conversation_history.append({"role": "user", "content": next_message})
 

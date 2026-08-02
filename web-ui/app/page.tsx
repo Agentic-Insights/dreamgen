@@ -28,6 +28,7 @@ import QueueHistory from "@/components/QueueHistory";
 import Settings from "@/components/Settings";
 import AdvancedControls from "@/components/AdvancedControls";
 import MetaPromptModal from "@/components/MetaPromptModal";
+import ImageEditPanel, { type ImageEditTarget } from "@/components/ImageEditPanel";
 import TaskProgress from "@/components/TaskProgress";
 import {
   API_BASE,
@@ -36,6 +37,7 @@ import {
   GenerationJob,
   GenerateResponse,
   GenerationConfig,
+  GenerationMetricsResponse,
   PluginInfo,
   SystemStatus,
 } from "@/lib/api";
@@ -169,6 +171,7 @@ export default function Home() {
   const [experimentLabel, setExperimentLabel] = useState("");
   const [promptFamily, setPromptFamily] = useState("");
   const [qualityFlags, setQualityFlags] = useState("");
+  const [recipeId, setRecipeId] = useState<string | null>(null);
   const [promptError, setPromptError] = useState<string | null>(null);
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
   const [promptProgress, setPromptProgress] = useState<ProgressSnapshot | null>(null);
@@ -181,12 +184,14 @@ export default function Home() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationProgress, setGenerationProgress] = useState<ProgressSnapshot | null>(null);
   const [currentImage, setCurrentImage] = useState<GenerateResponse | null>(null);
+  const [editTarget, setEditTarget] = useState<ImageEditTarget | null>(null);
   const [recentImages, setRecentImages] = useState<RecentImage[]>([]);
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [generationConfig, setGenerationConfig] = useState<GenerationConfig | null>(null);
   const [generationEvents, setGenerationEvents] = useState<GenerationEvent[]>([]);
   const [generationJobs, setGenerationJobs] = useState<GenerationJob[]>([]);
+  const [generationMetrics, setGenerationMetrics] = useState<GenerationMetricsResponse | null>(null);
   const [isJobsLoading, setIsJobsLoading] = useState(false);
   const [nextRunAt, setNextRunAt] = useState<Date | null>(null);
   const [, setClockTick] = useState(Date.now());
@@ -377,6 +382,14 @@ export default function Home() {
     }
   }, []);
 
+  const loadGenerationMetrics = useCallback(async () => {
+    try {
+      setGenerationMetrics(await api.getGenerationMetrics());
+    } catch (error) {
+      console.error("Failed to load generation metrics:", error);
+    }
+  }, []);
+
   runGenerationRef.current = async (source: "manual" | "loop") => {
     if (isGeneratingRef.current) return;
 
@@ -411,6 +424,7 @@ export default function Home() {
         experiment_label: experimentLabelRef.current.trim() || undefined,
         prompt_family: promptFamilyRef.current.trim() || undefined,
         quality_flags: splitQualityFlags(qualityFlagsRef.current),
+        recipe_id: recipeId || undefined,
         client_request_id: clientRequestId,
       });
 
@@ -437,6 +451,7 @@ export default function Home() {
         loadDashboardControls(),
         loadGenerationEvents(),
         loadGenerationJobs(),
+        loadGenerationMetrics(),
         api.getStatus().then(setStatus),
       ]);
     } catch (error) {
@@ -528,6 +543,7 @@ export default function Home() {
     loadDashboardControls();
     loadGenerationEvents();
     loadGenerationJobs();
+    loadGenerationMetrics();
 
     const unsubscribe = api.subscribeWebSocket((data) => {
       const nextPromptProgress = getTaskProgressUpdate(
@@ -563,10 +579,12 @@ export default function Home() {
         addLog(`Saved ${String(msg.image_path ?? "image")}.`);
         void loadGenerationEvents();
         void loadGenerationJobs();
+        void loadGenerationMetrics();
       } else if (msg.type === "generation_error") {
         addLog(`Backend error: ${String(msg.error ?? "unknown")}`, "error");
         void loadGenerationEvents();
         void loadGenerationJobs();
+        void loadGenerationMetrics();
       }
     });
 
@@ -576,7 +594,7 @@ export default function Home() {
         clearTimeout(generationResetTimeoutRef.current);
       }
     };
-  }, [loadDashboardControls, loadGenerationEvents, loadGenerationJobs, loadRecentImages, refreshDashboardState]);
+  }, [loadDashboardControls, loadGenerationEvents, loadGenerationJobs, loadGenerationMetrics, loadRecentImages, refreshDashboardState]);
 
   useEffect(() => {
     const hasActiveJobs = generationJobs.some(
@@ -716,6 +734,54 @@ export default function Home() {
     addLog("Copied job prompt into the generator.");
   };
 
+  const branchJob = async (job: GenerationJob) => {
+    const request = job.request;
+    const metadata = job.metadata ?? {};
+    const experiment = (metadata.experiment ?? {}) as Record<string, unknown>;
+    const parameters = (experiment.parameters ?? {}) as Record<string, unknown>;
+    const enhancers = (experiment.enhancers ?? {}) as Record<string, unknown>;
+    const pipeline = (experiment.pipeline ?? {}) as Record<string, unknown>;
+    const prompt = job.prompt || request.prompt || "";
+    setPromptSeed(prompt);
+    promptSeedRef.current = prompt;
+    setMetaPrompt(request.meta_prompt ?? "");
+    setSeed(request.seed ?? (typeof parameters.seed === "number" ? parameters.seed : null));
+    setRecipeId(request.recipe_id ?? null);
+    setExperimentLabel(typeof metadata.experiment_label === "string" ? metadata.experiment_label : "");
+    setPromptFamily(typeof metadata.prompt_family === "string" ? metadata.prompt_family : "");
+    setQualityFlags(
+      Array.isArray(metadata.quality_flags) ? metadata.quality_flags.map(String).join(", ") : ""
+    );
+
+    const overrides = request.config_overrides ?? {};
+    const model = (overrides.model ?? {}) as Record<string, unknown>;
+    const image = (overrides.image ?? {}) as Record<string, unknown>;
+    const lora = (overrides.lora ?? {}) as Record<string, unknown>;
+    const configUpdates: Partial<GenerationConfig> = {
+      image_backend: typeof model.image_backend === "string"
+        ? model.image_backend
+        : typeof pipeline.configured_backend === "string" ? pipeline.configured_backend : undefined,
+      width: typeof image.width === "number" ? image.width : undefined,
+      height: typeof image.height === "number" ? image.height : undefined,
+      num_inference_steps: typeof image.num_inference_steps === "number" ? image.num_inference_steps : undefined,
+      guidance_scale: typeof image.guidance_scale === "number" ? image.guidance_scale : undefined,
+      true_cfg_scale: typeof image.true_cfg_scale === "number" ? image.true_cfg_scale : undefined,
+      enabled_loras: Array.isArray(lora.enabled_loras)
+        ? lora.enabled_loras.map(String)
+        : Array.isArray(enhancers.loras) ? enhancers.loras.map(String) : undefined,
+    };
+    const cleanUpdates = Object.fromEntries(Object.entries(configUpdates).filter(([, value]) => value !== undefined));
+    if (Object.keys(cleanUpdates).length > 0) {
+      try {
+        const response = await api.setGenerationConfig(cleanUpdates);
+        setGenerationConfig(response.config);
+      } catch (error) {
+        addLog(`Could not restore runtime settings: ${error instanceof Error ? error.message : "unknown error"}`, "error");
+      }
+    }
+    addLog(`Restored full settings from job ${job.id.slice(0, 8)}${request.recipe_id ? ` (${request.recipe_id})` : ""}.`);
+  };
+
   const copyProbeRecipe = async () => {
     try {
       await navigator.clipboard.writeText(JSON.stringify(probeRecipe, null, 2));
@@ -744,11 +810,12 @@ export default function Home() {
         quality_flags: Array.isArray(job.metadata.quality_flags)
           ? job.metadata.quality_flags.map(String)
           : undefined,
-        metadata: {
-          ...(job.request.metadata ?? {}),
-          rerun_of_job_id: job.id,
-        },
-      });
+          metadata: {
+            ...(job.request.metadata ?? {}),
+            rerun_of_job_id: job.id,
+          },
+          config_overrides: job.request.config_overrides ?? {},
+        });
       addLog(`Queued rerun ${queued.id.slice(0, 8)}.`);
       await loadGenerationJobs();
     } catch (error) {
@@ -787,7 +854,7 @@ export default function Home() {
               GPU {status?.gpu_available ? "online" : "offline"}
             </span>
             <span className="status-pill hidden md:inline-flex capitalize">
-              {status?.backend ?? "unknown"}
+              {status?.active_model ?? status?.backend ?? "unknown"}
             </span>
           </div>
         </div>
@@ -1338,6 +1405,14 @@ export default function Home() {
                                   {currentImage.prompt}
                                 </p>
                               </div>
+                              <button
+                                type="button"
+                                onClick={() => setEditTarget({ imageUrl: `${API_BASE}${currentImage.image_path}`, sourcePath: currentImage.image_path, prompt: currentImage.prompt })}
+                                className="mt-3 inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-violet-500 px-4 py-2 text-sm text-white transition hover:bg-violet-600"
+                              >
+                                <Wand2 className="h-4 w-4" />
+                                Edit / branch from this image
+                              </button>
                             </motion.div>
                           ) : (
                             <div className="flex h-full min-h-[320px] flex-col items-center justify-center text-center">
@@ -1471,15 +1546,41 @@ export default function Home() {
                             </div>
                           )}
                         </div>
+
+                        <div className="rounded-lg border border-border/60 bg-background/78 px-3 py-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Timing metrics</div>
+                            <span className="text-[11px] text-muted-foreground">
+                              {generationMetrics?.otel_enabled ? "OTel on" : "JSONL local"}
+                            </span>
+                          </div>
+                          {generationMetrics && generationMetrics.completed_generations > 0 ? (
+                            <div className="mt-2 space-y-2">
+                              {Object.entries(generationMetrics.phase_averages_ms).slice(0, 2).map(([backend, values]) => (
+                                <div key={backend} className="text-xs">
+                                  <div className="truncate font-medium text-foreground" title={backend}>{backend}</div>
+                                  <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-muted-foreground">
+                                    {Object.entries(values).filter(([key]) => key !== "runs").map(([phase, value]) => (
+                                      <span key={phase}>{phase} {value.toFixed(0)}ms</span>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="mt-2 text-xs leading-5 text-muted-foreground">No completed timing samples yet.</div>
+                          )}
+                        </div>
                       </div>
                     </div>
 
-                    <QueueHistory
+          <QueueHistory
                       jobs={generationJobs}
                       isLoading={isJobsLoading}
                       onRefresh={() => void loadGenerationJobs()}
-                      onCopyPrompt={copyJobPrompt}
-                      onRerun={(job) => void rerunJob(job)}
+            onCopyPrompt={copyJobPrompt}
+            onBranch={(job) => void branchJob(job)}
+            onRerun={(job) => void rerunJob(job)}
                     />
 
                     <div className="ambient-panel rounded-[1.75rem] border border-border/80 p-5">
@@ -1577,7 +1678,7 @@ export default function Home() {
               exit={{ opacity: 0, y: -8 }}
               className="h-full"
             >
-              <Gallery />
+              <Gallery onRequestEdit={setEditTarget} />
             </motion.div>
           )}
 
@@ -1608,6 +1709,28 @@ export default function Home() {
           </span>
         </div>
       </footer>
+      {editTarget && (
+        <ImageEditPanel
+          target={editTarget}
+          onClose={() => setEditTarget(null)}
+          onCompleted={(response) => {
+            setCurrentImage((current) => current ? {
+              ...current,
+              id: response.id,
+              prompt: response.prompt,
+              image_path: response.edited_path,
+              metadata: {
+                ...current.metadata,
+                ...response.metadata,
+                backend: String(response.metadata.backend ?? "edit"),
+                plugins_used: current.metadata.plugins_used ?? [],
+              },
+              created_at: response.created_at,
+            } : current);
+            void loadRecentImages();
+          }}
+        />
+      )}
       </div>
       </div>
       </div>

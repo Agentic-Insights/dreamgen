@@ -13,9 +13,18 @@ from PIL import Image
 from src.utils.storage import read_image_metadata
 
 CATALOG_FILENAME = ".gallery_catalog.json"
-CATALOG_VERSION = 1
+CATALOG_VERSION = 2
 PUBLICATION_STATES = {"draft", "published", "hidden", "featured", "rejected"}
 PUBLIC_GALLERY_STATES = {"published", "featured"}
+PUBLICATION_BLOCKING_QUALITY_FLAGS = {
+    "corrupt",
+    "diagnostic",
+    "draft",
+    "placeholder",
+    "provisional",
+    "rejected",
+    "unsafe",
+}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 
 
@@ -150,14 +159,17 @@ def build_catalog_entry(
     if placeholder:
         quality_flags = sorted({*quality_flags, "placeholder"})
 
+    now = utc_now()
     return {
         "id": image_id_for(key),
         "path": key,
         "prompt": prompt if prompt is not None else prompt_for(image_path),
         "metadata": metadata,
         "created_at": created_at_for(image_path),
-        "updated_at": utc_now(),
+        "updated_at": now,
         "publication_state": state,
+        "published_at": now if state in PUBLIC_GALLERY_STATES else None,
+        "publication_history": [],
         "publishable": not placeholder,
         "quality_flags": quality_flags,
     }
@@ -191,6 +203,11 @@ def register_image(
         metadata=metadata,
         publication_state=state,
     )
+    if existing:
+        entry["published_at"] = existing.get("published_at") or (
+            existing.get("updated_at") if state in PUBLIC_GALLERY_STATES else None
+        )
+        entry["publication_history"] = list(existing.get("publication_history") or [])
     catalog["assets"][key] = entry
     save_catalog(output_dir, catalog)
     return entry
@@ -245,13 +262,19 @@ def backfill_catalog(
         if placeholder:
             state = existing.get("publication_state", "rejected") if existing else "rejected"
 
-        catalog["assets"][key] = build_catalog_entry(
+        refreshed_entry = build_catalog_entry(
             image_path,
             output_dir,
             prompt=prompt_for(image_path),
             metadata=metadata,
             publication_state=state,
         )
+        if existing:
+            refreshed_entry["published_at"] = existing.get("published_at") or (
+                existing.get("updated_at") if state in PUBLIC_GALLERY_STATES else None
+            )
+            refreshed_entry["publication_history"] = list(existing.get("publication_history") or [])
+        catalog["assets"][key] = refreshed_entry
         if existing:
             refreshed += 1
         else:
@@ -288,9 +311,23 @@ def set_publication_state(
     if placeholder and state in PUBLIC_GALLERY_STATES:
         raise PermissionError("Placeholder images cannot be published.")
 
+    previous_state = str(entry.get("publication_state", "draft"))
+    changed_at = utc_now()
     entry["publication_state"] = state
-    entry["updated_at"] = utc_now()
+    entry["updated_at"] = changed_at
+    history = list(entry.get("publication_history") or [])
+    if previous_state != state:
+        history.append({"from": previous_state, "to": state, "changed_at": changed_at})
+    entry["publication_history"] = history
+    if state in PUBLIC_GALLERY_STATES and previous_state not in PUBLIC_GALLERY_STATES:
+        entry["published_at"] = changed_at
+    elif state not in PUBLIC_GALLERY_STATES and previous_state in PUBLIC_GALLERY_STATES:
+        entry["unpublished_at"] = changed_at
     entry["publishable"] = not placeholder
+    if state in PUBLIC_GALLERY_STATES:
+        flags = set(entry.get("quality_flags", []))
+        flags.difference_update({"draft", "provisional"})
+        entry["quality_flags"] = sorted(flags)
     if placeholder:
         flags = set(entry.get("quality_flags", []))
         flags.add("placeholder")

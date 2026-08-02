@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "loras": {
+    "pxlstl": {
+      "display_name": "Pixel Art",
+      "kind": "style",
+      "trigger": "pxlstl",
+      "trigger_placement": "suffix",
+      "trigger_required": true,
+      "source": "https://huggingface.co/mks0813/z-image-turbo-pixel-art-lora",
+      "base_model": "Tongyi-MAI/Z-Image-Turbo"
+    },
+    "childrens drawings": {
+      "display_name": "Children's Drawings",
+      "kind": "style",
+      "trigger": "childrens drawings",
+      "trigger_placement": "suffix",
+      "trigger_required": false,
+      "source": "https://huggingface.co/ostris/z_image_turbo_childrens_drawings",
+      "base_model": "Tongyi-MAI/Z-Image-Turbo"
+    },
+    "HST photo": {
+      "display_name": "Historic Color Photography",
+      "kind": "style",
+      "trigger": "HST photo",
+      "trigger_placement": "suffix",
+      "trigger_required": true,
+      "source": "https://huggingface.co/AlekseyCalvin/HistoricColor_Z-image-Turbo-LoRA",
+      "base_model": "Tongyi-MAI/Z-Image-Turbo"
+    },
+    "elusarca anime style": {
+      "display_name": "Elusarca Anime Style",
+      "kind": "style",
+      "trigger": "elusarca anime style",
+      "trigger_placement": "suffix",
+      "trigger_required": true,
+      "source": "https://huggingface.co/reverentelusarca/elusarca-anime-style-lora-z-image-turbo",
+      "base_model": "Tongyi-MAI/Z-Image-Turbo"
+    },
+    "St652yl3": {
+      "display_name": "Vintage Comic Style",
+      "kind": "style",
+      "trigger": "St652yl3",
+      "trigger_placement": "suffix",
+      "trigger_required": true,
+      "source": "https://huggingface.co/lovis93/vintage-comic-style-zimage-lora",
+      "base_model": "Tongyi-MAI/Z-Image-Turbo"
+    }
+  }
+}

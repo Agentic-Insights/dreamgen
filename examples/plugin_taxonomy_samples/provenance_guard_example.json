@@ -1,0 +1,24 @@
+{
+  "purpose": "Operational guard result from a local pre/post validation example.",
+  "pre": {
+    "name": "provenance_guard",
+    "category": "operational",
+    "phase": "pre",
+    "status": "passed",
+    "details": {
+      "checks": ["resolution_once_per_job", "plugin_contribution_provenance"]
+    }
+  },
+  "post": {
+    "name": "provenance_guard",
+    "category": "operational",
+    "phase": "post",
+    "status": "warning",
+    "details": {
+      "checks": ["output_path", "prompt", "backend", "model", "generation_plan"],
+      "quality_flags": ["provenance_incomplete"],
+      "missing": ["image_path"],
+      "note": "Expected review signal for a dry-run plan with no rendered image; no asset was published."
+    }
+  }
+}

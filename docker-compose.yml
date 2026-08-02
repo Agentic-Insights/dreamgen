@@ -3,6 +3,33 @@
 #   docker compose --env-file .env.docker up --build
 
 services:
+  mageflow:
+    build:
+      context: .
+      dockerfile: Dockerfile.mageflow
+      args:
+        - MAGEFLOW_SOURCE_SHA=${MAGEFLOW_SOURCE_SHA:-6cefeb40e4c8ecc404ecb73732a91878939f27e0}
+    container_name: imagegen-mageflow
+    gpus: all
+    ports:
+      - "127.0.0.1:${MAGEFLOW_PORT:-25801}:8001"
+    volumes:
+      - ${AI_CACHE_DIR:-./.cache}/huggingface:/models
+    environment:
+      - HF_HOME=/models
+      - MAGEFLOW_MODEL=${MAGEFLOW_MODEL:-microsoft/Mage-Flow}
+      - MAGEFLOW_MODEL_REVISION=${MAGEFLOW_MODEL_REVISION:-faca09c18c1c19458e7fbc3f7bce6f7a7d4d01a9}
+      - MAGEFLOW_ATTENTION=${MAGEFLOW_ATTENTION:-sdpa}
+      - MAGEFLOW_MIN_VRAM_GB=${MAGEFLOW_MIN_VRAM_GB:-20}
+      - MAGEFLOW_SOURCE_SHA=${MAGEFLOW_SOURCE_SHA:-6cefeb40e4c8ecc404ecb73732a91878939f27e0}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
   backend:
     build:
       context: .
@@ -16,16 +43,22 @@ services:
       - ${AI_CACHE_DIR:-./.cache}/huggingface:/app/models
       - ${AI_CACHE_DIR:-./.cache}/torch:/app/.cache/torch
       - ${OUTPUT_HOST_DIR:-./output}:/app/output
-      - ./logs:/app/logs
-      - ./ckpts:/app/ckpts
-      - ./loras:/app/loras
-      - ./ref-repos:/app/ref-repos
+      - ${LOG_HOST_DIR:-./logs}:/app/logs
+      - ${CHECKPOINT_HOST_DIR:-./ckpts}:/app/ckpts
+      - ${LORA_HOST_DIR:-./loras}:/app/loras
+      - ${REF_REPOS_HOST_DIR:-./ref-repos}:/app/ref-repos
     environment:
       - HOST=0.0.0.0
       - PORT=8000
       - USE_MOCK_GENERATOR=${USE_MOCK_GENERATOR:-false}
       - MOCK_MODE=${MOCK_MODE:-false}
       - IMAGE_BACKEND=${IMAGE_BACKEND:-auto}
+      - MAGEFLOW_MODEL=${MAGEFLOW_MODEL:-microsoft/Mage-Flow}
+      - MAGEFLOW_MODEL_REVISION=${MAGEFLOW_MODEL_REVISION:-faca09c18c1c19458e7fbc3f7bce6f7a7d4d01a9}
+      - MAGEFLOW_URL=${MAGEFLOW_URL:-http://mageflow:8001}
+      - MAGEFLOW_STEPS=${MAGEFLOW_STEPS:-20}
+      - MAGEFLOW_CFG=${MAGEFLOW_CFG:-5.0}
+      - MAGEFLOW_TIMEOUT_SECONDS=${MAGEFLOW_TIMEOUT_SECONDS:-1800}
       - HF_TOKEN=${HF_TOKEN:-}
       - HF_HOME=/app/models
       - TRANSFORMERS_CACHE=/app/models
@@ -57,6 +90,8 @@ services:
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:${FRONTEND_PORT:-7860},http://127.0.0.1:${FRONTEND_PORT:-7860},http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001}
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    depends_on:
+      - mageflow
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/status"]

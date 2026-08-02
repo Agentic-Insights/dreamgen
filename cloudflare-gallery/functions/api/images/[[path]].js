@@ -1,13 +1,28 @@
+const CURRENT_MANIFEST_KEY = '_dreamgen/current.json';
+
 export async function onRequestGet(ctx) {
   const path = ctx.params.path?.join('/') || '';
 
-  // List all images with optional prompt/metadata sidecars.
+  // The release manifest is the approval boundary and the canonical ordering.
   if (!path) {
+    const manifest = await readJson(ctx.env.GALLERY, CURRENT_MANIFEST_KEY);
+    if (isReleaseManifest(manifest)) {
+      const images = manifest.items.map(item => buildManifestImageRecord(item, manifest));
+      return Response.json(images, {
+        headers: {
+          'Cache-Control': 'no-store',
+          'X-DreamGen-Release': manifest.release_id,
+          'ETag': `"${manifest.release_id}"`
+        }
+      });
+    }
+
+    // Backward-compatible fallback before the first manifest-based publish.
     const objects = await listAllObjects(ctx.env.GALLERY);
     const objectKeys = new Set(objects.map(o => o.key));
     const imageObjects = objects
       .filter(o => /\.(png|jpg|jpeg|webp|gif)$/i.test(o.key))
-      .sort((a, b) => sortTimestamp(b) - sortTimestamp(a));
+      .sort((a, b) => sortTimestamp(b) - sortTimestamp(a) || a.key.localeCompare(b.key));
 
     const images = [];
     for (const object of imageObjects) {
@@ -38,13 +53,70 @@ export async function onRequestGet(ctx) {
     json: 'application/json; charset=utf-8'
   };
 
-  return new Response(file.body, {
-    headers: {
-      'Content-Type': file.httpMetadata?.contentType || contentTypes[ext] || 'application/octet-stream',
-      'Cache-Control': ext === 'txt' ? 'public, max-age=3600' : 'public, max-age=31536000',
-      'Access-Control-Allow-Origin': '*'
-    }
+  const requestUrl = new URL(ctx.request.url);
+  const contentVersion = requestUrl.searchParams.get('v');
+  const headers = new Headers({
+    'Content-Type': file.httpMetadata?.contentType || contentTypes[ext] || 'application/octet-stream',
+    'Cache-Control': contentVersion
+      ? 'public, max-age=31536000, immutable'
+      : 'public, max-age=300, must-revalidate',
+    'Access-Control-Allow-Origin': '*'
   });
+  if (file.httpEtag) headers.set('ETag', file.httpEtag);
+
+  return new Response(file.body, { headers });
+}
+
+function isReleaseManifest(value) {
+  return Boolean(
+    value &&
+    value.schema_version === 1 &&
+    typeof value.release_id === 'string' &&
+    Array.isArray(value.items)
+  );
+}
+
+function buildManifestImageRecord(item, manifest) {
+  const metadata = item.metadata && typeof item.metadata === 'object' ? item.metadata : {};
+  const createdAt = item.created_at || metadata.generated_at || null;
+  const createdDate = createdAt ? new Date(createdAt) : parseDateFromFilename(item.key);
+  const backend = metadata.backend || metadata.provider || metadata.model_backend || 'unknown';
+  const model = metadata.model || metadata.model_name || metadata.ollama_model || backend;
+  const plugins = Array.isArray(metadata.plugins_used) ? metadata.plugins_used : [];
+  const loras = Array.isArray(metadata.loras) ? metadata.loras : [];
+  const publicationState = item.publication_state || metadata?.publication?.state || 'published';
+
+  return {
+    key: item.key,
+    position: item.position,
+    releaseId: manifest.release_id,
+    assetVersion: item.asset_version,
+    imageUrl: versionedAssetUrl(item.key, item.asset_version),
+    uploaded: manifest.published_at,
+    createdAt,
+    approvedAt: item.approved_at || null,
+    dateStr: formatMonthYear(createdDate),
+    week: extractWeek(item.key),
+    captionKey: item.caption_key || null,
+    captionUrl: item.caption_key
+      ? versionedAssetUrl(item.caption_key, item.caption_version || item.asset_version)
+      : null,
+    hasCaption: Boolean(item.caption_key),
+    metadataKey: item.metadata_key || null,
+    metadata,
+    backend,
+    model,
+    plugins,
+    loras,
+    featured: publicationState === 'featured' || item.featured === true,
+    publicationState,
+    sharePath: `/?image=${encodeURIComponent(item.key)}`
+  };
+}
+
+function versionedAssetUrl(key, version) {
+  const encodedKey = String(key).split('/').map(encodeURIComponent).join('/');
+  return `/api/images/${encodedKey}?v=${encodeURIComponent(version)}`;
 }
 
 async function buildImageRecord(bucket, object, objectKeys) {
@@ -110,15 +182,16 @@ function sortTimestamp(object) {
 }
 
 function parseDateFromFilename(filename) {
-  const match = filename.match(/(\d{8})/);
+  const match = filename.match(/(\d{4})(\d{2})(\d{2})(?:_(\d{2})(\d{2})(\d{2}))?/);
   if (!match) return null;
-
-  const dateStr = match[1];
-  const year = dateStr.substring(0, 4);
-  const month = dateStr.substring(4, 6);
-  const day = dateStr.substring(6, 8);
-
-  return new Date(Number(year), Number(month) - 1, Number(day));
+  return new Date(Date.UTC(
+    Number(match[1]),
+    Number(match[2]) - 1,
+    Number(match[3]),
+    Number(match[4] || 0),
+    Number(match[5] || 0),
+    Number(match[6] || 0)
+  ));
 }
 
 function formatMonthYear(date) {

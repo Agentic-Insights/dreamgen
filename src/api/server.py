@@ -4,6 +4,7 @@ Provides REST API and WebSocket endpoints for the Next.js frontend
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -18,6 +19,7 @@ from fastapi import (
     BackgroundTasks,
     FastAPI,
     File,
+    Form,
     HTTPException,
     Query,
     UploadFile,
@@ -29,14 +31,16 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel, Field
 
-from src.generators.factory import backend_label, is_model_cached, resolve_image_backend
+from src.generators.factory import inspect_local_zimage_model as inspect_zimage_checkpoint
+from src.generators.factory import is_model_cached, resolve_image_backend
 from src.generators.prompt_generator import PromptGenerator
 from src.plugins import plugin_manager, register_lora_plugin
-from src.plugins.lora import get_available_loras
+from src.plugins.lora import get_available_loras, get_lora_metadata
 from src.services import (
     GenerationJobCreate,
     GenerationProgressEvent,
     ImageGenService,
+    SQLiteEditJobStore,
     SQLiteGenerationJobStore,
     apply_config_overrides,
     get_workflow_recipe,
@@ -46,6 +50,7 @@ from src.services import (
 from src.services.model_runtime import ModelRuntimeManager
 from src.utils.config import Config
 from src.utils.gallery_publisher import DEFAULT_BUCKET, build_publish_status
+from src.utils.observability import read_lifecycle_events, write_lifecycle_event
 from src.utils.ollama import (
     OllamaModelInfo,
     get_ollama_version,
@@ -71,6 +76,7 @@ logger = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ALLOWED_IMAGE_BACKENDS = {
     "auto",
+    "mageflow",
     "flux",
     "ollama",
     "zimage",
@@ -82,6 +88,16 @@ ALLOWED_IMAGE_BACKENDS = {
     "mock",
 }
 MAX_RECENT_GENERATION_EVENTS = 100
+HF_TOKEN_PLACEHOLDER = "your_hugging_face_token_here"
+
+
+def configured_hf_token() -> str | None:
+    """Return a usable Hugging Face token without exposing placeholder values."""
+    token = os.getenv("HF_TOKEN", "").strip()
+    if not token or token == HF_TOKEN_PLACEHOLDER:
+        return None
+    return token
+
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -154,22 +170,7 @@ def zimage_native_source_path() -> Path:
 
 def inspect_local_zimage_model(model_path: Path) -> tuple[str, int]:
     """Return readiness status and size for a repo-local Z-Image checkpoint directory."""
-    if not model_path.exists():
-        return ("not_downloaded", 0)
-
-    size = sum(path.stat().st_size for path in model_path.rglob("*") if path.is_file())
-    transformer_files = list((model_path / "transformer").glob("*.safetensors"))
-    text_encoder_files = list((model_path / "text_encoder").glob("*.safetensors"))
-    required_files = [
-        model_path / "model_index.json",
-        model_path / "tokenizer" / "tokenizer.json",
-        model_path / "vae" / "diffusion_pytorch_model.safetensors",
-    ]
-
-    if transformer_files and text_encoder_files and all(path.exists() for path in required_files):
-        return ("ready", size)
-
-    return ("partial", size)
+    return inspect_zimage_checkpoint(model_path)
 
 
 def resolved_prompt_model_name() -> str:
@@ -225,11 +226,13 @@ def resolve_prompt_model_from_models(
 def generation_config_payload() -> Dict[str, Any]:
     """Serialize mutable generation/runtime settings for the frontend."""
     image_backend = config.model.image_backend
+    runtime_status = runtime_manager.status()
     configured_prompt_model = config.model.ollama_model
     prompt_model = resolved_prompt_model_name()
 
     image_model_by_backend = {
         "auto": "auto resolver",
+        "mageflow": config.model.mageflow_model,
         "flux": config.model.flux_model,
         "ollama": config.model.ollama_image_model,
         "zimage": str(config.model.zimage_model_path),
@@ -241,6 +244,20 @@ def generation_config_payload() -> Dict[str, Any]:
         "mock": "mock generator",
     }
     image_model = image_model_by_backend.get(image_backend, image_backend)
+    available_loras = get_available_loras(config.model.lora.lora_dir)
+    lora_metadata = [
+        {
+            "name": metadata.name,
+            "display_name": metadata.display_name,
+            "kind": metadata.kind,
+            "trigger": metadata.trigger,
+            "trigger_placement": metadata.trigger_placement,
+            "trigger_required": metadata.trigger_required,
+            "source": metadata.source,
+            "base_model": metadata.base_model,
+        }
+        for metadata in (get_lora_metadata(name) for name in available_loras)
+    ]
 
     return {
         "width": config.image.width,
@@ -254,6 +271,12 @@ def generation_config_payload() -> Dict[str, Any]:
         "configured_prompt_model": configured_prompt_model,
         "image_backend": image_backend,
         "image_model": image_model,
+        "resolved_image_backend": runtime_status["resolved_backend"],
+        "active_image_model": runtime_status["active_model"],
+        "active_image_model_id": runtime_status["active_model_id"],
+        "preferred_image_model": runtime_status["preferred_model"],
+        "preferred_image_model_status": runtime_status["preferred_model_status"],
+        "fallback_reason": runtime_status["fallback_reason"],
         "ollama_image_model": config.model.ollama_image_model,
         "pipeline": {
             "prompt": {
@@ -267,11 +290,18 @@ def generation_config_payload() -> Dict[str, Any]:
             },
         },
         "enabled_loras": config.model.lora.enabled_loras,
-        "available_loras": get_available_loras(config.model.lora.lora_dir),
+        "available_loras": available_loras,
+        "lora_metadata": lora_metadata,
         "lora_application_probability": config.model.lora.application_probability,
         "lora_dir": str(config.model.lora.lora_dir),
+        "entropy_level": config.plugins.entropy_level,
         "zimage_model_path": str(config.model.zimage_model_path),
         "zimage_native_available": zimage_native_source_path().exists(),
+        "mageflow_model": config.model.mageflow_model,
+        "mageflow_revision": config.model.mageflow_revision,
+        "mageflow_url": config.model.mageflow_url,
+        "mageflow_steps": config.model.mageflow_steps,
+        "mageflow_cfg": config.model.mageflow_cfg,
         "qwen_image_model": config.model.qwen_image_model,
         "qwen_prompt_magic": config.model.qwen_prompt_magic,
         "qwen_device_map": config.model.qwen_device_map,
@@ -370,6 +400,7 @@ def matches_gallery_filters(
     model: Optional[str] = None,
     prompt_family: Optional[str] = None,
     quality_flag: Optional[str] = None,
+    search: Optional[str] = None,
 ) -> bool:
     """Return whether a catalog entry matches operator review filters."""
     metadata = entry.get("metadata", {})
@@ -387,6 +418,17 @@ def matches_gallery_filters(
         else:
             flags.update(str(flag).strip() for flag in metadata_flags if str(flag).strip())
         if quality_flag not in flags:
+            return False
+    if search:
+        needle = search.strip().lower()
+        searchable = " ".join(
+            (
+                str(entry.get("path", "")),
+                str(entry.get("prompt", "")),
+                json.dumps(metadata, sort_keys=True, default=str),
+            )
+        ).lower()
+        if needle not in searchable:
             return False
     return True
 
@@ -524,6 +566,9 @@ class GenerateRequest(BaseModel):
     client_request_id: Optional[str] = Field(
         None, description="Client-provided request ID used to correlate progress events"
     )
+    config_overrides: Dict[str, Any] = Field(
+        default_factory=dict, description="Optional runtime settings to persist with the job"
+    )
 
 
 class GenerateResponse(BaseModel):
@@ -555,6 +600,9 @@ class JobCreateRequest(BaseModel):
         None, description="Client-provided request ID used to correlate progress events"
     )
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Extra job metadata")
+    config_overrides: Dict[str, Any] = Field(
+        default_factory=dict, description="Runtime settings to apply for this job"
+    )
 
 
 class PublicationUpdateRequest(BaseModel):
@@ -568,6 +616,15 @@ class EditRequest(BaseModel):
 
     prompt: str = Field(..., description="Edit prompt describing desired changes")
     strength: float = Field(0.8, ge=0.0, le=1.0, description="Edit strength (0.0 to 1.0)")
+    backend: str = Field("auto", description="Editing backend: auto, mock, or qwen")
+    source_path: Optional[str] = Field(None, description="Catalog path of the source image")
+
+
+class BulkPublicationRequest(BaseModel):
+    """Request model for applying one publication state to multiple catalog assets."""
+
+    image_paths: List[str] = Field(..., min_length=1)
+    state: str = Field(..., description="Publication state for all selected images")
 
 
 class PromptRequest(BaseModel):
@@ -599,6 +656,9 @@ class PluginInfo(BaseModel):
     enabled: bool
     description: str
     order: int
+    category: str = "context"
+    kind: str = "prompt"
+    phase: str = "prompt"
 
 
 class PluginOrderRequest(BaseModel):
@@ -634,6 +694,20 @@ class SystemStatus(BaseModel):
     active_plugins: List[str]
     gpu_available: bool
     ollama_available: bool
+    configured_backend: str
+    resolved_backend: str
+    active_backend_label: str
+    active_model: str
+    active_model_id: str
+    active_model_status: str
+    preferred_backend: str
+    preferred_model: str
+    preferred_model_id: str
+    preferred_model_status: str
+    fallback_backend: str
+    fallback_model: str
+    fallback_model_id: str
+    fallback_reason: Optional[str] = None
 
 
 # WebSocket connection manager
@@ -664,6 +738,7 @@ class ConnectionManager:
 manager = ConnectionManager()
 recent_generation_events: deque[Dict[str, Any]] = deque(maxlen=MAX_RECENT_GENERATION_EVENTS)
 generation_job_store = SQLiteGenerationJobStore(OUTPUT_DIR / ".generation_jobs.sqlite3")
+edit_job_store = SQLiteEditJobStore(OUTPUT_DIR / ".edit_jobs.sqlite3")
 generation_worker_lock = asyncio.Lock()
 
 
@@ -674,6 +749,7 @@ def record_generation_event(event: Dict[str, Any]) -> Dict[str, Any]:
         **event,
     }
     recent_generation_events.appendleft(payload)
+    write_lifecycle_event(OUTPUT_DIR / "metrics", payload)
     return payload
 
 
@@ -719,6 +795,7 @@ async def emit_generation_service_event(
             "label": event.label,
             "detail": event.detail,
             "payload": event.payload,
+            "duration_ms": event.duration_ms,
         }
     )
     if event.progress is not None:
@@ -882,6 +959,7 @@ def generation_job_from_request(
     quality_flags: Optional[List[str]] = None,
     enable_plugins: Optional[bool] = None,
     recipe_id: Optional[str] = None,
+    config_overrides: Dict[str, Any] | None = None,
 ) -> GenerationJobCreate:
     """Build a job creation payload, resolving a workflow recipe when requested."""
     merged_metadata = experiment_request_metadata(
@@ -899,6 +977,7 @@ def generation_job_from_request(
             publication_state=publication_state,
             client_request_id=client_request_id,
             metadata=merged_metadata,
+            config_overrides=dict(config_overrides or {}),
         )
 
     resolution = resolve_workflow_recipe(
@@ -909,6 +988,11 @@ def generation_job_from_request(
         metadata=merged_metadata,
     )
     payload = resolution.to_job_payload(client_request_id=client_request_id)
+    if config_overrides:
+        payload["config_overrides"] = {
+            **payload.get("config_overrides", {}),
+            **config_overrides,
+        }
     return GenerationJobCreate(**payload)
 
 
@@ -924,7 +1008,11 @@ async def prefetch_default_fallback_model() -> None:
         from huggingface_hub import snapshot_download
 
         logger.info("Prefetching small fallback model: %s", config.model.small_sd_model)
-        await asyncio.to_thread(snapshot_download, repo_id=config.model.small_sd_model)
+        await asyncio.to_thread(
+            snapshot_download,
+            repo_id=config.model.small_sd_model,
+            token=configured_hf_token(),
+        )
         logger.info("Small fallback model is ready")
     except Exception as e:
         logger.warning("Small fallback prefetch failed: %s", e)
@@ -976,7 +1064,8 @@ async def get_status():
     except Exception:
         ollama_available = False
 
-    backend_name = backend_label(config, resolve_image_backend(config))
+    runtime_status = runtime_manager.status()
+    backend_name = runtime_status["active_backend_label"]
 
     return SystemStatus(
         status="ready",
@@ -985,26 +1074,38 @@ async def get_status():
         active_plugins=[name for name, info in plugin_manager.plugins.items() if info.enabled],
         gpu_available=gpu_available,
         ollama_available=ollama_available,
+        configured_backend=runtime_status["configured_backend"],
+        resolved_backend=runtime_status["resolved_backend"],
+        active_backend_label=runtime_status["active_backend_label"],
+        active_model=runtime_status["active_model"],
+        active_model_id=runtime_status["active_model_id"],
+        active_model_status=runtime_status["active_model_status"],
+        preferred_backend=runtime_status["preferred_backend"],
+        preferred_model=runtime_status["preferred_model"],
+        preferred_model_id=runtime_status["preferred_model_id"],
+        preferred_model_status=runtime_status["preferred_model_status"],
+        fallback_backend=runtime_status["fallback_backend"],
+        fallback_model=runtime_status["fallback_model"],
+        fallback_model_id=runtime_status["fallback_model_id"],
+        fallback_reason=runtime_status["fallback_reason"],
     )
 
 
 @app.get("/api/plugins", response_model=List[PluginInfo])
 async def get_plugins():
     """Get list of available plugins and their states"""
-    plugins = []
-    sorted_plugins = sorted(
-        plugin_manager.plugins.values(), key=lambda info: (info.order, info.name)
-    )
-    for info in sorted_plugins:
-        plugins.append(
-            PluginInfo(
-                name=info.name,
-                enabled=info.enabled,
-                description=info.description,
-                order=info.order,
-            )
+    return [
+        PluginInfo(
+            name=info.name,
+            enabled=info.enabled,
+            description=info.description,
+            order=info.order,
+            category=info.category,
+            kind=info.kind,
+            phase=info.phase,
         )
-    return plugins
+        for info in plugin_manager.registry_entries()
+    ]
 
 
 @app.get("/api/models/status")
@@ -1025,7 +1126,7 @@ async def unload_model_runtime():
     return runtime_manager.unload()
 
 
-@app.post("/api/models/{model_id}/prefetch")
+@app.post("/api/models/{model_id:path}/prefetch")
 async def prefetch_model(model_id: str):
     """Prefetch alias for the existing asynchronous model download operation."""
     return await download_model(model_id)
@@ -1191,7 +1292,7 @@ async def _legacy_get_model_status():
     return {"models": models, "cache_dir": str(hf_cache_dir)}
 
 
-@app.post("/api/models/{model_id}/download")
+@app.post("/api/models/{model_id:path}/download")
 async def download_model(model_id: str):
     """Start downloading a model"""
     # URL decode the model_id
@@ -1220,15 +1321,40 @@ async def download_model(model_id: str):
 
                 # Use snapshot_download to get the entire model
                 loop = asyncio.get_event_loop()
-                if local_dir is not None:
+                download_token = configured_hf_token()
+                if resolved_model_id == config.model.mageflow_model:
+                    from urllib import request as urllib_request
+
+                    sidecar_request = urllib_request.Request(
+                        f"{config.model.mageflow_url.rstrip('/')}/download",
+                        data=b"",
+                        method="POST",
+                    )
+
+                    def download_mageflow():
+                        with urllib_request.urlopen(
+                            sidecar_request,
+                            timeout=config.model.mageflow_timeout_seconds,
+                        ) as response:
+                            return response.read()
+
+                    await loop.run_in_executor(None, download_mageflow)
+                elif local_dir is not None:
                     await loop.run_in_executor(
                         None,
-                        lambda: snapshot_download(repo_id=resolved_model_id, local_dir=local_dir),
+                        lambda: snapshot_download(
+                            repo_id=resolved_model_id,
+                            local_dir=local_dir,
+                            token=download_token,
+                        ),
                     )
                 else:
                     await loop.run_in_executor(
                         None,
-                        lambda: snapshot_download(repo_id=resolved_model_id),
+                        lambda: snapshot_download(
+                            repo_id=resolved_model_id,
+                            token=download_token,
+                        ),
                     )
 
                 logger.info(f"Download completed for model: {resolved_model_id}")
@@ -1270,7 +1396,7 @@ async def set_hf_token(token_data: dict):
     """Set HuggingFace token"""
     token = token_data.get("token", "").strip()
 
-    if not token:
+    if not token or token == HF_TOKEN_PLACEHOLDER:
         raise HTTPException(status_code=400, detail="Token is required")
 
     try:
@@ -1280,8 +1406,13 @@ async def set_hf_token(token_data: dict):
         hf_cache_dir.mkdir(parents=True, exist_ok=True)
         token_file = hf_cache_dir / "token"
 
-        with open(token_file, "w") as f:
-            f.write(token)
+        token_file.write_text(token, encoding="utf-8")
+        try:
+            token_file.chmod(0o600)
+        except OSError:
+            # Windows ACLs do not map cleanly to POSIX modes; keep the local
+            # cache behavior working while avoiding a noisy failure.
+            pass
 
         # Also set environment variable for current session
         os.environ["HF_TOKEN"] = token
@@ -1298,7 +1429,7 @@ async def set_hf_token(token_data: dict):
 async def get_hf_token_status():
     """Check if HF token is configured"""
     # Check environment variable first
-    if os.getenv("HF_TOKEN"):
+    if configured_hf_token():
         return {"configured": True, "source": "environment"}
 
     # Check token file using configured HF_HOME
@@ -1306,7 +1437,12 @@ async def get_hf_token_status():
     token_file = hf_cache_dir / "token"
 
     if token_file.exists():
-        return {"configured": True, "source": "file"}
+        try:
+            stored_token = token_file.read_text(encoding="utf-8").strip()
+        except OSError:
+            stored_token = ""
+        if stored_token and stored_token != HF_TOKEN_PLACEHOLDER:
+            return {"configured": True, "source": "file"}
 
     return {"configured": False, "source": None}
 
@@ -1314,7 +1450,7 @@ async def get_hf_token_status():
 @app.post("/api/plugins/{plugin_name}/toggle")
 async def toggle_plugin(plugin_name: str):
     """Toggle a plugin on/off"""
-    if plugin_name not in plugin_manager.plugins:
+    if plugin_name not in plugin_manager.plugins and plugin_name not in plugin_manager.guards:
         raise HTTPException(status_code=404, detail=f"Plugin '{plugin_name}' not found")
 
     current_state = plugin_manager.is_enabled(plugin_name)
@@ -1449,6 +1585,14 @@ async def set_generation_config(data: dict):
             config.model.image_backend = backend
         if "ollama_image_model" in data:
             config.model.ollama_image_model = str(data["ollama_image_model"]).strip()
+        if "mageflow_model" in data:
+            config.model.mageflow_model = (
+                str(data["mageflow_model"]).strip() or "microsoft/Mage-Flow"
+            )
+        if "mageflow_steps" in data:
+            config.model.mageflow_steps = int(data["mageflow_steps"])
+        if "mageflow_cfg" in data:
+            config.model.mageflow_cfg = float(data["mageflow_cfg"])
         if "qwen_image_model" in data:
             config.model.qwen_image_model = (
                 str(data["qwen_image_model"]).strip() or "diffusers/qwen-image-nf4"
@@ -1477,6 +1621,11 @@ async def set_generation_config(data: dict):
             if not 0.0 <= probability <= 1.0:
                 raise ValueError("lora_application_probability must be between 0.0 and 1.0")
             config.model.lora.application_probability = probability
+        if "entropy_level" in data:
+            entropy_level = str(data["entropy_level"]).strip().lower()
+            if entropy_level not in {"calm", "strange", "wild"}:
+                raise ValueError("entropy_level must be calm, strange, or wild")
+            config.plugins.entropy_level = entropy_level
 
         runtime_manager.persist_selection()
 
@@ -1580,6 +1729,7 @@ async def generate_image(request: GenerateRequest):
                 quality_flags=request.quality_flags,
                 enable_plugins=request.enable_plugins,
                 recipe_id=request.recipe_id,
+                config_overrides=request.config_overrides,
             )
         )
     except KeyError as exc:
@@ -1626,6 +1776,7 @@ async def create_generation_job(request: JobCreateRequest, background_tasks: Bac
                 prompt_family=request.prompt_family,
                 quality_flags=request.quality_flags,
                 recipe_id=request.recipe_id,
+                config_overrides=request.config_overrides,
             )
         )
     except KeyError as exc:
@@ -1672,7 +1823,44 @@ async def get_generation_job_events(job_id: str):
 async def get_generation_events(limit: int = Query(25, ge=1, le=100)):
     """Return recent generation lifecycle events for operator dashboards."""
     events = list(recent_generation_events)[:limit]
+    if not events:
+        events = read_lifecycle_events(OUTPUT_DIR / "metrics", limit)
     return {"events": events, "total": len(recent_generation_events), "limit": limit}
+
+
+@app.get("/api/generation/metrics")
+async def get_generation_metrics(limit: int = Query(500, ge=1, le=2000)):
+    """Return aggregated phase timing and outcome metrics for operator diagnostics."""
+    events = read_lifecycle_events(OUTPUT_DIR / "metrics", limit)
+    completed = [
+        event
+        for event in events
+        if event.get("name") == "generation_completed" and isinstance(event.get("payload"), dict)
+    ]
+    phase_totals: Dict[str, Dict[str, float]] = {}
+    for event in completed:
+        payload = event["payload"]
+        key = f"{payload.get('backend', 'unknown')}::{payload.get('model', 'unknown')}"
+        bucket = phase_totals.setdefault(key, {"runs": 0.0})
+        bucket["runs"] += 1
+        for phase, duration in (payload.get("phase_durations_ms") or {}).items():
+            bucket[phase] = bucket.get(phase, 0.0) + float(duration or 0)
+
+    for bucket in phase_totals.values():
+        runs = max(bucket["runs"], 1)
+        for key in list(bucket):
+            if key not in {"runs"}:
+                bucket[key] = round(bucket[key] / runs, 2)
+
+    return {
+        "events": len(events),
+        "completed_generations": len(completed),
+        "phase_averages_ms": phase_totals,
+        "otel_enabled": os.getenv("DREAMGEN_OTEL_ENABLED", "0").lower() in {"1", "true", "yes"},
+        "jsonl_path": str(
+            (OUTPUT_DIR / "metrics" / "generation_events.jsonl").relative_to(OUTPUT_DIR)
+        ),
+    }
 
 
 @app.get("/api/gallery")
@@ -1695,6 +1883,7 @@ async def get_gallery_catalog(
     model: Optional[str] = Query(None),
     prompt_family: Optional[str] = Query(None),
     quality_flag: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
     limit: int = 100,
     offset: int = 0,
 ):
@@ -1722,6 +1911,7 @@ async def get_gallery_catalog(
             model=model,
             prompt_family=prompt_family,
             quality_flag=quality_flag,
+            search=search,
         )
     ]
 
@@ -1819,6 +2009,28 @@ async def update_image_publication(image_path: str, request: PublicationUpdateRe
     return entry
 
 
+@app.post("/api/gallery/publication/bulk")
+async def bulk_update_image_publication(request: BulkPublicationRequest):
+    """Apply one publication state to a selected set of catalog entries."""
+    updated: list[dict[str, Any]] = []
+    failures: list[dict[str, str]] = []
+    for image_path in request.image_paths:
+        key = normalize_gallery_key(image_path)
+        full_path = (OUTPUT_DIR / key).resolve()
+        if not full_path.is_relative_to(OUTPUT_DIR.resolve()):
+            failures.append({"path": key, "error": "Invalid image path"})
+            continue
+        try:
+            updated.append(
+                await asyncio.to_thread(set_publication_state, OUTPUT_DIR, key, request.state)
+            )
+        except (ValueError, PermissionError, FileNotFoundError, KeyError) as exc:
+            failures.append({"path": key, "error": str(exc)})
+    if not updated and failures:
+        raise HTTPException(status_code=409, detail={"updated": [], "failures": failures})
+    return {"updated": updated, "failures": failures, "state": request.state}
+
+
 @app.delete("/api/gallery/{image_path:path}")
 async def delete_image(image_path: str):
     """Delete an image from the gallery"""
@@ -1886,66 +2098,93 @@ async def batch_generate(count: int = 5, delay: int = 0):
 
 
 @app.post("/api/edit", response_model=EditResponse)
-async def edit_image(request: EditRequest, file: UploadFile = File(...)):
-    """Edit an uploaded image using Qwen-Image-Edit"""
-    edit_id = str(uuid.uuid4())
+async def edit_image(
+    file: UploadFile = File(...),
+    prompt: str = Form(...),
+    strength: float = Form(0.8),
+    backend: str = Form("auto"),
+    source_path: Optional[str] = Form(None),
+):
+    """Run an image edit and persist source/output lineage as a durable edit job."""
+    if not 0.0 <= strength <= 1.0:
+        raise HTTPException(status_code=422, detail="strength must be between 0 and 1")
+    requested_backend = backend.strip().lower() or "auto"
+    if requested_backend not in {"auto", "mock", "qwen"}:
+        raise HTTPException(status_code=400, detail="backend must be auto, mock, or qwen")
+    resolved_backend = "mock" if requested_backend == "mock" else "qwen-image-edit"
+    image_bytes = await file.read()
+    edit_job = edit_job_store.create_job(
+        prompt=prompt,
+        strength=strength,
+        backend=resolved_backend,
+        source_path=source_path,
+        source_filename=file.filename,
+        metadata={"operation": "edit", "source_path": source_path},
+    )
+    edit_id = edit_job["id"]
+    edit_job_store.start_job(edit_id)
+    started = datetime.now().isoformat()
+    await manager.broadcast(
+        json.dumps({"type": "edit_started", "id": edit_id, "timestamp": started})
+    )
+    record_generation_event(
+        {
+            "type": "edit_lifecycle",
+            "name": "edit_started",
+            "id": edit_id,
+            "backend": resolved_backend,
+        }
+    )
 
     try:
-        # Broadcast start event
-        await manager.broadcast(
-            json.dumps(
-                {"type": "edit_started", "id": edit_id, "timestamp": datetime.now().isoformat()}
-            )
-        )
-
-        # Read uploaded file
-        image_bytes = await file.read()
-
-        # Initialize image editor
-        from src.generators.image_editor import ImageEditor
-
-        editor = ImageEditor(config)
-
-        # Broadcast editing event
-        await manager.broadcast(
-            json.dumps({"type": "editing_image", "id": edit_id, "prompt": request.prompt})
-        )
-
-        # Edit the image
-        edited_image = await editor.edit_image(image_bytes, request.prompt, request.strength)
-
-        # Save both original and edited images
         import io
 
-        original_img = Image.open(io.BytesIO(image_bytes))
-        original_path = save_image_and_prompt(
-            original_img, f"ORIGINAL: {request.prompt}", str(OUTPUT_DIR)
-        )
+        original_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        if resolved_backend == "mock":
+            digest = hashlib.sha256(prompt.encode("utf-8")).digest()
+            tint = (digest[0], digest[1], digest[2])
+            overlay = Image.new("RGB", original_img.size, tint)
+            edited_image = Image.blend(original_img, overlay, 0.12 + (strength * 0.2))
+        else:
+            from src.generators.image_editor import ImageEditor
+
+            editor = ImageEditor(config)
+            edited_image = await editor.edit_image(image_bytes, prompt, strength)
+
+        lineage = {
+            "operation": "edit",
+            "edit_job_id": edit_id,
+            "source_path": source_path,
+            "source_filename": file.filename,
+            "backend": resolved_backend,
+            "strength": strength,
+        }
+        original_path = save_image_and_prompt(original_img, f"ORIGINAL: {prompt}", str(OUTPUT_DIR))
+        edited_path = save_image_and_prompt(edited_image, f"EDITED: {prompt}", str(OUTPUT_DIR))
         register_image(
             original_path,
             OUTPUT_DIR,
-            prompt=f"ORIGINAL: {request.prompt}",
-            metadata={"operation": "edit_original"},
+            prompt=f"ORIGINAL: {prompt}",
+            metadata={**lineage, "role": "source"},
             publication_state="draft",
-        )
-
-        # Save edited
-        edited_path = save_image_and_prompt(
-            edited_image, f"EDITED: {request.prompt}", str(OUTPUT_DIR)
         )
         register_image(
             edited_path,
             OUTPUT_DIR,
-            prompt=f"EDITED: {request.prompt}",
-            metadata={"operation": "edit_result"},
+            prompt=f"EDITED: {prompt}",
+            metadata={**lineage, "role": "result"},
             publication_state="draft",
         )
 
-        # Create relative paths for API response
         original_relative = f"/images/{original_path.relative_to(OUTPUT_DIR).as_posix()}"
         edited_relative = f"/images/{edited_path.relative_to(OUTPUT_DIR).as_posix()}"
-
-        # Broadcast completion event
+        completed_metadata = {**lineage, "model": resolved_backend}
+        edit_job_store.complete_job(
+            edit_id,
+            original_path=original_relative,
+            edited_path=edited_relative,
+            metadata=completed_metadata,
+        )
         await manager.broadcast(
             json.dumps(
                 {
@@ -1953,31 +2192,46 @@ async def edit_image(request: EditRequest, file: UploadFile = File(...)):
                     "id": edit_id,
                     "original_path": original_relative,
                     "edited_path": edited_relative,
-                    "prompt": request.prompt,
+                    "prompt": prompt,
                 }
             )
         )
-
+        record_generation_event(
+            {
+                "type": "edit_lifecycle",
+                "name": "edit_completed",
+                "id": edit_id,
+                "backend": resolved_backend,
+                "payload": completed_metadata,
+            }
+        )
         return EditResponse(
             id=edit_id,
-            prompt=request.prompt,
+            prompt=prompt,
             original_path=original_relative,
             edited_path=edited_relative,
-            metadata={
-                "model": "Qwen/Qwen-Image-Edit",
-                "strength": request.strength,
-                "original_filename": file.filename,
-            },
+            metadata={**completed_metadata, "job_id": edit_id},
             created_at=datetime.now().isoformat(),
         )
+    except Exception as exc:
+        logger.error("Image edit failed: %s", exc)
+        edit_job_store.fail_job(edit_id, str(exc))
+        record_generation_event(
+            {"type": "edit_lifecycle", "name": "edit_failed", "id": edit_id, "error": str(exc)}
+        )
+        await manager.broadcast(
+            json.dumps({"type": "edit_error", "id": edit_id, "error": str(exc)})
+        )
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    except Exception as e:
-        logger.error(f"Image edit failed: {str(e)}")
 
-        # Broadcast error event
-        await manager.broadcast(json.dumps({"type": "edit_error", "id": edit_id, "error": str(e)}))
-
-        raise HTTPException(status_code=500, detail=str(e))
+@app.get("/api/edit/jobs/{job_id}")
+async def get_edit_job(job_id: str):
+    """Return persisted edit state and source/output lineage."""
+    job = edit_job_store.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Edit job not found")
+    return job
 
 
 if __name__ == "__main__":
