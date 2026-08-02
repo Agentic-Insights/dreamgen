@@ -149,6 +149,49 @@ def test_generate_accepts_workflow_recipe(tmp_path, monkeypatch):
     assert summary["metadata"]["recipe"]["version"] == 1
 
 
+def test_edit_cli_queues_supported_mage_flow_controls(monkeypatch):
+    """The CLI must use Studio's official-only queued edit contract."""
+    captured = {}
+
+    def fake_multipart(url, fields, source):
+        captured.update(url=url, fields=fields, source=source)
+        return {"id": "edit-fixture", "version": 1}
+
+    monkeypatch.setattr(cli, "_api_multipart", fake_multipart)
+    source = Path("assets/logo_mark.png").resolve()
+
+    result = runner.invoke(
+        app,
+        [
+            "edit",
+            str(source),
+            "--command",
+            "make the mark cobalt blue",
+            "--variant",
+            "turbo",
+            "--seed",
+            "17",
+            "--no-wait",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    assert "Queued Mage-Flow-Edit edit-fixture (v1)" in result.stdout
+    assert captured["url"] == "http://localhost:25800/api/edit/jobs"
+    assert captured["source"] == source
+    assert captured["fields"] == {
+        "command": "make the mark cobalt blue",
+        "variant": "turbo",
+        "seed": 17,
+        "steps": 4,
+        "guidance": 1.0,
+        "max_size": 1024,
+        "negative_prompt": "",
+        "vl_cond_long_edge": 384,
+    }
+    assert "strength" not in captured["fields"]
+
+
 @pytest.mark.asyncio
 async def test_generation_status_emits_heartbeat_for_slow_operation(monkeypatch):
     """Long-running generation should produce periodic visible waiting output."""

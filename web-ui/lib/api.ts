@@ -200,6 +200,75 @@ export interface EditResponse {
   created_at: string;
 }
 
+export interface MageEditVariant {
+  id: 'base' | 'aligned' | 'turbo';
+  label: string;
+  repository: string;
+  default_steps: number;
+  default_guidance: number;
+  verified_revision?: string | null;
+  available: boolean;
+  ready?: boolean;
+  cached?: boolean;
+  availability_reason?: string | null;
+}
+
+export interface MageEditCapabilities {
+  feature: string;
+  official_name: string;
+  source_repository: string;
+  source_revision: string;
+  license: string;
+  research_only: boolean;
+  target_hardware: string;
+  available: boolean;
+  model_loaded: boolean;
+  loaded_model_id?: string | null;
+  runtime_status?: string;
+  runtime_reason?: string | null;
+  access_note: string;
+  gpu: {
+    available: boolean;
+    name?: string | null;
+    vram_total_mb?: number | null;
+    vram_free_mb?: number | null;
+  };
+  variants: MageEditVariant[];
+}
+
+export interface MageEditJob {
+  id: string;
+  status: 'queued' | 'running' | 'cancelling' | 'cancelled' | 'succeeded' | 'failed';
+  prompt: string;
+  backend: string;
+  source_path?: string | null;
+  original_path?: string | null;
+  edited_path?: string | null;
+  root_job_id: string;
+  parent_job_id?: string | null;
+  version: number;
+  decision_state: 'pending' | 'approved' | 'rejected';
+  manifest_path?: string | null;
+  metadata: Record<string, unknown>;
+  error?: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string | null;
+}
+
+export interface CreateMageEditRequest {
+  command: string;
+  variant: MageEditVariant['id'];
+  seed: number;
+  steps: number;
+  guidance: number;
+  max_size: number;
+  negative_prompt?: string;
+  vl_cond_long_edge?: number;
+  source_path?: string;
+  parent_job_id?: string;
+}
+
 export interface PromptResponse {
   prompt: string;
 }
@@ -811,6 +880,53 @@ export class ImageGenAPI {
   async getEditJob(jobId: string): Promise<Record<string, unknown>> {
     const response = await fetch(`${this.baseUrl}/api/edit/jobs/${encodeURIComponent(jobId)}`);
     if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to get edit job'));
+    return response.json();
+  }
+
+  async getMageEditCapabilities(): Promise<MageEditCapabilities> {
+    const response = await fetch(`${this.baseUrl}/api/edit/capabilities`);
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to get edit capabilities'));
+    return response.json();
+  }
+
+  async getMageEditJobs(rootJobId?: string): Promise<{ jobs: MageEditJob[] }> {
+    const params = new URLSearchParams();
+    if (rootJobId) params.set('root_job_id', rootJobId);
+    const response = await fetch(`${this.baseUrl}/api/edit/jobs?${params.toString()}`);
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to get edit history'));
+    return response.json();
+  }
+
+  async downloadMageEditModel(variant: MageEditVariant['id']): Promise<Record<string, unknown>> {
+    const response = await fetch(`${this.baseUrl}/api/edit/models/${variant}/download`, { method: 'POST' });
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to download official edit model'));
+    return response.json();
+  }
+
+  async createMageEditJob(file: File, request: CreateMageEditRequest): Promise<MageEditJob> {
+    const formData = new FormData();
+    formData.append('file', file);
+    for (const [key, value] of Object.entries(request)) {
+      if (value !== undefined && value !== '') formData.append(key, String(value));
+    }
+    const response = await fetch(`${this.baseUrl}/api/edit/jobs`, { method: 'POST', body: formData });
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to queue edit'));
+    return response.json();
+  }
+
+  async cancelMageEditJob(jobId: string): Promise<MageEditJob> {
+    const response = await fetch(`${this.baseUrl}/api/edit/jobs/${encodeURIComponent(jobId)}/cancel`, { method: 'POST' });
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to cancel edit'));
+    return response.json();
+  }
+
+  async decideMageEditJob(jobId: string, decision: 'approved' | 'rejected' | 'pending'): Promise<MageEditJob> {
+    const response = await fetch(`${this.baseUrl}/api/edit/jobs/${encodeURIComponent(jobId)}/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision }),
+    });
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to record edit decision'));
     return response.json();
   }
 

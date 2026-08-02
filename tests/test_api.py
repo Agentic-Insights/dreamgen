@@ -3,6 +3,7 @@ Tests for the FastAPI server endpoints
 """
 
 import atexit
+import io
 import os
 import shutil
 import tempfile
@@ -47,8 +48,11 @@ os.environ["CACHE_DIR"] = "./.cache"
 os.environ["CPU_ONLY"] = "false"
 os.environ["MPS_USE_FP16"] = "false"
 
+from src.api import server as api_server
 from src.api.server import app
 from src.api.server import config as api_config
+from src.services.mage_edit_runtime import EditRuntimeResult
+from src.utils.mage_edit import capability_document
 
 
 @pytest.fixture
@@ -61,6 +65,64 @@ def test_health_check(client):
     """Test the root health check endpoint"""
     response = client.get("/")
     assert response.status_code in [200, 404]  # May return 404 if no root route
+
+
+def test_mage_edit_capabilities_are_truthfully_unavailable(client, monkeypatch):
+    monkeypatch.setattr(api_server, "probe_edit_runtime", lambda: None)
+    response = client.get("/api/edit/capabilities")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["official_name"] == "Mage-Flow-Edit"
+    assert payload["available"] is False
+    assert payload["runtime_status"] == "offline"
+    assert "strength" not in payload["controls"]
+
+
+def test_mage_edit_job_uses_official_runtime_and_persists_lineage(client, monkeypatch):
+    capabilities = capability_document()
+    capabilities["available"] = True
+    capabilities["source_revision"] = "6cefeb40e4c8ecc404ecb73732a91878939f27e0"
+    capabilities["gpu"] = {"available": True, "name": "RTX 4090", "vram_total_mb": 24576}
+    for item in capabilities["variants"]:
+        item["ready"] = item["id"] == "turbo"
+    monkeypatch.setattr(api_server, "edit_capabilities_with_runtime", lambda: capabilities)
+
+    result_buffer = io.BytesIO()
+    Image.new("RGB", (64, 64), "teal").save(result_buffer, "PNG")
+    monkeypatch.setattr(
+        api_server,
+        "run_mage_edit",
+        lambda *_args, **_kwargs: EditRuntimeResult(
+            image=result_buffer.getvalue(),
+            model="microsoft/Mage-Flow-Edit-Turbo",
+            revision="a" * 40,
+            source_revision="6cefeb40e4c8ecc404ecb73732a91878939f27e0",
+            elapsed_seconds=1.25,
+            peak_vram_mb=19800,
+        ),
+    )
+    source_buffer = io.BytesIO()
+    Image.new("RGB", (64, 64), "navy").save(source_buffer, "PNG")
+
+    created = client.post(
+        "/api/edit/jobs",
+        files={"file": ("source.png", source_buffer.getvalue(), "image/png")},
+        data={"command": "make it teal", "variant": "turbo"},
+    )
+    assert created.status_code == 202
+    job = client.get(f"/api/edit/jobs/{created.json()['id']}").json()
+
+    assert job["status"] == "succeeded"
+    assert job["metadata"]["source_sha256"]
+    assert job["metadata"]["derivative_sha256"]
+    assert job["metadata"]["hardware"]["peak_vram_mb"] == 19800
+    assert job["metadata"]["model_revision"] == "a" * 40
+    assert job["decision_state"] == "pending"
+
+    approved = client.post(f"/api/edit/jobs/{job['id']}/decision", json={"decision": "approved"})
+    assert approved.status_code == 200
+    assert approved.json()["decision_state"] == "approved"
 
 
 def test_status_endpoint(client):

@@ -70,7 +70,7 @@ export async function onRequestGet(ctx) {
 function isReleaseManifest(value) {
   return Boolean(
     value &&
-    value.schema_version === 1 &&
+    (value.schema_version === 1 || value.schema_version === 2) &&
     typeof value.release_id === 'string' &&
     Array.isArray(value.items)
   );
@@ -85,6 +85,9 @@ function buildManifestImageRecord(item, manifest) {
   const plugins = Array.isArray(metadata.plugins_used) ? metadata.plugins_used : [];
   const loras = Array.isArray(metadata.loras) ? metadata.loras : [];
   const publicationState = item.publication_state || metadata?.publication?.state || 'published';
+  const editLineage = item.edit_lineage && typeof item.edit_lineage === 'object'
+    ? item.edit_lineage
+    : (metadata.edit_lineage || null);
 
   return {
     key: item.key,
@@ -104,6 +107,10 @@ function buildManifestImageRecord(item, manifest) {
     hasCaption: Boolean(item.caption_key),
     metadataKey: item.metadata_key || null,
     metadata,
+    editLineage,
+    decisionManifestUrl: item.decision_manifest_key
+      ? versionedAssetUrl(item.decision_manifest_key, item.decision_manifest_version)
+      : null,
     backend,
     model,
     plugins,

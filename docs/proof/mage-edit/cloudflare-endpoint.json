@@ -1,0 +1,14 @@
+{
+  "checked_at": "2026-08-02T04:31:30Z",
+  "endpoint": "https://dreamgen.agenticinsights.com/api/images",
+  "http_status": 200,
+  "cloudflare_release_header": "20260731-96377d84c54dbd25",
+  "etag": "20260731-96377d84c54dbd25",
+  "image_count": 336,
+  "first_key": "2026/week_29/image_20260714_020519_474a9bca.png",
+  "first_asset_version": "1afd9fcf3f4a43a34e92",
+  "first_versioned_url": "/api/images/2026/week_29/image_20260714_020519_474a9bca.png?v=1afd9fcf3f4a43a34e92",
+  "all_records_have_release_id": true,
+  "all_records_have_versioned_url": true,
+  "note": "Read-only endpoint verification. No assets or release pointers were changed."
+}

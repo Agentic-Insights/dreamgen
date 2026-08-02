@@ -111,6 +111,18 @@ def is_placeholder_artifact(image_file: Path, metadata: dict[str, Any] | None = 
     return all(channel_min == channel_max for channel_min, channel_max in extrema)
 
 
+def edit_publishable(metadata: dict[str, Any]) -> bool:
+    """Only explicitly approved edit derivatives may enter a public release."""
+    lineage = metadata.get("edit_lineage")
+    if not isinstance(lineage, dict):
+        return True
+    if lineage.get("role") != "derivative":
+        return False
+    return lineage.get("decision_state") == "approved" and not bool(
+        lineage.get("diagnostic_fixture")
+    )
+
+
 def prompt_for(image_path: Path) -> str:
     """Read the prompt sidecar for an image when available."""
     prompt_path = image_path.with_suffix(".txt")
@@ -170,7 +182,7 @@ def build_catalog_entry(
         "publication_state": state,
         "published_at": now if state in PUBLIC_GALLERY_STATES else None,
         "publication_history": [],
-        "publishable": not placeholder,
+        "publishable": not placeholder and edit_publishable(metadata),
         "quality_flags": quality_flags,
     }
 
@@ -308,8 +320,12 @@ def set_publication_state(
 
     metadata = read_image_metadata(image_path)
     placeholder = is_placeholder_artifact(image_path, metadata)
-    if placeholder and state in PUBLIC_GALLERY_STATES:
-        raise PermissionError("Placeholder images cannot be published.")
+    if (
+        placeholder or not edit_publishable(entry.get("metadata") or {})
+    ) and state in PUBLIC_GALLERY_STATES:
+        raise PermissionError(
+            "Only explicitly approved, non-diagnostic edit derivatives can publish."
+        )
 
     previous_state = str(entry.get("publication_state", "draft"))
     changed_at = utc_now()
@@ -323,7 +339,7 @@ def set_publication_state(
         entry["published_at"] = changed_at
     elif state not in PUBLIC_GALLERY_STATES and previous_state in PUBLIC_GALLERY_STATES:
         entry["unpublished_at"] = changed_at
-    entry["publishable"] = not placeholder
+    entry["publishable"] = not placeholder and edit_publishable(entry.get("metadata") or {})
     if state in PUBLIC_GALLERY_STATES:
         flags = set(entry.get("quality_flags", []))
         flags.difference_update({"draft", "provisional"})
@@ -333,6 +349,44 @@ def set_publication_state(
         flags.add("placeholder")
         entry["quality_flags"] = sorted(flags)
     assets[key] = entry
+    save_catalog(output_dir, catalog)
+    return entry
+
+
+def set_edit_decision(
+    output_dir: Path,
+    key: str,
+    decision: str,
+    *,
+    decision_manifest_path: str | None = None,
+    decision_manifest_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Record an operator decision in the catalog without rewriting artifact provenance."""
+    if decision not in {"approved", "rejected", "pending"}:
+        raise ValueError(f"Invalid edit decision: {decision}")
+    catalog = load_catalog(output_dir)
+    entry = catalog["assets"].get(key)
+    if entry is None:
+        raise KeyError(key)
+    metadata = dict(entry.get("metadata") or {})
+    lineage = dict(metadata.get("edit_lineage") or {})
+    if lineage.get("role") != "derivative":
+        raise PermissionError("Only edit derivatives can receive an edit decision.")
+    lineage["decision_state"] = decision
+    lineage["decision_recorded_at"] = utc_now()
+    if decision_manifest_path:
+        lineage["decision_manifest_path"] = decision_manifest_path
+    if decision_manifest_sha256:
+        lineage["decision_manifest_sha256"] = decision_manifest_sha256
+    metadata["edit_lineage"] = lineage
+    entry["metadata"] = metadata
+    entry["publishable"] = edit_publishable(metadata) and not bool(
+        set(entry.get("quality_flags") or []) & PUBLICATION_BLOCKING_QUALITY_FLAGS
+    )
+    if decision == "rejected" and entry.get("publication_state") in PUBLIC_GALLERY_STATES:
+        entry["publication_state"] = "rejected"
+    entry["updated_at"] = utc_now()
+    catalog["assets"][key] = entry
     save_catalog(output_dir, catalog)
     return entry
 

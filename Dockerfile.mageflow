@@ -32,6 +32,7 @@ RUN uv venv /opt/venv \
       loguru==0.7.3 \
       "fastapi>=0.100" \
       "uvicorn[standard]>=0.23" \
+      "python-multipart>=0.0.9" \
     && uv pip install --python /opt/venv/bin/python --no-deps /opt/Mage/mage_flow
 
 WORKDIR /app

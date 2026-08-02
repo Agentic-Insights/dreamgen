@@ -4,11 +4,15 @@ Command-line interface for the continuous image generation system.
 
 import asyncio
 import json
+import mimetypes
 import os
 import shutil
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
+import uuid
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Awaitable, Iterator, Optional, TypeVar
@@ -127,6 +131,52 @@ def resolve_backend_with_overrides(
 def _valid_hf_token() -> bool:
     token = os.getenv("HF_TOKEN", "").strip()
     return bool(token and token != "your_hugging_face_token_here")
+
+
+def _api_multipart(url: str, fields: dict[str, object], source: Path) -> dict[str, object]:
+    """Submit a local image to DreamGen's provenance-preserving edit API."""
+    boundary = f"dreamgen-cli-{uuid.uuid4().hex}"
+    parts: list[bytes] = []
+    for name, value in fields.items():
+        if value is None or value == "":
+            continue
+        parts.extend(
+            [
+                f"--{boundary}\r\n".encode(),
+                f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode(),
+                str(value).encode(),
+                b"\r\n",
+            ]
+        )
+    parts.extend(
+        [
+            f"--{boundary}\r\n".encode(),
+            f'Content-Disposition: form-data; name="file"; filename="{source.name}"\r\n'.encode(),
+            f"Content-Type: {mimetypes.guess_type(source.name)[0] or 'application/octet-stream'}\r\n\r\n".encode(),
+            source.read_bytes(),
+            b"\r\n",
+            f"--{boundary}--\r\n".encode(),
+        ]
+    )
+    request = urllib.request.Request(
+        url,
+        data=b"".join(parts),
+        method="POST",
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        try:
+            parsed = json.loads(detail)
+            detail = parsed.get("detail", detail)
+            if isinstance(detail, dict):
+                detail = detail.get("message", json.dumps(detail))
+        except json.JSONDecodeError:
+            pass
+        raise RuntimeError(str(detail)) from exc
 
 
 def _requires_hf_token(model_name: str) -> bool:
@@ -646,6 +696,70 @@ def generate(
         asyncio.run(_generate())
     except KeyboardInterrupt:
         print("\nOperation cancelled by user")
+
+
+@app.command(help="Queue an immutable Microsoft Mage-Flow-Edit operation")
+def edit(
+    source: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True),
+    command: str = typer.Option(..., "--command", "-c", help="Natural-language edit command"),
+    variant: str = typer.Option("turbo", help="Official variant: base, aligned, or turbo"),
+    seed: int = typer.Option(42, min=0, max=2**31 - 1),
+    steps: Optional[int] = typer.Option(None, min=1, max=50),
+    guidance: Optional[float] = typer.Option(None, min=1.0, max=10.0),
+    max_size: int = typer.Option(1024, help="Longest output side: 512, 768, 1024, 1536, 2048"),
+    negative_prompt: str = typer.Option("", help="Optional negative prompt when CFG is above 1"),
+    api_url: str = typer.Option("http://localhost:25800", help="DreamGen backend URL"),
+    wait: bool = typer.Option(
+        True, "--wait/--no-wait", help="Wait for completion and print provenance"
+    ),
+) -> None:
+    """Use the same queued, lineage-preserving edit path as Studio."""
+    defaults = {"base": (30, 5.0), "aligned": (30, 5.0), "turbo": (4, 1.0)}
+    if variant not in defaults:
+        raise typer.BadParameter("variant must be base, aligned, or turbo")
+    if max_size not in {512, 768, 1024, 1536, 2048}:
+        raise typer.BadParameter("max-size must be 512, 768, 1024, 1536, or 2048")
+    resolved_steps, resolved_guidance = defaults[variant]
+    try:
+        job = _api_multipart(
+            f"{api_url.rstrip('/')}/api/edit/jobs",
+            {
+                "command": command,
+                "variant": variant,
+                "seed": seed,
+                "steps": steps or resolved_steps,
+                "guidance": guidance if guidance is not None else resolved_guidance,
+                "max_size": max_size,
+                "negative_prompt": negative_prompt,
+                "vl_cond_long_edge": 384,
+            },
+            source,
+        )
+        console.print(f"[cyan]Queued Mage-Flow-Edit[/cyan] {job['id']} (v{job['version']})")
+        if not wait:
+            return
+        job_url = f"{api_url.rstrip('/')}/api/edit/jobs/{job['id']}"
+        while job.get("status") in {"queued", "running", "cancelling"}:
+            time.sleep(2)
+            with urllib.request.urlopen(job_url, timeout=10) as response:
+                job = json.loads(response.read().decode("utf-8"))
+            console.print(f"[dim]{job['status']}[/dim]", end="\r")
+        if job.get("status") != "succeeded":
+            raise RuntimeError(str(job.get("error") or f"Edit ended with {job.get('status')}"))
+        console.print(
+            Panel(
+                f"Derivative: {job['edited_path']}\n"
+                f"Root: {job['root_job_id']} · version {job['version']}\n"
+                f"Decision: {job['decision_state']} (local only until approved)\n"
+                f"Model: {job['metadata'].get('model')}@{job['metadata'].get('model_revision')}\n"
+                f"Manifest: {job.get('manifest_path')}",
+                title="Mage-Flow-Edit complete",
+                border_style="green",
+            )
+        )
+    except Exception as exc:
+        console.print(f"[red]Mage-Flow-Edit unavailable or failed:[/red] {exc}")
+        raise typer.Exit(1) from exc
 
 
 @app.command(help="Run system diagnostics and troubleshooting")

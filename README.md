@@ -1,5 +1,10 @@
 # ✨ DreamGen
 
+> Microsoft Mage-Flow-Edit support is implemented as a first-class, provenance-preserving
+> local workflow but remains inference-gated while the official checkpoints are unavailable.
+> See [docs/MAGE_FLOW_EDIT.md](docs/MAGE_FLOW_EDIT.md) for exact repositories, controls,
+> license/intended-use caveats, and the current access boundary.
+
 Generate unlimited AI images locally with no subscriptions, no cloud APIs, and complete privacy. Your machine dreams with you! ✨
 
 DreamGen is an independent research and artistic hobby project for exploring

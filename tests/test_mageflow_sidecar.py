@@ -144,3 +144,41 @@ def test_unload_releases_sidecar_pipeline(sidecar, monkeypatch):
 
     assert payload == {"status": "ready", "unloaded": True, "was_loaded": True}
     assert sidecar._pipeline is None
+
+
+def test_official_edit_call_uses_only_supported_pipeline_controls(sidecar, monkeypatch):
+    observed = {}
+
+    class Pipeline:
+        def edit(self, prompts, references, **kwargs):
+            observed.update({"prompts": prompts, "references": references, **kwargs})
+            return [Image.new("RGB", (64, 64), "teal")]
+
+    monkeypatch.setenv("MAGEFLOW_EDIT_ENABLED", "true")
+    monkeypatch.setitem(sidecar.EDIT_MODELS["turbo"], "revision", "a" * 40)
+    monkeypatch.setattr(sidecar, "_load_pipeline", lambda *_args: Pipeline())
+    monkeypatch.setattr(sidecar.torch.cuda, "is_available", lambda: False)
+    source = io.BytesIO()
+    Image.new("RGB", (64, 48), "navy").save(source, "PNG")
+
+    image, metrics = sidecar._run_edit(
+        source.getvalue(),
+        command="make it teal",
+        variant="turbo",
+        seed=7,
+        steps=4,
+        guidance=1.0,
+        max_size=1024,
+        negative_prompt="",
+        vl_cond_long_edge=384,
+    )
+
+    assert Image.open(io.BytesIO(image)).size == (64, 64)
+    assert observed["prompts"] == ["make it teal"]
+    assert observed["seeds"] == [7]
+    assert observed["steps"] == 4
+    assert observed["cfg"] == 1.0
+    assert observed["max_size"] == 1024
+    assert observed["vl_cond_long_edge"] == 384
+    assert "strength" not in observed
+    assert metrics["peak_vram_mb"] is None
