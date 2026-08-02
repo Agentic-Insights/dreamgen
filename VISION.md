@@ -9,6 +9,13 @@ Treat DreamGen as an instrument for probing models, not just a button that makes
 nice pictures. It should keep moving with the best image engines that people can
 actually download and run on one high-end consumer machine.
 
+DreamGen is an independent research, artistic hobby project about machine
+"dreaming." It is not a hosted production image service. Research-only model
+guidance can therefore be compatible with the project when local use is lawful,
+the intended-use limits stay visible, and operators remain in control. Including
+a model does not imply that its authors sponsor, endorse, or are affiliated with
+DreamGen.
+
 ## Use This Lens
 
 When changing or extending DreamGen, prefer work that helps answer questions like:

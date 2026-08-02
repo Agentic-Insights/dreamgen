@@ -2,6 +2,12 @@
 
 Generate unlimited AI images locally with no subscriptions, no cloud APIs, and complete privacy. Your machine dreams with you! ✨
 
+DreamGen is an independent research and artistic hobby project for exploring
+what local image models "dream," how their behavior changes, and where their
+boundaries appear. It is not a hosted production image service. Model names and
+upstream projects are identified for reproducibility; their inclusion does not
+imply sponsorship, endorsement, or affiliation.
+
 ![Do androids dream of electric sheep?](https://host-image.agentic.workers.dev/)
 
 ## ✨ Modern Web Interface
@@ -101,6 +107,8 @@ For Z-Image review in Docker:
 For Microsoft Mage-Flow review:
 
 - read [the verified availability/runtime note](docs/MAGE_FLOW.md)
+- treat it as a local research probe consistent with Microsoft's published
+  research-only guidance, not as a production-service backend
 - use **Settings → Models** to download the pinned RL checkpoint
   `microsoft/Mage-Flow@faca09c18c1c19458e7fbc3f7bce6f7a7d4d01a9`
 - wait for both checkpoint and isolated runtime readiness

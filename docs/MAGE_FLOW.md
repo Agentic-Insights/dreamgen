@@ -20,8 +20,10 @@ images and video; Mage-Flow generates and edits images.
   instead of following a moving branch. The 4-step Turbo checkpoint remains an
   explicit speed-oriented alternative, not the default quality probe.
 - Scope: Microsoft describes the family as research-only and not intended for
-  product or service deployment. That is compatible with DreamGen's local model
-  probing purpose, but it must remain visible to operators.
+  product or service deployment. DreamGen is independently operated as a local
+  research and artistic hobby project about machine "dreaming," so that guidance
+  is compatible with this use and remains visible to operators. This integration
+  does not imply Microsoft sponsorship, endorsement, or affiliation.
 - Tested runtime: Python 3.10+, Torch 2.13, torchvision 0.28, Diffusers 0.38,
   Transformers 5.5, and CUDA. Microsoft's accelerated path uses FlashAttention;
   the isolated DreamGen runtime selects upstream's slower Torch SDPA fallback.
