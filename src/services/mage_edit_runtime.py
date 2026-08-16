@@ -48,12 +48,13 @@ def download_edit_model(variant: str, timeout: float = 3600) -> dict[str, Any]:
 
 
 def run_edit(
-    image: bytes,
-    filename: str,
+    sources: list[tuple[bytes, str]],
     settings: dict[str, Any],
     *,
     timeout: float = 900,
 ) -> EditRuntimeResult:
+    if not 1 <= len(sources) <= 3:
+        raise ValueError("Mage-Flow-Edit requires between one and three reference images")
     boundary = f"dreamgen-{uuid.uuid4().hex}"
     parts: list[bytes] = []
 
@@ -78,17 +79,18 @@ def run_edit(
         "vl_cond_long_edge",
     ):
         field(name, settings[name])
-    content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
-    parts.extend(
-        [
-            f"--{boundary}\r\n".encode(),
-            f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'.encode(),
-            f"Content-Type: {content_type}\r\n\r\n".encode(),
-            image,
-            b"\r\n",
-            f"--{boundary}--\r\n".encode(),
-        ]
-    )
+    for image, filename in sources:
+        content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        parts.extend(
+            [
+                f"--{boundary}\r\n".encode(),
+                f'Content-Disposition: form-data; name="files"; filename="{filename}"\r\n'.encode(),
+                f"Content-Type: {content_type}\r\n\r\n".encode(),
+                image,
+                b"\r\n",
+            ]
+        )
+    parts.append(f"--{boundary}--\r\n".encode())
     request = urllib.request.Request(
         f"{runtime_url()}/edit",
         data=b"".join(parts),

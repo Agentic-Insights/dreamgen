@@ -903,9 +903,12 @@ export class ImageGenAPI {
     return response.json();
   }
 
-  async createMageEditJob(file: File, request: CreateMageEditRequest): Promise<MageEditJob> {
+  async createMageEditJob(files: File[], request: CreateMageEditRequest): Promise<MageEditJob> {
+    if (files.length < 1 || files.length > 3) {
+      throw new Error('Mage-Flow-Edit requires between one and three reference images');
+    }
     const formData = new FormData();
-    formData.append('file', file);
+    for (const file of files) formData.append('files', file);
     for (const [key, value] of Object.entries(request)) {
       if (value !== undefined && value !== '') formData.append(key, String(value));
     }

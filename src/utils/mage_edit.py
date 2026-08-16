@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 OFFICIAL_SOURCE_REPOSITORY = "https://github.com/microsoft/Mage"
-OFFICIAL_SOURCE_REVISION = "6cefeb40e4c8ecc404ecb73732a91878939f27e0"
+OFFICIAL_SOURCE_REVISION = "76bec2bb3818863f470de7e867c2dc7f1d0bfd83"
 OFFICIAL_LICENSE = "MIT"
 UNVERIFIED_COMMUNITY_REPOSITORIES = (
     "mage-flow-community/Mage-Flow-Edit-Base",
@@ -88,6 +88,7 @@ def capability_document() -> dict[str, Any]:
         "gpu": {"available": False, "name": None, "vram_total_mb": None, "vram_free_mb": None},
         "controls": {
             "command": {"type": "string", "required": True},
+            "reference_images": {"type": "image", "minimum": 1, "maximum": 3},
             "seed": {"type": "integer", "minimum": 0},
             "steps": {"type": "integer", "minimum": 1, "maximum": 50},
             "guidance": {"type": "number", "minimum": 1.0, "maximum": 10.0},
@@ -105,7 +106,7 @@ def capability_document() -> dict[str, Any]:
         ],
         "variants": variants,
         "available": any(variant["available"] for variant in variants),
-        "provenance_status": "official_repositories_withdrawn",
+        "provenance_status": "official_repositories_inaccessible",
         "unverified_community_repositories": list(UNVERIFIED_COMMUNITY_REPOSITORIES),
         "access_note": (
             "The official Microsoft Hugging Face repositories currently return 404 in a "

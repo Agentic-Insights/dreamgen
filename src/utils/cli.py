@@ -133,8 +133,10 @@ def _valid_hf_token() -> bool:
     return bool(token and token != "your_hugging_face_token_here")
 
 
-def _api_multipart(url: str, fields: dict[str, object], source: Path) -> dict[str, object]:
-    """Submit a local image to DreamGen's provenance-preserving edit API."""
+def _api_multipart(
+    url: str, fields: dict[str, object], sources: Path | list[Path]
+) -> dict[str, object]:
+    """Submit one to three local images to DreamGen's edit API."""
     boundary = f"dreamgen-cli-{uuid.uuid4().hex}"
     parts: list[bytes] = []
     for name, value in fields.items():
@@ -148,16 +150,20 @@ def _api_multipart(url: str, fields: dict[str, object], source: Path) -> dict[st
                 b"\r\n",
             ]
         )
-    parts.extend(
-        [
-            f"--{boundary}\r\n".encode(),
-            f'Content-Disposition: form-data; name="file"; filename="{source.name}"\r\n'.encode(),
-            f"Content-Type: {mimetypes.guess_type(source.name)[0] or 'application/octet-stream'}\r\n\r\n".encode(),
-            source.read_bytes(),
-            b"\r\n",
-            f"--{boundary}--\r\n".encode(),
-        ]
-    )
+    resolved_sources = [sources] if isinstance(sources, Path) else list(sources)
+    if not 1 <= len(resolved_sources) <= 3:
+        raise ValueError("Mage-Flow-Edit requires between one and three source images")
+    for source in resolved_sources:
+        parts.extend(
+            [
+                f"--{boundary}\r\n".encode(),
+                f'Content-Disposition: form-data; name="files"; filename="{source.name}"\r\n'.encode(),
+                f"Content-Type: {mimetypes.guess_type(source.name)[0] or 'application/octet-stream'}\r\n\r\n".encode(),
+                source.read_bytes(),
+                b"\r\n",
+            ]
+        )
+    parts.append(f"--{boundary}--\r\n".encode())
     request = urllib.request.Request(
         url,
         data=b"".join(parts),
@@ -700,7 +706,9 @@ def generate(
 
 @app.command(help="Queue an immutable Microsoft Mage-Flow-Edit operation")
 def edit(
-    source: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True),
+    sources: list[Path] = typer.Argument(
+        ..., exists=True, dir_okay=False, readable=True, help="One to three reference images"
+    ),
     command: str = typer.Option(..., "--command", "-c", help="Natural-language edit command"),
     variant: str = typer.Option("turbo", help="Official variant: base, aligned, or turbo"),
     seed: int = typer.Option(42, min=0, max=2**31 - 1),
@@ -719,6 +727,8 @@ def edit(
         raise typer.BadParameter("variant must be base, aligned, or turbo")
     if max_size not in {512, 768, 1024, 1536, 2048}:
         raise typer.BadParameter("max-size must be 512, 768, 1024, 1536, or 2048")
+    if not 1 <= len(sources) <= 3:
+        raise typer.BadParameter("provide between one and three reference images")
     resolved_steps, resolved_guidance = defaults[variant]
     try:
         job = _api_multipart(
@@ -733,7 +743,7 @@ def edit(
                 "negative_prompt": negative_prompt,
                 "vl_cond_long_edge": 384,
             },
-            source,
+            sources,
         )
         console.print(f"[cyan]Queued Mage-Flow-Edit[/cyan] {job['id']} (v{job['version']})")
         if not wait:

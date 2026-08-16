@@ -5,6 +5,7 @@ Provides REST API and WebSocket endpoints for the Next.js frontend
 
 import asyncio
 import hashlib
+import io
 import json
 import logging
 import os
@@ -802,7 +803,7 @@ def edit_capabilities_with_runtime() -> dict[str, Any]:
     return document
 
 
-async def execute_mage_edit_job(job_id: str, source_bytes: bytes, filename: str) -> None:
+async def execute_mage_edit_job(job_id: str, sources: list[tuple[bytes, str]]) -> None:
     """Execute a queued official edit and persist an immutable derivative."""
     job = edit_job_store.start_job(job_id)
     if job.get("status") != "running":
@@ -810,7 +811,7 @@ async def execute_mage_edit_job(job_id: str, source_bytes: bytes, filename: str)
     metadata = dict(job.get("metadata") or {})
     settings = dict(metadata.get("settings") or {})
     try:
-        result = await asyncio.to_thread(run_mage_edit, source_bytes, filename, settings)
+        result = await asyncio.to_thread(run_mage_edit, sources, settings)
         if (edit_job_store.get_job(job_id) or {}).get("status") == "cancelling":
             edit_job_store.finish_cancellation(job_id)
             return
@@ -852,6 +853,8 @@ async def execute_mage_edit_job(job_id: str, source_bytes: bytes, filename: str)
                 "parent_job_id": job.get("parent_job_id"),
                 "command": job["prompt"],
                 "source_sha256": metadata.get("source_sha256"),
+                "source_sha256s": metadata.get("source_sha256s"),
+                "source_artifacts": metadata.get("source_artifacts"),
                 "derivative_sha256": derivative_sha,
                 "model": result.model,
                 "model_revision": result.revision,
@@ -2268,7 +2271,8 @@ async def download_mage_edit_model(variant: str):
 @app.post("/api/edit/jobs", status_code=202)
 async def create_mage_edit_job(
     background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
+    files: Optional[List[UploadFile]] = File(None),
+    file: Optional[UploadFile] = File(None),
     command: str = Form(...),
     variant: str = Form("turbo"),
     seed: int = Form(42),
@@ -2311,18 +2315,46 @@ async def create_mage_edit_job(
     if not 0 <= seed <= 2**31 - 1:
         raise HTTPException(status_code=422, detail="seed must be between 0 and 2147483647")
 
-    image_bytes = await file.read()
+    references = list(files or [])
+    if file is not None:
+        references.insert(0, file)
+    if not 1 <= len(references) <= 3:
+        raise HTTPException(
+            status_code=422,
+            detail="Mage-Flow-Edit supports between one and three reference images",
+        )
+    source_payloads = [
+        (await reference.read(), reference.filename or f"reference-{index + 1}.png")
+        for index, reference in enumerate(references)
+    ]
+    try:
+        for content, _filename in source_payloads:
+            with Image.open(io.BytesIO(content)) as candidate:
+                candidate.verify()
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid source image: {exc}") from exc
+
     parent = edit_job_store.get_job(parent_job_id) if parent_job_id else None
     if parent_job_id and (not parent or parent.get("status") != "succeeded"):
         raise HTTPException(status_code=422, detail="parent_job_id must reference a succeeded edit")
     job_id = str(uuid.uuid4())
     root_id = str(parent["root_job_id"]) if parent else job_id
     version = max((job["version"] for job in edit_job_store.list_jobs(root_id)), default=0) + 1
-    try:
-        source_file, source_sha = persist_source(OUTPUT_DIR, root_id, image_bytes)
-    except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"Invalid source image: {exc}") from exc
-    source_url = f"/images/{source_file.relative_to(OUTPUT_DIR).as_posix()}"
+    source_artifacts = []
+    for index, (content, filename) in enumerate(source_payloads):
+        source_file, source_sha = persist_source(OUTPUT_DIR, root_id, content)
+        source_artifacts.append(
+            {
+                "index": index,
+                "role": "primary" if index == 0 else "reference",
+                "path": f"/images/{source_file.relative_to(OUTPUT_DIR).as_posix()}",
+                "sha256": source_sha,
+                "original_filename": filename,
+                "catalog_path": source_path if index == 0 else None,
+            }
+        )
+    source_url = str(source_artifacts[0]["path"])
+    source_sha = str(source_artifacts[0]["sha256"])
     settings = {
         "command": command,
         "variant": variant,
@@ -2337,6 +2369,8 @@ async def create_mage_edit_job(
         "operation": "mage-flow-edit",
         "source_catalog_path": source_path,
         "source_sha256": source_sha,
+        "source_sha256s": [artifact["sha256"] for artifact in source_artifacts],
+        "source_artifacts": source_artifacts,
         "settings": settings,
         "model": descriptor["repository"],
         "model_revision": descriptor["verified_revision"],
@@ -2361,6 +2395,8 @@ async def create_mage_edit_job(
             "root_job_id": root_id,
             "parent_job_id": parent_job_id,
             "source_sha256": source_sha,
+            "source_sha256s": [artifact["sha256"] for artifact in source_artifacts],
+            "source_artifacts": source_artifacts,
             "source_path": source_url,
             "command": command,
             "model": descriptor["repository"],
@@ -2373,28 +2409,35 @@ async def create_mage_edit_job(
     )
     metadata["source_manifest_path"] = str(source_manifest_path)
     metadata["source_manifest_sha256"] = source_manifest_sha
-    register_image(
-        source_file,
-        OUTPUT_DIR,
-        prompt=f"SOURCE for: {command}",
-        metadata=metadata,
-        publication_state="draft",
-    )
+    for artifact in source_artifacts:
+        artifact_path = OUTPUT_DIR / str(artifact["path"]).removeprefix("/images/")
+        register_image(
+            artifact_path,
+            OUTPUT_DIR,
+            prompt=f"SOURCE {int(artifact['index']) + 1} for: {command}",
+            metadata={
+                **metadata,
+                "source_index": artifact["index"],
+                "edit_lineage": {
+                    **metadata["edit_lineage"],
+                    "source_index": artifact["index"],
+                },
+            },
+            publication_state="draft",
+        )
     job = edit_job_store.create_job(
         job_id=job_id,
         prompt=command,
         strength=0.0,
         backend="mage-flow-edit",
         source_path=source_url,
-        source_filename=file.filename,
+        source_filename=str(source_artifacts[0]["original_filename"]),
         metadata=metadata,
         root_job_id=root_id,
         parent_job_id=parent_job_id,
         version=version,
     )
-    background_tasks.add_task(
-        execute_mage_edit_job, job_id, image_bytes, file.filename or "source.png"
-    )
+    background_tasks.add_task(execute_mage_edit_job, job_id, source_payloads)
     return job
 
 
@@ -2413,6 +2456,12 @@ async def decide_edit_job(job_id: str, request: EditDecisionRequest):
         raise HTTPException(status_code=404, detail="Edit job not found")
     if job.get("status") != "succeeded" or not job.get("edited_path"):
         raise HTTPException(status_code=409, detail="Only succeeded derivatives can be decided")
+    edit_lineage = job.get("metadata", {}).get("edit_lineage", {})
+    if edit_lineage.get("diagnostic_fixture"):
+        raise HTTPException(
+            status_code=409,
+            detail="Diagnostic fixtures cannot be approved or rejected",
+        )
     key = str(job["edited_path"]).removeprefix("/images/")
     manifest_path, manifest_sha = append_manifest(
         OUTPUT_DIR,

@@ -886,7 +886,7 @@ export default function Home() {
 
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <div className="border-b border-border/70 bg-muted/20 lg:hidden">
-            <div className="flex gap-2 overflow-x-auto px-3 py-2">
+            <div className="grid grid-cols-4 gap-1 px-2 py-2 sm:flex sm:gap-2 sm:overflow-x-auto sm:px-3">
               {tabs.map((tab) => {
                 const Icon = tab.icon;
                 return (
@@ -894,7 +894,7 @@ export default function Home() {
                     key={tab.id}
                     onClick={() => selectTab(tab.id)}
                     className={cn(
-                      "flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition whitespace-nowrap",
+                      "flex min-w-0 flex-col items-center gap-1 rounded-lg border px-1 py-2 text-[11px] transition whitespace-nowrap sm:flex-row sm:gap-2 sm:px-3 sm:text-sm",
                       activeTab === tab.id
                         ? "border-primary/40 bg-primary/12 text-foreground"
                         : "border-transparent text-muted-foreground hover:border-border/60 hover:bg-card/40 hover:text-foreground"

@@ -35,7 +35,12 @@ def test_capabilities_use_only_official_models_and_no_strength(monkeypatch):
     assert [item["default_steps"] for item in document["variants"]] == [30, 30, 4]
     assert "strength" not in document["controls"]
     assert document["unsupported_controls"] == ["strength"]
-    assert document["provenance_status"] == "official_repositories_withdrawn"
+    assert document["provenance_status"] == "official_repositories_inaccessible"
+    assert document["controls"]["reference_images"] == {
+        "type": "image",
+        "minimum": 1,
+        "maximum": 3,
+    }
     assert document["unverified_community_repositories"] == [
         "mage-flow-community/Mage-Flow-Edit-Base",
         "mage-flow-community/Mage-Flow-Edit",

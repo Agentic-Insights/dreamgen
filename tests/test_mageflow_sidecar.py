@@ -160,9 +160,11 @@ def test_official_edit_call_uses_only_supported_pipeline_controls(sidecar, monke
     monkeypatch.setattr(sidecar.torch.cuda, "is_available", lambda: False)
     source = io.BytesIO()
     Image.new("RGB", (64, 48), "navy").save(source, "PNG")
+    second = io.BytesIO()
+    Image.new("RGB", (32, 32), "gold").save(second, "PNG")
 
     image, metrics = sidecar._run_edit(
-        source.getvalue(),
+        [source.getvalue(), second.getvalue()],
         command="make it teal",
         variant="turbo",
         seed=7,
@@ -175,6 +177,9 @@ def test_official_edit_call_uses_only_supported_pipeline_controls(sidecar, monke
 
     assert Image.open(io.BytesIO(image)).size == (64, 64)
     assert observed["prompts"] == ["make it teal"]
+    assert len(observed["references"]) == 1
+    assert len(observed["references"][0]) == 2
+    assert all(isinstance(item, Image.Image) for item in observed["references"][0])
     assert observed["seeds"] == [7]
     assert observed["steps"] == 4
     assert observed["cfg"] == 1.0
@@ -182,3 +187,20 @@ def test_official_edit_call_uses_only_supported_pipeline_controls(sidecar, monke
     assert observed["vl_cond_long_edge"] == 384
     assert "strength" not in observed
     assert metrics["peak_vram_mb"] is None
+
+
+def test_official_edit_rejects_more_than_three_references(sidecar):
+    with pytest.raises(HTTPException) as exc_info:
+        sidecar._run_edit(
+            [b"not-read"] * 4,
+            command="combine them",
+            variant="turbo",
+            seed=7,
+            steps=4,
+            guidance=1.0,
+            max_size=1024,
+            negative_prompt="",
+            vl_cond_long_edge=384,
+        )
+
+    assert exc_info.value.status_code == 422

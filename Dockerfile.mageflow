@@ -4,7 +4,7 @@
 # DreamGen's main backend environment so existing generators retain their lock.
 FROM ghcr.io/astral-sh/uv:0.5.14-python3.11-bookworm-slim
 
-ARG MAGEFLOW_SOURCE_SHA=6cefeb40e4c8ecc404ecb73732a91878939f27e0
+ARG MAGEFLOW_SOURCE_SHA=76bec2bb3818863f470de7e867c2dc7f1d0bfd83
 
 RUN apt-get update && apt-get install -y \
     build-essential \

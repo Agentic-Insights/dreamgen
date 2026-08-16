@@ -96,7 +96,7 @@ def test_mage_edit_capabilities_are_truthfully_unavailable(client, monkeypatch):
 def test_mage_edit_job_uses_official_runtime_and_persists_lineage(client, monkeypatch):
     capabilities = capability_document()
     capabilities["available"] = True
-    capabilities["source_revision"] = "6cefeb40e4c8ecc404ecb73732a91878939f27e0"
+    capabilities["source_revision"] = "76bec2bb3818863f470de7e867c2dc7f1d0bfd83"
     capabilities["gpu"] = {"available": True, "name": "RTX 4090", "vram_total_mb": 24576}
     for item in capabilities["variants"]:
         item["ready"] = item["id"] == "turbo"
@@ -104,24 +104,31 @@ def test_mage_edit_job_uses_official_runtime_and_persists_lineage(client, monkey
 
     result_buffer = io.BytesIO()
     Image.new("RGB", (64, 64), "teal").save(result_buffer, "PNG")
-    monkeypatch.setattr(
-        api_server,
-        "run_mage_edit",
-        lambda *_args, **_kwargs: EditRuntimeResult(
+    observed = {}
+
+    def fake_run_mage_edit(sources, _settings):
+        observed["sources"] = sources
+        return EditRuntimeResult(
             image=result_buffer.getvalue(),
             model="microsoft/Mage-Flow-Edit-Turbo",
             revision="a" * 40,
-            source_revision="6cefeb40e4c8ecc404ecb73732a91878939f27e0",
+            source_revision="76bec2bb3818863f470de7e867c2dc7f1d0bfd83",
             elapsed_seconds=1.25,
             peak_vram_mb=19800,
-        ),
-    )
+        )
+
+    monkeypatch.setattr(api_server, "run_mage_edit", fake_run_mage_edit)
     source_buffer = io.BytesIO()
     Image.new("RGB", (64, 64), "navy").save(source_buffer, "PNG")
+    reference_buffer = io.BytesIO()
+    Image.new("RGB", (48, 48), "gold").save(reference_buffer, "PNG")
 
     created = client.post(
         "/api/edit/jobs",
-        files={"file": ("source.png", source_buffer.getvalue(), "image/png")},
+        files=[
+            ("files", ("source.png", source_buffer.getvalue(), "image/png")),
+            ("files", ("reference.png", reference_buffer.getvalue(), "image/png")),
+        ],
         data={"command": "make it teal", "variant": "turbo"},
     )
     assert created.status_code == 202
@@ -129,6 +136,12 @@ def test_mage_edit_job_uses_official_runtime_and_persists_lineage(client, monkey
 
     assert job["status"] == "succeeded"
     assert job["metadata"]["source_sha256"]
+    assert len(job["metadata"]["source_sha256s"]) == 2
+    assert [item["role"] for item in job["metadata"]["source_artifacts"]] == [
+        "primary",
+        "reference",
+    ]
+    assert len(observed["sources"]) == 2
     assert job["metadata"]["derivative_sha256"]
     assert job["metadata"]["hardware"]["peak_vram_mb"] == 19800
     assert job["metadata"]["model_revision"] == "a" * 40
@@ -137,6 +150,50 @@ def test_mage_edit_job_uses_official_runtime_and_persists_lineage(client, monkey
     approved = client.post(f"/api/edit/jobs/{job['id']}/decision", json={"decision": "approved"})
     assert approved.status_code == 200
     assert approved.json()["decision_state"] == "approved"
+
+
+def test_mage_edit_job_rejects_more_than_three_references(client, monkeypatch):
+    capabilities = capability_document()
+    capabilities["available"] = True
+    for item in capabilities["variants"]:
+        item["ready"] = item["id"] == "turbo"
+    monkeypatch.setattr(api_server, "edit_capabilities_with_runtime", lambda: capabilities)
+    source = io.BytesIO()
+    Image.new("RGB", (16, 16), "navy").save(source, "PNG")
+
+    response = client.post(
+        "/api/edit/jobs",
+        files=[
+            ("files", (f"source-{index}.png", source.getvalue(), "image/png")) for index in range(4)
+        ],
+        data={"command": "combine them", "variant": "turbo"},
+    )
+
+    assert response.status_code == 422
+    assert "one and three" in response.json()["detail"]
+
+
+def test_diagnostic_edit_fixture_cannot_be_decided(client):
+    source = io.BytesIO()
+    Image.new("RGB", (16, 16), "navy").save(source, "PNG")
+    created = client.post(
+        "/api/edit",
+        files={"file": ("source.png", source.getvalue(), "image/png")},
+        data={
+            "prompt": "diagnostic tint",
+            "backend": "mock",
+            "strength": "0.5",
+        },
+    )
+
+    assert created.status_code == 200
+    response = client.post(
+        f"/api/edit/jobs/{created.json()['id']}/decision",
+        json={"decision": "approved"},
+    )
+
+    assert response.status_code == 409
+    assert "Diagnostic fixtures" in response.json()["detail"]
 
 
 def test_status_endpoint(client):
@@ -152,7 +209,8 @@ def test_status_endpoint(client):
     assert data["active_model_id"]
     assert data["preferred_model"] == "Microsoft Mage-Flow"
     assert data["preferred_model_status"] in {"ready", "partial", "not_downloaded"}
-    assert data["fallback_model"] == "Small Stable Diffusion"
+    assert data["fallback_model"]
+    assert data["fallback_model_id"]
     assert data["backend"] in [
         "mock",
         "smoke-test",

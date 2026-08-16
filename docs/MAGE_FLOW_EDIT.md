@@ -7,7 +7,7 @@ mirror, or fixture as Mage-Flow-Edit.
 ## Pinned primary source
 
 - Implementation: `https://github.com/microsoft/Mage`
-- Reviewed source commit: `6cefeb40e4c8ecc404ecb73732a91878939f27e0`
+- Reviewed source commit: `76bec2bb3818863f470de7e867c2dc7f1d0bfd83`
 - Source license and Mage-Flow license declared by Microsoft: MIT
 - Intended-use caveat: Microsoft's README says the models are for research purposes,
   are not intended for product/service deployment, and require human oversight and
@@ -28,7 +28,7 @@ at 30 steps. A generic parameter note in the same source says “RL 20”; that 
 appears for the text-to-image RL model. DreamGen follows the edit-specific table and
 benchmark and keeps the user free to change steps.
 
-## Availability boundary (rechecked 2026-08-02)
+## Availability boundary (rechecked 2026-08-16)
 
 Anonymous Hugging Face API, resolve, and git requests return HTTP 401. A clean run with
 the current available `huggingface_hub` CLI (0.35.0) produces the same result, and the
@@ -40,10 +40,13 @@ The credential-free audit is recorded in
 `docs/proof/mage-edit/huggingface-access-audit.json`.
 
 This distinguishes the current state from an ordinary license gate: the repositories
-are withdrawn, private, or otherwise unavailable to this account. Therefore DreamGen
-ships edit inference disabled. Full official checkpoint commit SHAs and file hashes are
-intentionally blank; abbreviated search-index revisions and community copies are not
-accepted as proof.
+are withdrawn, private, or otherwise unavailable to this account. Search indexes
+captured a short-lived Microsoft publication in early August, including verified commit
+pages, but current API, resolve, signed-in browser, and collection state no longer expose
+those repositories. Stale indexed pages are not a download or provenance authority.
+Therefore DreamGen ships edit inference disabled. Full official checkpoint HEADs and
+complete current inventories remain intentionally blank; abbreviated or stale indexed
+revisions and community copies are not accepted as activation proof.
 
 Exact recovery action: Microsoft must restore/publicize the three repositories, or the
 operator must use a Hugging Face account that Microsoft has explicitly granted access.
@@ -51,7 +54,7 @@ Then run `hf auth login` in the local terminal, verify each official repository 
 pin its full 40-character commit SHA in the corresponding `MAGEFLOW_EDIT_*_REVISION`
 variable, and set `MAGEFLOW_EDIT_ENABLED=true`. Never paste a token into logs or source.
 
-### `mage-flow-community` provenance lead (rechecked 2026-08-02)
+### `mage-flow-community` provenance lead (rechecked 2026-08-16)
 
 The public `mage-flow-community` organization is a useful preservation lead, but it is
 not currently defensible as Microsoft's authorized or canonical continuation:
@@ -67,10 +70,10 @@ not currently defensible as Microsoft's authorized or canonical continuation:
 - the copied cards do not name `mage-flow-community`; they still link every model and
   usage example to the withdrawn `microsoft/Mage-Flow*` repositories;
 - Microsoft's current source HEAD
-  `8c94a0ac905167f40b05b09332b78752b7f9fbef` contains no community-namespace reference
-  and still defaults to the Microsoft repositories; compared with DreamGen's pinned
-  `6cefeb40e4c8ecc404ecb73732a91878939f27e0`, the intervening changes do not touch
-  `mage_flow/`;
+  `76bec2bb3818863f470de7e867c2dc7f1d0bfd83` contains no community-namespace reference
+  and still defaults to the Microsoft repositories; compared with DreamGen's previous
+  `6cefeb40e4c8ecc404ecb73732a91878939f27e0` pin, the intervening changes do not alter
+  runtime code;
 - Microsoft's live Mage collection now contains only Mage-VL and Mage-ViT.
 
 The community weights are public, ungated, internally complete according to their own
@@ -87,11 +90,13 @@ checkpoint home, or restoration of the canonical Microsoft repositories.
 
 ## Supported operation
 
-The official API accepts one natural-language instruction plus one or more reference
-images and returns one edited image. It was trained with up to three references, though
-the implementation accepts more. Supported categories include semantic/local content
-editing; subject, scene, and camera transformations; appearance and artistic changes;
-conditional reconstruction/restoration; and multi-reference composition.
+The official API accepts one natural-language instruction plus one to three reference
+images and returns one edited image. Studio, API, and CLI enforce Microsoft's trained
+range even though the upstream implementation accepts more. The output aspect ratio
+follows the primary reference. Retry reuses the complete reference set; branch-from-result
+starts a new single-primary iteration. Supported categories include semantic/local
+content editing; subject, scene, and camera transformations; appearance and artistic
+changes; conditional reconstruction/restoration; and multi-reference composition.
 
 DreamGen exposes only official parameters: command, seed, steps, CFG, maximum output
 side (512–2048), optional negative prompt, and the 384-pixel visual-language condition
@@ -115,11 +120,11 @@ revision is configured and cached. Turbo and aligned must both be benchmarked on
 
 ## Immutable lineage and publication
 
-Each session writes a content-addressed normalized source under
+Each session writes every reference as a content-addressed normalized source under
 `output/edits/<root>/source`, version-addressed derivatives under `versions`, and
 append-only hash-linked creation/decision manifests under `manifests`. Jobs retain the
-command, source/derivative SHA-256, official model and revisions, settings, parent/root
-IDs, version, timing, GPU/VRAM evidence, and decision.
+command, ordered source paths and SHA-256 hashes, derivative SHA-256, official model and
+revisions, settings, parent/root IDs, version, timing, GPU/VRAM evidence, and decision.
 
 Edit sources and pending/rejected derivatives are not publishable. Approval is a
 separate immutable decision record. Only an approved, non-diagnostic derivative can be

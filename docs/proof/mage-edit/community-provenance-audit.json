@@ -1,21 +1,23 @@
 {
   "schema_version": 1,
   "checked_at": "2026-08-02T13:47:21.1092904Z",
+  "rechecked_at": "2026-08-16T21:33:43Z",
   "lead": "https://huggingface.co/mage-flow-community",
   "decision": "not_accepted_as_canonical",
   "decision_reason": "The public repositories are internally complete according to their own manifests and are labeled as Hugging Face duplicates, but the inaccessible Microsoft weights prevent an independent equality check and no primary source provides an explicit authorized-transfer statement.",
   "canonical_source": {
     "repository": "https://github.com/microsoft/Mage",
     "dreamgen_pinned_revision": "6cefeb40e4c8ecc404ecb73732a91878939f27e0",
-    "current_revision": "8c94a0ac905167f40b05b09332b78752b7f9fbef",
+    "current_revision": "76bec2bb3818863f470de7e867c2dc7f1d0bfd83",
     "comparison": {
-      "ahead_by": 2,
+      "ahead_by": 3,
       "changed_paths": [
         "README.md",
         "assets/mage_vl_tech_report.pdf",
+        "mage_flow/README.md",
         "mage_vl/README.md"
       ],
-      "mage_flow_changed": false
+      "mage_flow_runtime_code_changed": false
     },
     "community_namespace_mentions": 0,
     "checkpoint_namespace_still_documented": "microsoft/Mage-Flow*",
@@ -45,6 +47,12 @@
       "microsoft/Mage-VL",
       "microsoft/Mage-ViT"
     ]
+  },
+  "community_live_recheck": {
+    "repositories_public_and_ungated": true,
+    "repository_revisions_unchanged": true,
+    "repository_file_count_each": 43,
+    "authorization_statement_found": false
   },
   "community_repositories": [
     {

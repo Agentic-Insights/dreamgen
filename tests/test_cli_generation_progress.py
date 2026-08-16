@@ -159,12 +159,14 @@ def test_edit_cli_queues_supported_mage_flow_controls(monkeypatch):
 
     monkeypatch.setattr(cli, "_api_multipart", fake_multipart)
     source = Path("assets/logo_mark.png").resolve()
+    reference = Path("assets/agentic-insights-logo.png").resolve()
 
     result = runner.invoke(
         app,
         [
             "edit",
             str(source),
+            str(reference),
             "--command",
             "make the mark cobalt blue",
             "--variant",
@@ -178,7 +180,7 @@ def test_edit_cli_queues_supported_mage_flow_controls(monkeypatch):
     assert result.exit_code == 0, result.stdout
     assert "Queued Mage-Flow-Edit edit-fixture (v1)" in result.stdout
     assert captured["url"] == "http://localhost:25800/api/edit/jobs"
-    assert captured["source"] == source
+    assert captured["source"] == [source, reference]
     assert captured["fields"] == {
         "command": "make the mark cobalt blue",
         "variant": "turbo",

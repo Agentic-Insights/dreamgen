@@ -33,9 +33,9 @@ export default function EditWorkspace({ initialSource, onSourceConsumed }: EditW
   const [capabilities, setCapabilities] = useState<MageEditCapabilities | null>(null);
   const [jobs, setJobs] = useState<MageEditJob[]>([]);
   const [selectedJob, setSelectedJob] = useState<MageEditJob | null>(null);
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [source, setSource] = useState<EditSource | null>(initialSource ?? null);
-  const [preview, setPreview] = useState(initialSource?.imageUrl ?? "");
+  const [previews, setPreviews] = useState<string[]>(initialSource ? [initialSource.imageUrl] : []);
   const [command, setCommand] = useState("");
   const [variant, setVariant] = useState<MageEditVariant["id"]>("turbo");
   const [seed, setSeed] = useState(42);
@@ -74,26 +74,34 @@ export default function EditWorkspace({ initialSource, onSourceConsumed }: EditW
   useEffect(() => {
     if (!initialSource) return;
     setSource(initialSource);
-    setPreview(initialSource.imageUrl);
-    setFile(null);
+    setPreviews([initialSource.imageUrl]);
+    setFiles([]);
     setSelectedJob(null);
     onSourceConsumed?.();
   }, [initialSource, onSourceConsumed]);
   useEffect(() => () => {
-    if (preview.startsWith("blob:")) URL.revokeObjectURL(preview);
-  }, [preview]);
+    previews.filter((preview) => preview.startsWith("blob:")).forEach(URL.revokeObjectURL);
+  }, [previews]);
 
   const selectedVariant = useMemo(
     () => capabilities?.variants.find((item) => item.id === variant),
     [capabilities, variant]
   );
   const resultUrl = imageUrl(selectedJob?.edited_path);
-  const sourceUrl = imageUrl(selectedJob?.original_path || preview || source?.imageUrl);
+  const sourceUrl = imageUrl(selectedJob?.original_path || previews[0] || source?.imageUrl);
   const activeJobs = jobs.filter((job) => ["queued", "running", "cancelling"].includes(job.status));
   const activeJob = activeJobs.find((job) => job.status === "running" || job.status === "cancelling") ?? activeJobs[0];
   const queuedCount = activeJobs.filter((job) => job.status === "queued").length;
   const runningCount = activeJobs.filter((job) => job.status === "running" || job.status === "cancelling").length;
-  const diagnosticJob = selectedJob && selectedJob.backend !== "mage-flow-edit";
+  const selectedLineage = selectedJob?.metadata.edit_lineage;
+  const diagnosticJob = Boolean(selectedJob && (
+    selectedJob.backend !== "mage-flow-edit"
+    || (
+      typeof selectedLineage === "object"
+      && selectedLineage !== null
+      && (selectedLineage as Record<string, unknown>).diagnostic_fixture === true
+    )
+  ));
 
   const chooseVariant = (id: MageEditVariant["id"]) => {
     const next = capabilities?.variants.find((item) => item.id === id);
@@ -117,32 +125,46 @@ export default function EditWorkspace({ initialSource, onSourceConsumed }: EditW
     }
   };
 
-  const chooseFile = (next: File) => {
-    if (preview.startsWith("blob:")) URL.revokeObjectURL(preview);
-    setFile(next);
+  const chooseFiles = (next: File[]) => {
+    if (!next.length || next.length > 3 || next.some((item) => !item.type.startsWith("image/"))) {
+      setError("Choose between one and three supported image files.");
+      return;
+    }
+    setFiles(next);
     setSource(null);
-    setPreview(URL.createObjectURL(next));
+    setPreviews(next.map((item) => URL.createObjectURL(item)));
     setSelectedJob(null);
     setError(null);
   };
 
-  const resolveFile = async (preferredUrl = sourceUrl) => {
-    if (file && preferredUrl === sourceUrl) return file;
-    if (!preferredUrl) throw new Error("Choose a source image first.");
-    const response = await fetch(preferredUrl);
-    if (!response.ok) throw new Error("Could not read the selected local source image.");
-    const blob = await response.blob();
-    return new File([blob], "dreamgen-edit-source.png", { type: blob.type || "image/png" });
+  const jobSourceUrls = (job?: MageEditJob | null) => {
+    const artifacts = job?.metadata?.source_artifacts;
+    if (!Array.isArray(artifacts)) return job?.original_path ? [imageUrl(job.original_path)] : [];
+    return artifacts.flatMap((artifact) => {
+      if (!artifact || typeof artifact !== "object" || !("path" in artifact)) return [];
+      return typeof artifact.path === "string" ? [imageUrl(artifact.path)] : [];
+    });
   };
 
-  const queueEdit = async (parent?: MageEditJob | null, preferredUrl?: string) => {
+  const resolveFiles = async (preferredUrls: string[] = sourceUrl ? [sourceUrl] : []) => {
+    if (files.length && preferredUrls.length <= 1 && preferredUrls[0] === sourceUrl) return files;
+    if (!preferredUrls.length) throw new Error("Choose at least one source image first.");
+    return Promise.all(preferredUrls.map(async (preferredUrl, index) => {
+      const response = await fetch(preferredUrl);
+      if (!response.ok) throw new Error("Could not read a selected local source image.");
+      const blob = await response.blob();
+      return new File([blob], `dreamgen-edit-source-${index + 1}.png`, { type: blob.type || "image/png" });
+    }));
+  };
+
+  const queueEdit = async (parent?: MageEditJob | null, preferredUrls?: string[]) => {
     if (!command.trim()) return setError("Describe the change you want to make.");
     if (!selectedVariant?.ready) return setError("This official checkpoint is not ready locally.");
     setSubmitting(true);
     setError(null);
     try {
-      const sourceFile = await resolveFile(preferredUrl);
-      const job = await api.createMageEditJob(sourceFile, {
+      const sourceFiles = await resolveFiles(preferredUrls);
+      const job = await api.createMageEditJob(sourceFiles, {
         command: command.trim(), variant, seed, steps, guidance, max_size: maxSize,
         negative_prompt: negativePrompt, vl_cond_long_edge: 384,
         source_path: source?.sourcePath, parent_job_id: parent?.id,
@@ -179,8 +201,8 @@ export default function EditWorkspace({ initialSource, onSourceConsumed }: EditW
   const branch = () => {
     if (!selectedJob?.edited_path) return;
     setSource({ imageUrl: selectedJob.edited_path, parentJobId: selectedJob.id });
-    setPreview(selectedJob.edited_path);
-    setFile(null);
+    setPreviews([selectedJob.edited_path]);
+    setFiles([]);
     setCommand("");
     setSelectedJob(null);
   };
@@ -219,10 +241,14 @@ export default function EditWorkspace({ initialSource, onSourceConsumed }: EditW
         <div className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)_300px]">
           <section className="space-y-4 rounded-xl border border-border/70 bg-card/75 p-4">
             <div className="flex items-center justify-between"><h2 className="font-semibold">1 · Source & command</h2><span className="text-xs text-muted-foreground">original stays immutable</span></div>
-            <button type="button" onClick={() => fileInput.current?.click()} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const dropped = event.dataTransfer.files?.[0]; if (dropped?.type.startsWith("image/")) chooseFile(dropped); else setError("Drop a supported image file."); }} className="flex min-h-36 w-full items-center justify-center overflow-hidden rounded-xl border border-dashed border-primary/40 bg-background/60">
-              {preview ? <img src={imageUrl(preview)} alt="Edit source" className="max-h-56 w-full object-contain" /> : <span className="flex flex-col items-center gap-2 text-sm text-muted-foreground"><ImagePlus className="h-7 w-7" />Choose or drop a local image</span>}
+            <button type="button" onClick={() => fileInput.current?.click()} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); chooseFiles(Array.from(event.dataTransfer.files)); }} className="flex min-h-36 w-full items-center justify-center overflow-hidden rounded-xl border border-dashed border-primary/40 bg-background/60">
+              {previews[0] ? <img src={imageUrl(previews[0])} alt="Primary edit source" className="max-h-56 w-full object-contain" /> : <span className="flex flex-col items-center gap-2 text-sm text-muted-foreground"><ImagePlus className="h-7 w-7" />Choose or drop 1–3 local images</span>}
             </button>
-            <input ref={fileInput} className="hidden" type="file" accept="image/*" onChange={(event) => event.target.files?.[0] && chooseFile(event.target.files[0])} />
+            <input ref={fileInput} className="hidden" type="file" accept="image/*" multiple onChange={(event) => chooseFiles(Array.from(event.target.files ?? []))} />
+            {previews.length > 1 && <div className="grid grid-cols-3 gap-2" aria-label="Edit references">
+              {previews.map((item, index) => <div key={item} className="rounded-lg border bg-background/60 p-1"><img src={imageUrl(item)} alt={`Reference ${index + 1}`} className="h-16 w-full rounded object-cover" /><div className="mt-1 text-center text-[10px] text-muted-foreground">{index === 0 ? "primary" : `reference ${index + 1}`}</div></div>)}
+            </div>}
+            <p className="text-[11px] text-muted-foreground">One primary image plus up to two additional references. Output shape follows the primary.</p>
             <textarea value={command} onChange={(event) => setCommand(event.target.value)} rows={5} placeholder="Replace the background with a field of sunflowers…" className="w-full rounded-xl border bg-background/70 p-3 text-sm outline-none focus:border-primary" />
             <div className="grid grid-cols-3 gap-2">
               {capabilities?.variants.map((item) => <button key={item.id} type="button" onClick={() => chooseVariant(item.id)} className={cn("rounded-lg border p-2 text-left text-xs", variant === item.id ? "border-primary bg-primary/10" : "border-border/70")}><div className="font-semibold">{item.label}</div><div className="mt-1 text-muted-foreground">{item.default_steps} steps{item.ready ? " · ready" : " · unavailable"}</div></button>)}
@@ -236,8 +262,8 @@ export default function EditWorkspace({ initialSource, onSourceConsumed }: EditW
             </div>
             <label className="block text-xs">Negative prompt<input value={negativePrompt} onChange={(e) => setNegativePrompt(e.target.value)} placeholder="Optional; used when CFG > 1" className="mt-1 w-full rounded-lg border bg-background p-2" /></label>
             {error && <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">{error}</div>}
-            <button type="button" disabled={submitting || !selectedVariant?.ready || !preview} onClick={() => void queueEdit(source?.parentJobId ? jobs.find((job) => job.id === source.parentJobId) : null)} className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-45">
-              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Queue edit
+            <button type="button" disabled={submitting || !selectedVariant?.ready || !sourceUrl} onClick={() => void queueEdit(source?.parentJobId ? jobs.find((job) => job.id === source.parentJobId) : null)} className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground disabled:opacity-70">
+              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} {selectedVariant?.ready ? "Queue edit" : "Checkpoint unavailable"}
             </button>
           </section>
 
@@ -246,6 +272,8 @@ export default function EditWorkspace({ initialSource, onSourceConsumed }: EditW
             <div className="relative flex min-h-[420px] items-center justify-center overflow-hidden rounded-xl border bg-black/35" data-testid="edit-compare">
               {sourceUrl ? <img src={sourceUrl} alt="Original" className="max-h-[68vh] w-full object-contain" /> : <div className="text-sm text-muted-foreground">Choose a source to begin</div>}
               {resultUrl && <div className="absolute inset-0 overflow-hidden" style={{ clipPath: `inset(0 ${100 - compare}% 0 0)` }}><img src={resultUrl} alt="Edited result" className="h-full w-full object-contain" /></div>}
+              {sourceUrl && !resultUrl && <div className="absolute left-3 top-3 z-20 rounded-md border border-border bg-background/90 px-2 py-1 font-mono text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Original preview · no edit output</div>}
+              {diagnosticJob && <div className="absolute left-3 top-3 z-20 rounded-md border border-amber-300/60 bg-amber-950/90 px-2 py-1 font-mono text-[10px] font-bold uppercase tracking-wide text-amber-100">Diagnostic fixture · not model output</div>}
               {activeJob && <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background/80 backdrop-blur-sm"><Loader2 className="h-8 w-8 animate-spin text-primary" /><div className="font-medium">{activeJob.status === "queued" ? "Queued locally" : "Editing on GPU"}</div><div className="text-xs text-muted-foreground">{selectedVariant?.repository} · {steps} steps</div><button onClick={() => void api.cancelMageEditJob(activeJob.id).then(refresh)} className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs"><CircleStop className="h-4 w-4" />Cancel</button></div>}
             </div>
             {resultUrl && <input aria-label="Before and after comparison" type="range" min={0} max={100} value={compare} onChange={(e) => setCompare(Number(e.target.value))} className="mt-3 w-full" />}
@@ -253,7 +281,7 @@ export default function EditWorkspace({ initialSource, onSourceConsumed }: EditW
             {selectedJob?.status === "succeeded" && <div className="mt-4 flex flex-wrap gap-2">
               <button disabled={Boolean(diagnosticJob)} onClick={() => void decide("approved")} className="flex items-center gap-2 rounded-lg bg-emerald-500 px-3 py-2 text-xs font-semibold text-black disabled:opacity-35"><Check className="h-4 w-4" />Approve</button>
               <button disabled={Boolean(diagnosticJob)} onClick={() => void decide("rejected")} className="flex items-center gap-2 rounded-lg border border-rose-400/50 px-3 py-2 text-xs disabled:opacity-35"><X className="h-4 w-4" />Reject</button>
-              <button disabled={Boolean(diagnosticJob)} onClick={() => void queueEdit(selectedJob, sourceUrl)} className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs disabled:opacity-35"><RotateCcw className="h-4 w-4" />Retry</button>
+              <button disabled={Boolean(diagnosticJob)} onClick={() => void queueEdit(selectedJob, jobSourceUrls(selectedJob))} className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs disabled:opacity-35"><RotateCcw className="h-4 w-4" />Retry</button>
               <button disabled={Boolean(diagnosticJob)} onClick={branch} className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs disabled:opacity-35"><GitBranch className="h-4 w-4" />Branch from result</button>
               <button disabled={Boolean(diagnosticJob) || selectedJob.decision_state !== "approved"} onClick={() => void publish()} className="ml-auto flex items-center gap-2 rounded-lg border border-primary/40 px-3 py-2 text-xs disabled:opacity-35"><UploadCloud className="h-4 w-4" />Publish to gallery</button>
             </div>}

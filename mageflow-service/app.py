@@ -237,7 +237,7 @@ def _run_generation(payload: GenerateRequest) -> list[Any]:
 
 
 def _run_edit(
-    source: bytes,
+    sources: list[bytes],
     *,
     command: str,
     variant: str,
@@ -248,6 +248,11 @@ def _run_edit(
     negative_prompt: str,
     vl_cond_long_edge: int,
 ) -> tuple[bytes, dict[str, Any]]:
+    if not 1 <= len(sources) <= 3:
+        raise HTTPException(
+            status_code=422,
+            detail="Mage-Flow-Edit supports between one and three reference images",
+        )
     settings = EDIT_MODELS[variant]
     revision = str(settings["revision"])
     if os.getenv("MAGEFLOW_EDIT_ENABLED", "false").lower() != "true" or not _is_full_sha(revision):
@@ -257,13 +262,13 @@ def _run_edit(
         )
     with _generation_lock:
         pipeline = _load_pipeline(str(settings["model_id"]), revision)
-        reference = Image.open(io.BytesIO(source)).convert("RGB")
+        references = [Image.open(io.BytesIO(source)).convert("RGB") for source in sources]
         if torch.cuda.is_available():
             torch.cuda.reset_peak_memory_stats()
         started = time.perf_counter()
         images = pipeline.edit(
             [command],
-            [reference],
+            [references],
             neg_prompts=[negative_prompt or " "],
             seeds=[seed],
             steps=steps,
@@ -399,7 +404,8 @@ async def generate(payload: GenerateRequest) -> Response:
 
 @app.post("/edit")
 async def edit(
-    file: UploadFile = File(...),
+    files: list[UploadFile] | None = File(None),
+    file: UploadFile | None = File(None),
     command: str = Form(...),
     variant: str = Form("turbo"),
     seed: int = Form(42),
@@ -418,10 +424,18 @@ async def edit(
         raise HTTPException(status_code=422, detail="Unsupported edit settings")
     if max_size not in {512, 768, 1024, 1536, 2048}:
         raise HTTPException(status_code=422, detail="Unsupported max_size")
+    references = list(files or [])
+    if file is not None:
+        references.insert(0, file)
+    if not 1 <= len(references) <= 3:
+        raise HTTPException(
+            status_code=422,
+            detail="Mage-Flow-Edit supports between one and three reference images",
+        )
     try:
         image, metrics = await asyncio.to_thread(
             _run_edit,
-            await file.read(),
+            [await reference.read() for reference in references],
             command=command.strip(),
             variant=variant,
             seed=seed,
