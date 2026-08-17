@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "checked_at": "2026-08-17T00:28:00Z",
+  "repository": "Comfy-Org/Mage-Flow",
+  "revision": "dbba082792fb61234d7218327511a9725b69db37",
+  "repository_card_claim": "Repackaged model files for ComfyUI",
+  "repository_card_license": "mit",
+  "upstream_source": "https://github.com/microsoft/Mage",
+  "upstream_source_revision": "76bec2bb3818863f470de7e867c2dc7f1d0bfd83",
+  "authorization_boundary": {
+    "status": "user_authorized_comfy_org_mirror",
+    "microsoft_canonical_transfer_proven": false,
+    "note": "The DreamGen operator explicitly authorized this mirror. DreamGen records Comfy-Org as the artifact source and Microsoft only as the upstream model identity."
+  },
+  "configuration_overlay": {
+    "repository": "mage-flow-community/Mage-Flow-Edit",
+    "revision": "fd7119d80fff2e5be21178edf2a93877955540b9",
+    "purpose": "Diffusers layout and tokenizer metadata only",
+    "community_weight_shards_loaded": false,
+    "text_encoder_expected_keys": 713,
+    "text_encoder_actual_keys": 713,
+    "missing_keys": 0,
+    "unexpected_keys": 0
+  },
+  "downloaded_artifacts": [
+    {
+      "role": "aligned_transformer",
+      "path": "diffusion_models/mage_flow_edit_bf16.safetensors",
+      "bytes": 8231536784,
+      "sha256": "09cee4afa95239d850af02c9b1c006bffc71dca4a984a2a1f56edff9282d53d3",
+      "matches_audited_community_duplicate": true
+    },
+    {
+      "role": "turbo_transformer",
+      "path": "diffusion_models/mage_flow_edit_turbo_bf16.safetensors",
+      "bytes": 8231536760,
+      "sha256": "29c3726ecd64afe149eef28af3e27b6b40de52646bfd16757a37da4b6fbcf288",
+      "matches_audited_community_duplicate": true
+    },
+    {
+      "role": "qwen3vl_text_encoder",
+      "path": "text_encoders/qwen3vl_4b_bf16.safetensors",
+      "bytes": 8875719384,
+      "sha256": "36f3ff447ef59201722e8f9ce6020c9819fdcfba6aa2608c4e09b1c0ce114e34"
+    },
+    {
+      "role": "vae",
+      "path": "vae/mage_flow_vae_bf16.safetensors",
+      "bytes": 345053056,
+      "sha256": "34e076dc1e8a15321e1e07be5111d59cf16dd10b804b7c7e20b4de29013427e0"
+    }
+  ],
+  "not_downloaded": [
+    {
+      "role": "base_transformer",
+      "path": "diffusion_models/mage_flow_edit_base_bf16.safetensors",
+      "bytes": 8231536784,
+      "sha256": "9d93faa75963ba4a2ef1b64bed4fe94c2554b82e8f3fb2dbb267604a634d450d"
+    }
+  ],
+  "unique_downloaded_weight_bytes": 25683845984,
+  "managed_huggingface_cache_bytes_after_download": 36074033260,
+  "storage_note": "The managed cache total includes pre-existing unrelated checkpoints. DreamGen overlays are links to pinned blobs and do not duplicate weight bytes."
+}

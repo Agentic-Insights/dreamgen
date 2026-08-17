@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "checked_at": "2026-08-16T21:13:01Z",
+  "decision": "official_checkpoints_currently_inaccessible",
+  "canonical_source": {
+    "repository": "https://github.com/microsoft/Mage",
+    "previous_dreamgen_revision": "6cefeb40e4c8ecc404ecb73732a91878939f27e0",
+    "current_revision": "76bec2bb3818863f470de7e867c2dc7f1d0bfd83",
+    "ahead_by": 3,
+    "runtime_code_changed": false,
+    "changed_paths": [
+      "README.md",
+      "assets/mage_vl_tech_report.pdf",
+      "mage_flow/README.md",
+      "mage_vl/README.md"
+    ],
+    "checkpoint_namespace": "microsoft/Mage-Flow*",
+    "license": "MIT",
+    "intended_use": "Research purposes only; not intended for product or service deployment; human oversight and downstream moderation, validation, and compliance safeguards required."
+  },
+  "local_authentication": {
+    "hf_cli_logged_in": false,
+    "hf_token_environment_recorded": false,
+    "signed_in_browser_session": true
+  },
+  "live_repository_access": [
+    {
+      "id": "microsoft/Mage-Flow-Edit-Base",
+      "anonymous_api_status": 401,
+      "anonymous_resolve_status": 401,
+      "authenticated_browser_status": 404,
+      "standard_gate_present": false
+    },
+    {
+      "id": "microsoft/Mage-Flow-Edit",
+      "anonymous_api_status": 401,
+      "anonymous_resolve_status": 401,
+      "authenticated_browser_status": 404,
+      "standard_gate_present": false
+    },
+    {
+      "id": "microsoft/Mage-Flow-Edit-Turbo",
+      "anonymous_api_status": 401,
+      "anonymous_resolve_status": 401,
+      "authenticated_browser_status": 404,
+      "standard_gate_present": false
+    }
+  ],
+  "microsoft_collection": {
+    "url": "https://huggingface.co/collections/microsoft/mage",
+    "updated_label": "22 days ago",
+    "public_model_ids": [
+      "microsoft/Mage-VL",
+      "microsoft/Mage-ViT"
+    ],
+    "contains_mage_flow_edit": false
+  },
+  "transient_index_evidence": {
+    "interpretation": "Search indexes captured official Microsoft model and commit pages during a short-lived publication. These stale pages establish that Microsoft created repositories, but they do not provide current access, complete HEAD inventories, or downloadable canonical artifacts and are not used for activation.",
+    "base_assets_commit": "0fa01bd1120b1aa28beb65fb3bc2ba9d7acd91b6",
+    "turbo_assets_commit": "4a79fac468adbcbc32da6dcab1d41fe9b4f7df66",
+    "aligned_full_revision_verified": false,
+    "accepted_as_runtime_pin": false
+  },
+  "managed_storage": {
+    "path": ".cache",
+    "bytes_before": 2123752935,
+    "bytes_after": 2123752935,
+    "official_edit_snapshots_found": 0,
+    "official_edit_weights_downloaded": false,
+    "bytes_added": 0
+  },
+  "hardware_at_check": {
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "vram_total_mib": 23028,
+    "vram_free_mib": 21277,
+    "driver": "610.74"
+  },
+  "runtime": {
+    "adapter_activated": false,
+    "benchmark_run": false,
+    "visual_output_claimed": false,
+    "blocker": "Restore current direct access to microsoft/Mage-Flow-Edit and microsoft/Mage-Flow-Edit-Turbo, or explicitly grant this Hugging Face account access. Stale search-index pages and unendorsed copies are not accepted."
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "id": "39a41685-fded-477d-beed-0a9d3c8ab460",
+  "status": "succeeded",
+  "root_job_id": "679d152a-db6f-45ab-ac0a-66b2d7128869",
+  "parent_job_id": "679d152a-db6f-45ab-ac0a-66b2d7128869",
+  "version": 2,
+  "decision_state": "pending",
+  "created_at": "2026-08-17T01:02:05Z",
+  "completed_at": "2026-08-17T01:05:45Z",
+  "prompt": "Change the dog's scarf to royal blue while preserving the dog, pose, lighting, and background.",
+  "model": "Comfy-Org/Mage-Flow",
+  "upstream_model": "microsoft/Mage-Flow-Edit-Turbo",
+  "model_revision": "dbba082792fb61234d7218327511a9725b69db37",
+  "artifact_path": "diffusion_models/mage_flow_edit_turbo_bf16.safetensors",
+  "artifact_sha256": "29c3726ecd64afe149eef28af3e27b6b40de52646bfd16757a37da4b6fbcf288",
+  "source_sha256": "55e4d0e1e7714cd6a5f0db48e0d1af8802bf0d36b6f2b6ace126d7dc4a6333c3",
+  "derivative_sha256": "f44b589fc0ab2e764e4d6703518e38e7e43ee95db64df21fbc07d7690bfd746b",
+  "settings": {
+    "command": "Change the dog's scarf to royal blue while preserving the dog, pose, lighting, and background.",
+    "variant": "turbo",
+    "seed": 43,
+    "steps": 4,
+    "guidance": 1.0,
+    "max_size": 512,
+    "negative_prompt": "",
+    "vl_cond_long_edge": 384
+  },
+  "timing": {
+    "elapsed_seconds": 4.4656,
+    "cold_total_seconds": 220
+  },
+  "hardware": {
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "peak_vram_mb": 17426
+  },
+  "original_path": "/images/edits/679d152a-db6f-45ab-ac0a-66b2d7128869/source/source-55e4d0e1e7714cd6a5f0.png",
+  "edited_path": "/images/edits/679d152a-db6f-45ab-ac0a-66b2d7128869/versions/v002-39a41685-f44b589fc0ab2e764e4d.png",
+  "manifest_path": "/app/output/edits/679d152a-db6f-45ab-ac0a-66b2d7128869/manifests/0004-v002-39a41685-4aba2bf5cf4957a9.json"
+}

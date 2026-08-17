@@ -1,0 +1,16 @@
+HTTP/1.1 200 OK
+date: Mon, 17 Aug 2026 00:19:21 GMT
+server: uvicorn
+x-dreamgen-model: Comfy-Org/Mage-Flow
+x-dreamgen-upstream-model: microsoft/Mage-Flow-Edit
+x-dreamgen-model-revision: dbba082792fb61234d7218327511a9725b69db37
+x-dreamgen-artifact-path: diffusion_models/mage_flow_edit_bf16.safetensors
+x-dreamgen-artifact-sha256: 09cee4afa95239d850af02c9b1c006bffc71dca4a984a2a1f56edff9282d53d3
+x-dreamgen-provenance-status: user_authorized_comfy_org_mirror
+x-dreamgen-configuration-repository: mage-flow-community/Mage-Flow-Edit
+x-dreamgen-configuration-revision: fd7119d80fff2e5be21178edf2a93877955540b9
+x-dreamgen-source-sha: 76bec2bb3818863f470de7e867c2dc7f1d0bfd83
+x-dreamgen-elapsed-seconds: 6.5671
+x-dreamgen-peak-vram-mb: 17426
+content-length: 208057
+content-type: image/png

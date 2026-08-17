@@ -5,6 +5,7 @@ Provides REST API and WebSocket endpoints for the Next.js frontend
 
 import asyncio
 import hashlib
+import io
 import json
 import logging
 import os
@@ -42,14 +43,22 @@ from src.services import (
     ImageGenService,
     SQLiteEditJobStore,
     SQLiteGenerationJobStore,
+    append_manifest,
     apply_config_overrides,
     get_workflow_recipe,
     list_workflow_recipes,
+    persist_derivative,
+    persist_source,
     resolve_workflow_recipe,
+    sha256_bytes,
 )
+from src.services.mage_edit_runtime import download_edit_model, probe_edit_runtime
+from src.services.mage_edit_runtime import run_edit as run_mage_edit
 from src.services.model_runtime import ModelRuntimeManager
 from src.utils.config import Config
 from src.utils.gallery_publisher import DEFAULT_BUCKET, build_publish_status
+from src.utils.image_engine_catalog import image_engine_catalog
+from src.utils.mage_edit import capability_document, get_variant
 from src.utils.observability import read_lifecycle_events, write_lifecycle_event
 from src.utils.ollama import (
     OllamaModelInfo,
@@ -65,6 +74,7 @@ from src.utils.publication_catalog import (
     public_catalog_entries,
     register_image,
     remove_image,
+    set_edit_decision,
     set_publication_state,
 )
 from src.utils.storage import StorageManager, metadata_path_for, save_image_and_prompt
@@ -649,6 +659,12 @@ class EditResponse(BaseModel):
     created_at: str = Field(..., description="ISO timestamp")
 
 
+class EditDecisionRequest(BaseModel):
+    """Approve or reject one immutable edit derivative."""
+
+    decision: str = Field(..., pattern="^(approved|rejected|pending)$")
+
+
 class PluginInfo(BaseModel):
     """Plugin information model"""
 
@@ -751,6 +767,138 @@ def record_generation_event(event: Dict[str, Any]) -> Dict[str, Any]:
     recent_generation_events.appendleft(payload)
     write_lifecycle_event(OUTPUT_DIR / "metrics", payload)
     return payload
+
+
+def edit_capabilities_with_runtime() -> dict[str, Any]:
+    """Merge static official capabilities with live, local sidecar state."""
+    document = capability_document()
+    runtime = probe_edit_runtime()
+    if runtime is None:
+        document["runtime_status"] = "offline"
+        document["runtime_reason"] = "The local Mage-Flow sidecar is not reachable."
+        for variant in document["variants"]:
+            variant["ready"] = False
+        document["available"] = False
+        return document
+
+    cuda = runtime.get("cuda") or {}
+    document["gpu"] = {
+        "available": bool(cuda.get("available")),
+        "name": cuda.get("device"),
+        "vram_total_mb": round(float(cuda.get("total_gb", 0)) * 1024) or None,
+        "vram_free_mb": round(float(cuda.get("free_gb", 0)) * 1024) or None,
+    }
+    document["model_loaded"] = bool(runtime.get("loaded"))
+    document["loaded_model_id"] = runtime.get("loaded_model_id")
+    document["runtime_status"] = runtime.get("status", "unknown")
+    document["runtime_reason"] = runtime.get("reason")
+    runtime_models = runtime.get("edit_models") or {}
+    for variant in document["variants"]:
+        live = runtime_models.get(variant["id"]) or {}
+        variant["cached"] = bool(live.get("cached"))
+        variant["ready"] = bool(
+            variant["available"] and live.get("available") and live.get("cached")
+        )
+    document["available"] = any(variant["ready"] for variant in document["variants"])
+    return document
+
+
+async def execute_mage_edit_job(job_id: str, sources: list[tuple[bytes, str]]) -> None:
+    """Execute a queued official edit and persist an immutable derivative."""
+    job = edit_job_store.start_job(job_id)
+    if job.get("status") != "running":
+        return
+    metadata = dict(job.get("metadata") or {})
+    settings = dict(metadata.get("settings") or {})
+    try:
+        result = await asyncio.to_thread(run_mage_edit, sources, settings)
+        if (edit_job_store.get_job(job_id) or {}).get("status") == "cancelling":
+            edit_job_store.finish_cancellation(job_id)
+            return
+        root_id = str(job["root_job_id"])
+        version = int(job["version"])
+        completed_metadata = {
+            **metadata,
+            "model": result.model,
+            "upstream_model": result.upstream_model,
+            "model_revision": result.revision,
+            "artifact_path": result.artifact_path,
+            "artifact_sha256": result.artifact_sha256,
+            "provenance_status": result.provenance_status,
+            "configuration_repository": result.configuration_repository,
+            "configuration_revision": result.configuration_revision,
+            "source_revision": result.source_revision,
+            "timing": {"elapsed_seconds": result.elapsed_seconds},
+            "hardware": {"peak_vram_mb": result.peak_vram_mb},
+            "edit_lineage": {
+                **dict(metadata.get("edit_lineage") or {}),
+                "role": "derivative",
+                "decision_state": "pending",
+            },
+        }
+        derivative_sha = sha256_bytes(result.image)
+        completed_metadata["derivative_sha256"] = derivative_sha
+        derivative_path, derivative_sha = persist_derivative(
+            OUTPUT_DIR,
+            root_id,
+            job_id,
+            version,
+            result.image,
+            command=job["prompt"],
+            metadata=completed_metadata,
+        )
+        manifest_path, manifest_sha = append_manifest(
+            OUTPUT_DIR,
+            root_id,
+            job_id,
+            version,
+            {
+                "event": "created",
+                "job_id": job_id,
+                "root_job_id": root_id,
+                "parent_job_id": job.get("parent_job_id"),
+                "command": job["prompt"],
+                "source_sha256": metadata.get("source_sha256"),
+                "source_sha256s": metadata.get("source_sha256s"),
+                "source_artifacts": metadata.get("source_artifacts"),
+                "derivative_sha256": derivative_sha,
+                "model": result.model,
+                "upstream_model": result.upstream_model,
+                "model_revision": result.revision,
+                "artifact_path": result.artifact_path,
+                "artifact_sha256": result.artifact_sha256,
+                "provenance_status": result.provenance_status,
+                "configuration_repository": result.configuration_repository,
+                "configuration_revision": result.configuration_revision,
+                "source_revision": result.source_revision,
+                "settings": settings,
+                "timing": completed_metadata["timing"],
+                "hardware": completed_metadata["hardware"],
+                "decision_state": "pending",
+            },
+        )
+        completed_metadata["manifest_sha256"] = manifest_sha
+        relative_source = str(job["source_path"])
+        relative_derivative = f"/images/{derivative_path.relative_to(OUTPUT_DIR).as_posix()}"
+        register_image(
+            derivative_path,
+            OUTPUT_DIR,
+            prompt=job["prompt"],
+            metadata=completed_metadata,
+            publication_state="draft",
+        )
+        edit_job_store.complete_job(
+            job_id,
+            original_path=relative_source,
+            edited_path=relative_derivative,
+            metadata=completed_metadata,
+        )
+        edit_job_store.set_decision(job_id, "pending", manifest_path=str(manifest_path))
+        await manager.broadcast(json.dumps({"type": "edit_completed", "id": job_id}))
+    except Exception as exc:
+        logger.exception("Mage-Flow-Edit job %s failed", job_id)
+        edit_job_store.fail_job(job_id, str(exc))
+        await manager.broadcast(json.dumps({"type": "edit_error", "id": job_id, "error": str(exc)}))
 
 
 async def broadcast_task_progress(
@@ -1112,6 +1260,12 @@ async def get_plugins():
 async def get_model_status():
     """Get status of available models and their download progress"""
     return runtime_manager.status()
+
+
+@app.get("/api/models/catalog")
+async def get_image_engine_catalog():
+    """Expose verified model identities separately from runtime readiness."""
+    return image_engine_catalog()
 
 
 @app.get("/api/models/recommended")
@@ -2097,6 +2251,336 @@ async def batch_generate(count: int = 5, delay: int = 0):
     return {"batch_id": batch_id, "count": count, "results": results}
 
 
+@app.get("/api/edit/capabilities")
+async def get_edit_capabilities():
+    """Return official controls plus live checkpoint/GPU readiness."""
+    return await asyncio.to_thread(edit_capabilities_with_runtime)
+
+
+@app.get("/api/edit/jobs")
+async def list_edit_jobs(root_job_id: Optional[str] = None, limit: int = Query(100, ge=1, le=500)):
+    """List recoverable edit history, optionally scoped to one lineage root."""
+    return {"jobs": edit_job_store.list_jobs(root_job_id=root_job_id, limit=limit)}
+
+
+@app.post("/api/edit/models/{variant}/download")
+async def download_mage_edit_model(variant: str):
+    try:
+        descriptor = get_variant(variant)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if not descriptor.get("available"):
+        raise HTTPException(
+            status_code=503,
+            detail="Enable the exact pinned Comfy-Org mirror revision before download.",
+        )
+    try:
+        return await asyncio.to_thread(download_edit_model, variant)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.post("/api/edit/jobs", status_code=202)
+async def create_mage_edit_job(
+    background_tasks: BackgroundTasks,
+    files: Optional[List[UploadFile]] = File(None),
+    file: Optional[UploadFile] = File(None),
+    command: str = Form(...),
+    variant: str = Form("turbo"),
+    seed: int = Form(42),
+    steps: Optional[int] = Form(None),
+    guidance: Optional[float] = Form(None),
+    max_size: int = Form(1024),
+    negative_prompt: str = Form(""),
+    vl_cond_long_edge: int = Form(384),
+    source_path: Optional[str] = Form(None),
+    parent_job_id: Optional[str] = Form(None),
+):
+    """Queue Mage-Flow-Edit through the explicitly authorized pinned mirror."""
+    command = command.strip()
+    if not command:
+        raise HTTPException(status_code=422, detail="Edit command is required")
+    try:
+        descriptor = get_variant(variant)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    live = edit_capabilities_with_runtime()
+    live_variant = next(item for item in live["variants"] if item["id"] == variant)
+    if not live_variant.get("ready"):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "The pinned Mage-Flow-Edit mirror checkpoint is not ready.",
+                "repository": descriptor["repository"],
+                "reason": live_variant.get("availability_reason") or live.get("runtime_reason"),
+                "action": "Download the pinned Comfy-Org mirror artifacts for this variant.",
+            },
+        )
+    resolved_steps = steps if steps is not None else int(descriptor["default_steps"])
+    resolved_guidance = guidance if guidance is not None else float(descriptor["default_guidance"])
+    if not 1 <= resolved_steps <= 50 or not 1.0 <= resolved_guidance <= 10.0:
+        raise HTTPException(status_code=422, detail="Unsupported steps or guidance value")
+    if max_size not in {512, 768, 1024, 1536, 2048}:
+        raise HTTPException(
+            status_code=422, detail="max_size must be 512, 768, 1024, 1536, or 2048"
+        )
+    if not 0 <= seed <= 2**31 - 1:
+        raise HTTPException(status_code=422, detail="seed must be between 0 and 2147483647")
+
+    references = list(files or [])
+    if file is not None:
+        references.insert(0, file)
+    if not 1 <= len(references) <= 3:
+        raise HTTPException(
+            status_code=422,
+            detail="Mage-Flow-Edit supports between one and three reference images",
+        )
+    source_payloads = [
+        (await reference.read(), reference.filename or f"reference-{index + 1}.png")
+        for index, reference in enumerate(references)
+    ]
+    try:
+        for content, _filename in source_payloads:
+            with Image.open(io.BytesIO(content)) as candidate:
+                candidate.verify()
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid source image: {exc}") from exc
+
+    parent = edit_job_store.get_job(parent_job_id) if parent_job_id else None
+    if parent_job_id and (not parent or parent.get("status") != "succeeded"):
+        raise HTTPException(status_code=422, detail="parent_job_id must reference a succeeded edit")
+    job_id = str(uuid.uuid4())
+    root_id = str(parent["root_job_id"]) if parent else job_id
+    version = max((job["version"] for job in edit_job_store.list_jobs(root_id)), default=0) + 1
+    source_artifacts = []
+    for index, (content, filename) in enumerate(source_payloads):
+        source_file, source_sha = persist_source(OUTPUT_DIR, root_id, content)
+        source_artifacts.append(
+            {
+                "index": index,
+                "role": "primary" if index == 0 else "reference",
+                "path": f"/images/{source_file.relative_to(OUTPUT_DIR).as_posix()}",
+                "sha256": source_sha,
+                "original_filename": filename,
+                "catalog_path": source_path if index == 0 else None,
+            }
+        )
+    source_url = str(source_artifacts[0]["path"])
+    source_sha = str(source_artifacts[0]["sha256"])
+    settings = {
+        "command": command,
+        "variant": variant,
+        "seed": seed,
+        "steps": resolved_steps,
+        "guidance": resolved_guidance,
+        "max_size": max_size,
+        "negative_prompt": negative_prompt,
+        "vl_cond_long_edge": vl_cond_long_edge,
+    }
+    metadata = {
+        "operation": "mage-flow-edit",
+        "source_catalog_path": source_path,
+        "source_sha256": source_sha,
+        "source_sha256s": [artifact["sha256"] for artifact in source_artifacts],
+        "source_artifacts": source_artifacts,
+        "settings": settings,
+        "model": descriptor["artifact_repository"],
+        "upstream_model": descriptor["upstream_repository"],
+        "model_revision": descriptor["verified_revision"],
+        "artifact_path": descriptor["artifact_path"],
+        "artifact_sha256": descriptor["artifact_sha256"],
+        "provenance_status": live["provenance_status"],
+        "configuration_repository": live["configuration_source"]["repository"],
+        "configuration_revision": live["configuration_source"]["revision"],
+        "source_revision": live["source_revision"],
+        "edit_lineage": {
+            "role": "source",
+            "root_job_id": root_id,
+            "parent_job_id": parent_job_id,
+            "version": version,
+            "decision_state": "pending",
+        },
+        "hardware_at_queue": live.get("gpu"),
+    }
+    source_manifest_path, source_manifest_sha = append_manifest(
+        OUTPUT_DIR,
+        root_id,
+        job_id,
+        version,
+        {
+            "event": "source_registered",
+            "job_id": job_id,
+            "root_job_id": root_id,
+            "parent_job_id": parent_job_id,
+            "source_sha256": source_sha,
+            "source_sha256s": [artifact["sha256"] for artifact in source_artifacts],
+            "source_artifacts": source_artifacts,
+            "source_path": source_url,
+            "command": command,
+            "model": descriptor["artifact_repository"],
+            "upstream_model": descriptor["upstream_repository"],
+            "model_revision": descriptor["verified_revision"],
+            "artifact_path": descriptor["artifact_path"],
+            "artifact_sha256": descriptor["artifact_sha256"],
+            "provenance_status": live["provenance_status"],
+            "configuration_repository": live["configuration_source"]["repository"],
+            "configuration_revision": live["configuration_source"]["revision"],
+            "source_revision": live["source_revision"],
+            "settings": settings,
+            "hardware": live.get("gpu"),
+            "decision_state": "pending",
+        },
+    )
+    metadata["source_manifest_path"] = str(source_manifest_path)
+    metadata["source_manifest_sha256"] = source_manifest_sha
+    for artifact in source_artifacts:
+        artifact_path = OUTPUT_DIR / str(artifact["path"]).removeprefix("/images/")
+        register_image(
+            artifact_path,
+            OUTPUT_DIR,
+            prompt=f"SOURCE {int(artifact['index']) + 1} for: {command}",
+            metadata={
+                **metadata,
+                "source_index": artifact["index"],
+                "edit_lineage": {
+                    **metadata["edit_lineage"],
+                    "source_index": artifact["index"],
+                },
+            },
+            publication_state="draft",
+        )
+    job = edit_job_store.create_job(
+        job_id=job_id,
+        prompt=command,
+        strength=0.0,
+        backend="mage-flow-edit",
+        source_path=source_url,
+        source_filename=str(source_artifacts[0]["original_filename"]),
+        metadata=metadata,
+        root_job_id=root_id,
+        parent_job_id=parent_job_id,
+        version=version,
+    )
+    background_tasks.add_task(execute_mage_edit_job, job_id, source_payloads)
+    return job
+
+
+@app.post("/api/edit/jobs/{job_id}/retry", status_code=202)
+async def retry_mage_edit_job(job_id: str, background_tasks: BackgroundTasks):
+    """Replay one recovered edit with its exact immutable sources and settings."""
+    job = edit_job_store.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Edit job not found")
+    if job.get("status") != "succeeded" or job.get("backend") != "mage-flow-edit":
+        raise HTTPException(status_code=409, detail="Only succeeded Mage-Flow-Edit jobs can retry")
+    metadata = dict(job.get("metadata") or {})
+    settings = metadata.get("settings")
+    artifacts = metadata.get("source_artifacts")
+    if not isinstance(settings, dict) or not isinstance(artifacts, list) or not artifacts:
+        raise HTTPException(status_code=409, detail="Recovered job is missing immutable retry data")
+    uploads: list[UploadFile] = []
+    output_root = OUTPUT_DIR.resolve()
+    for index, artifact in enumerate(artifacts):
+        if not isinstance(artifact, dict):
+            raise HTTPException(status_code=409, detail="Recovered source metadata is invalid")
+        relative = str(artifact.get("path") or "").removeprefix("/images/")
+        source_file = (OUTPUT_DIR / relative).resolve()
+        if not source_file.is_relative_to(output_root) or not source_file.is_file():
+            raise HTTPException(status_code=409, detail="Recovered source file is unavailable")
+        source_bytes = source_file.read_bytes()
+        expected_sha = str(artifact.get("sha256") or "")
+        if not expected_sha or sha256_bytes(source_bytes) != expected_sha:
+            raise HTTPException(
+                status_code=409,
+                detail="Recovered source file no longer matches its immutable SHA-256",
+            )
+        uploads.append(
+            UploadFile(
+                file=io.BytesIO(source_bytes),
+                filename=str(artifact.get("original_filename") or f"reference-{index + 1}.png"),
+            )
+        )
+    required = {
+        "command",
+        "variant",
+        "seed",
+        "steps",
+        "guidance",
+        "max_size",
+        "negative_prompt",
+        "vl_cond_long_edge",
+    }
+    if not required.issubset(settings):
+        raise HTTPException(status_code=409, detail="Recovered settings are incomplete")
+    return await create_mage_edit_job(
+        background_tasks,
+        files=uploads,
+        file=None,
+        command=str(settings["command"]),
+        variant=str(settings["variant"]),
+        seed=int(settings["seed"]),
+        steps=int(settings["steps"]),
+        guidance=float(settings["guidance"]),
+        max_size=int(settings["max_size"]),
+        negative_prompt=str(settings["negative_prompt"]),
+        vl_cond_long_edge=int(settings["vl_cond_long_edge"]),
+        source_path=metadata.get("source_catalog_path"),
+        parent_job_id=job_id,
+    )
+
+
+@app.post("/api/edit/jobs/{job_id}/cancel")
+async def cancel_edit_job(job_id: str):
+    job = edit_job_store.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Edit job not found")
+    return edit_job_store.cancel_job(job_id)
+
+
+@app.post("/api/edit/jobs/{job_id}/decision")
+async def decide_edit_job(job_id: str, request: EditDecisionRequest):
+    job = edit_job_store.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Edit job not found")
+    if job.get("status") != "succeeded" or not job.get("edited_path"):
+        raise HTTPException(status_code=409, detail="Only succeeded derivatives can be decided")
+    edit_lineage = job.get("metadata", {}).get("edit_lineage", {})
+    if edit_lineage.get("diagnostic_fixture"):
+        raise HTTPException(
+            status_code=409,
+            detail="Diagnostic fixtures cannot be approved or rejected",
+        )
+    key = str(job["edited_path"]).removeprefix("/images/")
+    manifest_path, manifest_sha = append_manifest(
+        OUTPUT_DIR,
+        str(job["root_job_id"]),
+        job_id,
+        int(job["version"]),
+        {
+            "event": "decision",
+            "job_id": job_id,
+            "root_job_id": job["root_job_id"],
+            "parent_job_id": job.get("parent_job_id"),
+            "decision_state": request.decision,
+            "derivative_sha256": job.get("metadata", {}).get("derivative_sha256"),
+        },
+    )
+    try:
+        catalog_entry = set_edit_decision(
+            OUTPUT_DIR,
+            key,
+            request.decision,
+            decision_manifest_path=manifest_path.relative_to(OUTPUT_DIR).as_posix(),
+            decision_manifest_sha256=manifest_sha,
+        )
+    except (KeyError, PermissionError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    updated = edit_job_store.set_decision(
+        job_id, request.decision, manifest_path=str(manifest_path)
+    )
+    return {**updated, "catalog": catalog_entry}
+
+
 @app.post("/api/edit", response_model=EditResponse)
 async def edit_image(
     file: UploadFile = File(...),
@@ -2165,20 +2649,41 @@ async def edit_image(
             original_path,
             OUTPUT_DIR,
             prompt=f"ORIGINAL: {prompt}",
-            metadata={**lineage, "role": "source"},
+            metadata={
+                **lineage,
+                "role": "source",
+                "edit_lineage": {
+                    "role": "source",
+                    "root_job_id": edit_id,
+                    "version": 1,
+                    "decision_state": "pending",
+                    "diagnostic_fixture": resolved_backend == "mock",
+                },
+            },
             publication_state="draft",
         )
+        result_lineage = {
+            "role": "derivative",
+            "root_job_id": edit_id,
+            "version": 1,
+            "decision_state": "pending",
+            "diagnostic_fixture": resolved_backend == "mock",
+        }
         register_image(
             edited_path,
             OUTPUT_DIR,
             prompt=f"EDITED: {prompt}",
-            metadata={**lineage, "role": "result"},
+            metadata={**lineage, "role": "result", "edit_lineage": result_lineage},
             publication_state="draft",
         )
 
         original_relative = f"/images/{original_path.relative_to(OUTPUT_DIR).as_posix()}"
         edited_relative = f"/images/{edited_path.relative_to(OUTPUT_DIR).as_posix()}"
-        completed_metadata = {**lineage, "model": resolved_backend}
+        completed_metadata = {
+            **lineage,
+            "model": resolved_backend,
+            "edit_lineage": result_lineage,
+        }
         edit_job_store.complete_job(
             edit_id,
             original_path=original_relative,

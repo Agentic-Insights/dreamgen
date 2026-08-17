@@ -1,0 +1,50 @@
+{
+  "checked_at": "2026-08-02T05:00:29Z",
+  "canonical_source": "Hugging Face Microsoft organization",
+  "cli": {
+    "huggingface_hub_version": "0.35.0",
+    "authenticated": false,
+    "hf_token_environment_present": false
+  },
+  "authenticated_browser": {
+    "session_confirmed_by_profile_settings": true,
+    "account_identifier_recorded": false,
+    "gated_requests_contain_mage_flow_edit": false
+  },
+  "repositories": [
+    {
+      "id": "microsoft/Mage-Flow-Edit-Base",
+      "anonymous_api_status": 401,
+      "anonymous_resolve_status": 401,
+      "current_cli_download_status": 401,
+      "authenticated_browser_status": 404,
+      "standard_gate_or_request_control": false
+    },
+    {
+      "id": "microsoft/Mage-Flow-Edit",
+      "anonymous_api_status": 401,
+      "anonymous_resolve_status": 401,
+      "current_cli_download_status": 401,
+      "authenticated_browser_status": 404,
+      "standard_gate_or_request_control": false
+    },
+    {
+      "id": "microsoft/Mage-Flow-Edit-Turbo",
+      "anonymous_api_status": 401,
+      "anonymous_resolve_status": 401,
+      "current_cli_download_status": 401,
+      "authenticated_browser_status": 404,
+      "standard_gate_or_request_control": false
+    }
+  ],
+  "microsoft_collection": {
+    "slug": "microsoft/mage-6a447824394d0ca3ecbead21",
+    "last_updated": "2026-07-26T06:08:03.205Z",
+    "public_model_ids": [
+      "microsoft/Mage-VL",
+      "microsoft/Mage-ViT"
+    ],
+    "contains_mage_flow_edit": false
+  },
+  "conclusion": "The exact official edit repositories are withdrawn, private, or otherwise unavailable to this account. This is not an ordinary gated-model agreement that can be accepted, so no official revision, hash, download, or benchmark is claimed."
+}

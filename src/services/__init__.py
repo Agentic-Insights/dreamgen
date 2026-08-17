@@ -1,5 +1,6 @@
 """Application service boundaries for DreamGen workflows."""
 
+from .edit_artifacts import append_manifest, persist_derivative, persist_source, sha256_bytes
 from .edit_jobs import SQLiteEditJobStore
 from .generation_jobs import (
     GenerationJobCreate,

@@ -27,8 +27,8 @@ import Gallery from "@/components/Gallery";
 import QueueHistory from "@/components/QueueHistory";
 import Settings from "@/components/Settings";
 import AdvancedControls from "@/components/AdvancedControls";
+import EditWorkspace, { type EditSource } from "@/components/EditWorkspace";
 import MetaPromptModal from "@/components/MetaPromptModal";
-import ImageEditPanel, { type ImageEditTarget } from "@/components/ImageEditPanel";
 import TaskProgress from "@/components/TaskProgress";
 import {
   API_BASE,
@@ -52,7 +52,7 @@ import {
 import { cn } from "@/lib/utils";
 import galleryCache from "@/lib/cache";
 
-type TabId = "generate" | "gallery" | "settings";
+type TabId = "generate" | "edit" | "gallery" | "settings";
 
 type CadenceOption = {
   label: string;
@@ -156,7 +156,7 @@ const describeGenerationEvent = (event: GenerationEvent) => {
   return event.type.replaceAll("_", " ");
 };
 
-const TAB_IDS: readonly TabId[] = ["generate", "gallery", "settings"];
+const TAB_IDS: readonly TabId[] = ["generate", "edit", "gallery", "settings"];
 
 const readTabFromHash = (): TabId => {
   if (typeof window === "undefined") return "generate";
@@ -184,7 +184,7 @@ export default function Home() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationProgress, setGenerationProgress] = useState<ProgressSnapshot | null>(null);
   const [currentImage, setCurrentImage] = useState<GenerateResponse | null>(null);
-  const [editTarget, setEditTarget] = useState<ImageEditTarget | null>(null);
+  const [editTarget, setEditTarget] = useState<EditSource | null>(null);
   const [recentImages, setRecentImages] = useState<RecentImage[]>([]);
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
@@ -660,7 +660,8 @@ export default function Home() {
   }, [cadenceMinutes, loopEnabled, nextRunAt]);
 
   const tabs = [
-    { id: "generate" as const, label: "Create", icon: Sparkles },
+    { id: "generate" as const, label: "Generate", icon: Sparkles },
+    { id: "edit" as const, label: "Edit", icon: Wand2 },
     { id: "gallery" as const, label: "Gallery", icon: ImageIcon },
     { id: "settings" as const, label: "Settings", icon: SettingsIcon },
   ];
@@ -885,7 +886,7 @@ export default function Home() {
 
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <div className="border-b border-border/70 bg-muted/20 lg:hidden">
-            <div className="flex gap-2 overflow-x-auto px-3 py-2">
+            <div className="grid grid-cols-4 gap-1 px-2 py-2 sm:flex sm:gap-2 sm:overflow-x-auto sm:px-3">
               {tabs.map((tab) => {
                 const Icon = tab.icon;
                 return (
@@ -893,7 +894,7 @@ export default function Home() {
                     key={tab.id}
                     onClick={() => selectTab(tab.id)}
                     className={cn(
-                      "flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition whitespace-nowrap",
+                      "flex min-w-0 flex-col items-center gap-1 rounded-lg border px-1 py-2 text-[11px] transition whitespace-nowrap sm:flex-row sm:gap-2 sm:px-3 sm:text-sm",
                       activeTab === tab.id
                         ? "border-primary/40 bg-primary/12 text-foreground"
                         : "border-transparent text-muted-foreground hover:border-border/60 hover:bg-card/40 hover:text-foreground"
@@ -1407,7 +1408,10 @@ export default function Home() {
                               </div>
                               <button
                                 type="button"
-                                onClick={() => setEditTarget({ imageUrl: `${API_BASE}${currentImage.image_path}`, sourcePath: currentImage.image_path, prompt: currentImage.prompt })}
+                                onClick={() => {
+                                  setEditTarget({ imageUrl: currentImage.image_path, sourcePath: currentImage.image_path.replace(/^\/images\//, ""), prompt: currentImage.prompt });
+                                  selectTab("edit");
+                                }}
                                 className="mt-3 inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-violet-500 px-4 py-2 text-sm text-white transition hover:bg-violet-600"
                               >
                                 <Wand2 className="h-4 w-4" />
@@ -1678,7 +1682,19 @@ export default function Home() {
               exit={{ opacity: 0, y: -8 }}
               className="h-full"
             >
-              <Gallery onRequestEdit={setEditTarget} />
+              <Gallery onRequestEdit={(target) => { setEditTarget(target); selectTab("edit"); }} />
+            </motion.div>
+          )}
+
+          {activeTab === "edit" && (
+            <motion.div
+              key="edit"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              className="h-full"
+            >
+              <EditWorkspace initialSource={editTarget} />
             </motion.div>
           )}
 
@@ -1700,37 +1716,19 @@ export default function Home() {
       <footer className="border-t border-border bg-muted/50">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-2 text-xs text-muted-foreground sm:px-6">
           <span>
-            {status?.status === "ready" ? "Ready to generate" : "Connecting to backend"}
+            {activeTab === "edit"
+              ? "Edit workspace ready"
+              : status?.status === "ready" ? "Ready to generate" : "Connecting to backend"}
           </span>
           <span>
-            {loopEnabled
+            {activeTab === "edit"
+              ? "Local until explicitly approved and published"
+              : loopEnabled
               ? `Loop active, next run in ${formatCountdown(nextRunAt)}`
               : "Loop stopped"}
           </span>
         </div>
       </footer>
-      {editTarget && (
-        <ImageEditPanel
-          target={editTarget}
-          onClose={() => setEditTarget(null)}
-          onCompleted={(response) => {
-            setCurrentImage((current) => current ? {
-              ...current,
-              id: response.id,
-              prompt: response.prompt,
-              image_path: response.edited_path,
-              metadata: {
-                ...current.metadata,
-                ...response.metadata,
-                backend: String(response.metadata.backend ?? "edit"),
-                plugins_used: current.metadata.plugins_used ?? [],
-              },
-              created_at: response.created_at,
-            } : current);
-            void loadRecentImages();
-          }}
-        />
-      )}
       </div>
       </div>
       </div>

@@ -26,7 +26,7 @@ from src.utils.publication_catalog import (
 DEFAULT_BUCKET = "dreamgen-gallery"
 CURRENT_MANIFEST_KEY = "_dreamgen/current.json"
 RELEASE_MANIFEST_PREFIX = "_dreamgen/releases"
-MANIFEST_SCHEMA_VERSION = 1
+MANIFEST_SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -231,6 +231,30 @@ def build_publish_plan(
         if not bool(entry.get("publishable", True)):
             skipped.append(SkippedAsset(key, "not publishable"))
             continue
+        metadata = entry.get("metadata") or {}
+        lineage = metadata.get("edit_lineage") if isinstance(metadata, dict) else None
+        if isinstance(lineage, dict) and (
+            lineage.get("role") != "derivative" or lineage.get("decision_state") != "approved"
+        ):
+            skipped.append(SkippedAsset(key, "edit derivative is not explicitly approved"))
+            continue
+        decision_manifest_path = None
+        if isinstance(lineage, dict):
+            manifest_key = str(lineage.get("decision_manifest_path") or "")
+            expected_sha = str(lineage.get("decision_manifest_sha256") or "")
+            candidate = (output_dir / manifest_key).resolve()
+            try:
+                candidate.relative_to(output_dir.resolve())
+            except ValueError:
+                skipped.append(SkippedAsset(key, "edit decision manifest is outside output"))
+                continue
+            if not manifest_key or not expected_sha or not candidate.is_file():
+                skipped.append(SkippedAsset(key, "edit decision manifest is missing"))
+                continue
+            if _sha256(candidate) != expected_sha:
+                skipped.append(SkippedAsset(key, "edit decision manifest hash mismatch"))
+                continue
+            decision_manifest_path = candidate
         quality_flags = {str(flag) for flag in entry.get("quality_flags", [])}
         blocking_flags = sorted(quality_flags & PUBLICATION_BLOCKING_QUALITY_FLAGS)
         if blocking_flags:
@@ -247,6 +271,13 @@ def build_publish_plan(
         assets.append(PublishAsset(image_path, object_key(image_path, output_dir), reason))
         _add_sidecar(assets, image_path.with_suffix(".txt"), output_dir, "prompt sidecar")
         _add_sidecar(assets, image_path.with_suffix(".meta.json"), output_dir, "metadata sidecar")
+        if decision_manifest_path:
+            _add_sidecar(
+                assets,
+                decision_manifest_path,
+                output_dir,
+                "immutable edit decision manifest",
+            )
 
         included_images += 1
         if limit is not None and included_images >= limit:
@@ -288,6 +319,12 @@ def build_release_manifest(
                 "approved_at": entry.get("published_at") or entry.get("updated_at"),
             },
         }
+        edit_lineage = metadata.get("edit_lineage")
+        decision_manifest_path = None
+        decision_manifest_sha = None
+        if isinstance(edit_lineage, dict) and edit_lineage.get("decision_manifest_path"):
+            decision_manifest_path = output_dir / str(edit_lineage["decision_manifest_path"])
+            decision_manifest_sha = _sha256(decision_manifest_path)
         items.append(
             {
                 "position": position,
@@ -308,6 +345,16 @@ def build_release_manifest(
                 ),
                 "metadata_version": metadata_version,
                 "metadata": metadata,
+                "edit_lineage": edit_lineage if isinstance(edit_lineage, dict) else None,
+                "decision_manifest_key": (
+                    object_key(decision_manifest_path, output_dir)
+                    if decision_manifest_path
+                    else None
+                ),
+                "decision_manifest_version": (
+                    decision_manifest_sha[:20] if decision_manifest_sha else None
+                ),
+                "decision_manifest_sha256": decision_manifest_sha,
             }
         )
 
@@ -339,6 +386,9 @@ def build_release_manifest(
                 "publication_state": item["publication_state"],
                 "created_at": item["created_at"],
                 "approved_at": item["approved_at"],
+                "edit_lineage": item["edit_lineage"],
+                "decision_manifest_key": item["decision_manifest_key"],
+                "decision_manifest_version": item["decision_manifest_version"],
             }
             for item in items
         ],

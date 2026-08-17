@@ -144,3 +144,99 @@ def test_unload_releases_sidecar_pipeline(sidecar, monkeypatch):
 
     assert payload == {"status": "ready", "unloaded": True, "was_loaded": True}
     assert sidecar._pipeline is None
+
+
+def test_mirrored_edit_call_uses_only_supported_pipeline_controls(sidecar, monkeypatch):
+    observed = {}
+
+    class Pipeline:
+        def edit(self, prompts, references, **kwargs):
+            observed.update({"prompts": prompts, "references": references, **kwargs})
+            return [Image.new("RGB", (64, 64), "teal")]
+
+    monkeypatch.setenv("MAGEFLOW_EDIT_ENABLED", "true")
+    monkeypatch.setitem(sidecar.EDIT_MODELS["turbo"], "revision", sidecar.EDIT_MIRROR_REVISION)
+    monkeypatch.setattr(sidecar, "_load_pipeline", lambda *_args, **_kwargs: Pipeline())
+    monkeypatch.setattr(sidecar.torch.cuda, "is_available", lambda: False)
+    source = io.BytesIO()
+    Image.new("RGB", (64, 48), "navy").save(source, "PNG")
+    second = io.BytesIO()
+    Image.new("RGB", (32, 32), "gold").save(second, "PNG")
+
+    image, metrics = sidecar._run_edit(
+        [source.getvalue(), second.getvalue()],
+        command="make it teal",
+        variant="turbo",
+        seed=7,
+        steps=4,
+        guidance=1.0,
+        max_size=1024,
+        negative_prompt="",
+        vl_cond_long_edge=384,
+    )
+
+    assert Image.open(io.BytesIO(image)).size == (64, 64)
+    assert observed["prompts"] == ["make it teal"]
+    assert len(observed["references"]) == 1
+    assert len(observed["references"][0]) == 2
+    assert all(isinstance(item, Image.Image) for item in observed["references"][0])
+    assert observed["seeds"] == [7]
+    assert observed["steps"] == 4
+    assert observed["cfg"] == 1.0
+    assert observed["max_size"] == 1024
+    assert observed["vl_cond_long_edge"] == 384
+    assert "strength" not in observed
+    assert metrics["peak_vram_mb"] is None
+
+
+def test_mirrored_edit_rejects_more_than_three_references(sidecar):
+    with pytest.raises(HTTPException) as exc_info:
+        sidecar._run_edit(
+            [b"not-read"] * 4,
+            command="combine them",
+            variant="turbo",
+            seed=7,
+            steps=4,
+            guidance=1.0,
+            max_size=1024,
+            negative_prompt="",
+            vl_cond_long_edge=384,
+        )
+
+    assert exc_info.value.status_code == 422
+
+
+def test_mirror_overlay_links_pinned_weights_without_copying(sidecar, monkeypatch, tmp_path):
+    config = tmp_path / "config"
+    (config / "transformer").mkdir(parents=True)
+    (config / "scheduler").mkdir()
+    (config / "text_encoder").mkdir()
+    (config / "model_index.json").write_text("{}", encoding="utf-8")
+    (config / "transformer" / "config.json").write_text("{}", encoding="utf-8")
+    (config / "scheduler" / "scheduler_config.json").write_text("{}", encoding="utf-8")
+    (config / "text_encoder" / "config.json").write_text("{}", encoding="utf-8")
+    (config / "text_encoder" / "model.safetensors.index.json").write_text("{}", encoding="utf-8")
+    artifacts = {}
+    for name in ("transformer", "text_encoder", "vae"):
+        path = tmp_path / f"{name}.safetensors"
+        path.write_bytes(name.encode())
+        artifacts[name] = str(path)
+    artifacts["config"] = str(config)
+    monkeypatch.setenv("HF_HOME", str(tmp_path / "hf"))
+    monkeypatch.setattr(sidecar, "_cached_edit_assets", lambda _settings: artifacts)
+    monkeypatch.setattr(sidecar, "_validate_artifact", lambda *_args, **_kwargs: None)
+
+    overlay = Path(sidecar._prepare_mirror_repo(sidecar.EDIT_MODELS["aligned"]))
+
+    assert (
+        overlay / "transformer" / "diffusion_pytorch_model.safetensors"
+    ).read_bytes() == b"transformer"
+    assert (overlay / "text_encoder" / "model.safetensors").read_bytes() == b"text_encoder"
+    assert (overlay / "vae" / "diffusion_pytorch_model.safetensors").read_bytes() == b"vae"
+    assert not (overlay / "text_encoder" / "model.safetensors.index.json").exists()
+
+
+def test_edit_cache_rejects_an_unpinned_mirror_repository(sidecar, monkeypatch):
+    monkeypatch.setattr(sidecar, "EDIT_MIRROR_REPOSITORY", "someone-else/Mage-Flow")
+
+    assert sidecar._cached_edit_assets(sidecar.EDIT_MODELS["aligned"]) is None

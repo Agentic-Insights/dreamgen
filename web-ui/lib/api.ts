@@ -200,6 +200,124 @@ export interface EditResponse {
   created_at: string;
 }
 
+export interface MageEditVariant {
+  id: 'base' | 'aligned' | 'turbo';
+  label: string;
+  repository: string;
+  upstream_repository: string;
+  artifact_repository: string;
+  artifact_path: string;
+  artifact_sha256: string;
+  artifact_bytes: number;
+  default_steps: number;
+  default_guidance: number;
+  verified_revision?: string | null;
+  available: boolean;
+  ready?: boolean;
+  cached?: boolean;
+  availability_reason?: string | null;
+}
+
+export interface MageEditCapabilities {
+  feature: string;
+  official_name: string;
+  source_repository: string;
+  source_revision: string;
+  license: string;
+  research_only: boolean;
+  provenance_status: string;
+  checkpoint_source: {
+    repository: string;
+    revision: string;
+    url: string;
+    provenance_status: string;
+    license_claim: string;
+  };
+  configuration_source: {
+    repository: string;
+    revision: string;
+    weights_used: boolean;
+    purpose: string;
+  };
+  target_hardware: string;
+  available: boolean;
+  model_loaded: boolean;
+  loaded_model_id?: string | null;
+  runtime_status?: string;
+  runtime_reason?: string | null;
+  access_note: string;
+  gpu: {
+    available: boolean;
+    name?: string | null;
+    vram_total_mb?: number | null;
+    vram_free_mb?: number | null;
+  };
+  variants: MageEditVariant[];
+}
+
+export interface MageEditJob {
+  id: string;
+  status: 'queued' | 'running' | 'cancelling' | 'cancelled' | 'succeeded' | 'failed';
+  prompt: string;
+  backend: string;
+  source_path?: string | null;
+  original_path?: string | null;
+  edited_path?: string | null;
+  root_job_id: string;
+  parent_job_id?: string | null;
+  version: number;
+  decision_state: 'pending' | 'approved' | 'rejected';
+  manifest_path?: string | null;
+  metadata: Record<string, unknown>;
+  error?: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string | null;
+}
+
+export interface CreateMageEditRequest {
+  command: string;
+  variant: MageEditVariant['id'];
+  seed: number;
+  steps: number;
+  guidance: number;
+  max_size: number;
+  negative_prompt?: string;
+  vl_cond_long_edge?: number;
+  source_path?: string;
+  parent_job_id?: string;
+}
+
+export function replayRequestFromMageEditJob(job: MageEditJob): CreateMageEditRequest {
+  const settings = job.metadata.settings;
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+    throw new Error('This recovered edit has no immutable settings to retry.');
+  }
+  const saved = settings as Record<string, unknown>;
+  const variant = saved.variant;
+  const command = typeof saved.command === 'string' ? saved.command : job.prompt;
+  if (!command.trim() || !['base', 'aligned', 'turbo'].includes(String(variant))) {
+    throw new Error('This recovered edit has incomplete immutable settings.');
+  }
+  const requiredNumber = (key: string) => {
+    const value = saved[key];
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      throw new Error(`This recovered edit is missing ${key}.`);
+    }
+    return value;
+  };
+  return {
+    command,
+    variant: variant as MageEditVariant['id'],
+    seed: requiredNumber('seed'),
+    steps: requiredNumber('steps'),
+    guidance: requiredNumber('guidance'),
+    max_size: requiredNumber('max_size'),
+    negative_prompt: typeof saved.negative_prompt === 'string' ? saved.negative_prompt : '',
+    vl_cond_long_edge: requiredNumber('vl_cond_long_edge'),
+  };
+}
+
 export interface PromptResponse {
   prompt: string;
 }
@@ -811,6 +929,62 @@ export class ImageGenAPI {
   async getEditJob(jobId: string): Promise<Record<string, unknown>> {
     const response = await fetch(`${this.baseUrl}/api/edit/jobs/${encodeURIComponent(jobId)}`);
     if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to get edit job'));
+    return response.json();
+  }
+
+  async getMageEditCapabilities(): Promise<MageEditCapabilities> {
+    const response = await fetch(`${this.baseUrl}/api/edit/capabilities`);
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to get edit capabilities'));
+    return response.json();
+  }
+
+  async getMageEditJobs(rootJobId?: string): Promise<{ jobs: MageEditJob[] }> {
+    const params = new URLSearchParams();
+    if (rootJobId) params.set('root_job_id', rootJobId);
+    const response = await fetch(`${this.baseUrl}/api/edit/jobs?${params.toString()}`);
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to get edit history'));
+    return response.json();
+  }
+
+  async downloadMageEditModel(variant: MageEditVariant['id']): Promise<Record<string, unknown>> {
+    const response = await fetch(`${this.baseUrl}/api/edit/models/${variant}/download`, { method: 'POST' });
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to download pinned edit mirror'));
+    return response.json();
+  }
+
+  async createMageEditJob(files: File[], request: CreateMageEditRequest): Promise<MageEditJob> {
+    if (files.length < 1 || files.length > 3) {
+      throw new Error('Mage-Flow-Edit requires between one and three reference images');
+    }
+    const formData = new FormData();
+    for (const file of files) formData.append('files', file);
+    for (const [key, value] of Object.entries(request)) {
+      if (value !== undefined && value !== '') formData.append(key, String(value));
+    }
+    const response = await fetch(`${this.baseUrl}/api/edit/jobs`, { method: 'POST', body: formData });
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to queue edit'));
+    return response.json();
+  }
+
+  async cancelMageEditJob(jobId: string): Promise<MageEditJob> {
+    const response = await fetch(`${this.baseUrl}/api/edit/jobs/${encodeURIComponent(jobId)}/cancel`, { method: 'POST' });
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to cancel edit'));
+    return response.json();
+  }
+
+  async retryMageEditJob(jobId: string): Promise<MageEditJob> {
+    const response = await fetch(`${this.baseUrl}/api/edit/jobs/${encodeURIComponent(jobId)}/retry`, { method: 'POST' });
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to retry exact edit settings'));
+    return response.json();
+  }
+
+  async decideMageEditJob(jobId: string, decision: 'approved' | 'rejected' | 'pending'): Promise<MageEditJob> {
+    const response = await fetch(`${this.baseUrl}/api/edit/jobs/${encodeURIComponent(jobId)}/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision }),
+    });
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to record edit decision'));
     return response.json();
   }
 

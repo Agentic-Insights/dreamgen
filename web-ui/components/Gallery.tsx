@@ -18,7 +18,7 @@ import {
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import galleryCache from "@/lib/cache";
-import type { ImageEditTarget } from "@/components/ImageEditPanel";
+import type { EditSource } from "@/components/EditWorkspace";
 
 interface GalleryImage {
   path: string;
@@ -157,7 +157,7 @@ const withTimeout = async <T,>(
 );
 
 interface GalleryProps {
-  onRequestEdit?: (target: ImageEditTarget) => void;
+  onRequestEdit?: (target: EditSource) => void;
 }
 
 export default function Gallery({ onRequestEdit }: GalleryProps) {

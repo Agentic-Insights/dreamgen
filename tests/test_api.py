@@ -3,6 +3,7 @@ Tests for the FastAPI server endpoints
 """
 
 import atexit
+import io
 import os
 import shutil
 import tempfile
@@ -47,8 +48,11 @@ os.environ["CACHE_DIR"] = "./.cache"
 os.environ["CPU_ONLY"] = "false"
 os.environ["MPS_USE_FP16"] = "false"
 
+from src.api import server as api_server
 from src.api.server import app
 from src.api.server import config as api_config
+from src.services.mage_edit_runtime import EditRuntimeResult
+from src.utils.mage_edit import capability_document
 
 
 @pytest.fixture
@@ -61,6 +65,163 @@ def test_health_check(client):
     """Test the root health check endpoint"""
     response = client.get("/")
     assert response.status_code in [200, 404]  # May return 404 if no root route
+
+
+def test_model_catalog_returns_provider_neutral_contract(client):
+    response = client.get("/api/models/catalog")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["target_default"] == "flux2-klein-4b"
+    assert payload["target_default_selectable"] is False
+    assert [engine["role"] for engine in payload["engines"]] == [
+        "target_default",
+        "benchmark_lane",
+        "benchmark_lane",
+    ]
+
+
+def test_mage_edit_capabilities_are_truthfully_unavailable(client, monkeypatch):
+    monkeypatch.setattr(api_server, "probe_edit_runtime", lambda: None)
+    response = client.get("/api/edit/capabilities")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["official_name"] == "Mage-Flow-Edit"
+    assert payload["available"] is False
+    assert payload["runtime_status"] == "offline"
+    assert "strength" not in payload["controls"]
+
+
+def test_mage_edit_job_uses_official_runtime_and_persists_lineage(client, monkeypatch):
+    capabilities = capability_document()
+    capabilities["available"] = True
+    capabilities["source_revision"] = "76bec2bb3818863f470de7e867c2dc7f1d0bfd83"
+    capabilities["gpu"] = {"available": True, "name": "RTX 4090", "vram_total_mb": 24576}
+    for item in capabilities["variants"]:
+        item["ready"] = item["id"] == "turbo"
+    monkeypatch.setattr(api_server, "edit_capabilities_with_runtime", lambda: capabilities)
+
+    result_buffer = io.BytesIO()
+    Image.new("RGB", (64, 64), "teal").save(result_buffer, "PNG")
+    observed = {}
+
+    def fake_run_mage_edit(sources, _settings):
+        observed["sources"] = sources
+        return EditRuntimeResult(
+            image=result_buffer.getvalue(),
+            model="Comfy-Org/Mage-Flow",
+            upstream_model="microsoft/Mage-Flow-Edit-Turbo",
+            revision="a" * 40,
+            artifact_path="diffusion_models/mage_flow_edit_turbo_bf16.safetensors",
+            artifact_sha256="b" * 64,
+            provenance_status="user_authorized_comfy_org_mirror",
+            configuration_repository="mage-flow-community/Mage-Flow-Edit",
+            configuration_revision="c" * 40,
+            source_revision="76bec2bb3818863f470de7e867c2dc7f1d0bfd83",
+            elapsed_seconds=1.25,
+            peak_vram_mb=19800,
+        )
+
+    monkeypatch.setattr(api_server, "run_mage_edit", fake_run_mage_edit)
+    source_buffer = io.BytesIO()
+    Image.new("RGB", (64, 64), "navy").save(source_buffer, "PNG")
+    reference_buffer = io.BytesIO()
+    Image.new("RGB", (48, 48), "gold").save(reference_buffer, "PNG")
+
+    created = client.post(
+        "/api/edit/jobs",
+        files=[
+            ("files", ("source.png", source_buffer.getvalue(), "image/png")),
+            ("files", ("reference.png", reference_buffer.getvalue(), "image/png")),
+        ],
+        data={
+            "command": "make it teal",
+            "variant": "turbo",
+            "seed": "7",
+            "steps": "4",
+            "guidance": "1.0",
+            "max_size": "512",
+            "negative_prompt": "haze",
+            "vl_cond_long_edge": "384",
+        },
+    )
+    assert created.status_code == 202
+    job = client.get(f"/api/edit/jobs/{created.json()['id']}").json()
+
+    assert job["status"] == "succeeded"
+    assert job["metadata"]["source_sha256"]
+    assert len(job["metadata"]["source_sha256s"]) == 2
+    assert [item["role"] for item in job["metadata"]["source_artifacts"]] == [
+        "primary",
+        "reference",
+    ]
+    assert len(observed["sources"]) == 2
+    assert job["metadata"]["derivative_sha256"]
+    assert job["metadata"]["hardware"]["peak_vram_mb"] == 19800
+    assert job["metadata"]["model_revision"] == "a" * 40
+    assert job["metadata"]["model"] == "Comfy-Org/Mage-Flow"
+    assert job["metadata"]["upstream_model"] == "microsoft/Mage-Flow-Edit-Turbo"
+    assert job["metadata"]["artifact_sha256"] == "b" * 64
+    assert job["metadata"]["provenance_status"] == "user_authorized_comfy_org_mirror"
+    assert job["decision_state"] == "pending"
+
+    approved = client.post(f"/api/edit/jobs/{job['id']}/decision", json={"decision": "approved"})
+    assert approved.status_code == 200
+    assert approved.json()["decision_state"] == "approved"
+
+    retry = client.post(f"/api/edit/jobs/{job['id']}/retry")
+    assert retry.status_code == 202
+    retried = client.get(f"/api/edit/jobs/{retry.json()['id']}").json()
+    assert retried["status"] == "succeeded"
+    assert retried["root_job_id"] == job["root_job_id"]
+    assert retried["parent_job_id"] == job["id"]
+    assert retried["version"] == 2
+    assert retried["metadata"]["settings"] == job["metadata"]["settings"]
+
+
+def test_mage_edit_job_rejects_more_than_three_references(client, monkeypatch):
+    capabilities = capability_document()
+    capabilities["available"] = True
+    for item in capabilities["variants"]:
+        item["ready"] = item["id"] == "turbo"
+    monkeypatch.setattr(api_server, "edit_capabilities_with_runtime", lambda: capabilities)
+    source = io.BytesIO()
+    Image.new("RGB", (16, 16), "navy").save(source, "PNG")
+
+    response = client.post(
+        "/api/edit/jobs",
+        files=[
+            ("files", (f"source-{index}.png", source.getvalue(), "image/png")) for index in range(4)
+        ],
+        data={"command": "combine them", "variant": "turbo"},
+    )
+
+    assert response.status_code == 422
+    assert "one and three" in response.json()["detail"]
+
+
+def test_diagnostic_edit_fixture_cannot_be_decided(client):
+    source = io.BytesIO()
+    Image.new("RGB", (16, 16), "navy").save(source, "PNG")
+    created = client.post(
+        "/api/edit",
+        files={"file": ("source.png", source.getvalue(), "image/png")},
+        data={
+            "prompt": "diagnostic tint",
+            "backend": "mock",
+            "strength": "0.5",
+        },
+    )
+
+    assert created.status_code == 200
+    response = client.post(
+        f"/api/edit/jobs/{created.json()['id']}/decision",
+        json={"decision": "approved"},
+    )
+
+    assert response.status_code == 409
+    assert "Diagnostic fixtures" in response.json()["detail"]
 
 
 def test_status_endpoint(client):
@@ -76,7 +237,8 @@ def test_status_endpoint(client):
     assert data["active_model_id"]
     assert data["preferred_model"] == "Microsoft Mage-Flow"
     assert data["preferred_model_status"] in {"ready", "partial", "not_downloaded"}
-    assert data["fallback_model"] == "Small Stable Diffusion"
+    assert data["fallback_model"]
+    assert data["fallback_model_id"]
     assert data["backend"] in [
         "mock",
         "smoke-test",
@@ -280,19 +442,20 @@ def test_prompt_endpoint_accepts_client_request_id(client, monkeypatch):
     assert response.json() == {"prompt": "prompt from cinematic alleyway"}
 
 
-def test_generate_without_prompt(client):
-    """Test generation with AI-generated prompt (requires Ollama)"""
+def test_generate_without_prompt(client, monkeypatch):
+    """Test generation with a deterministic generated prompt."""
+
+    async def fake_generate_prompt(self, meta_prompt=None):
+        return "deterministic generated prompt"
+
+    monkeypatch.setattr("src.api.server.PromptGenerator.generate_prompt", fake_generate_prompt)
     payload = {"enable_plugins": False}
 
     response = client.post("/api/generate", json=payload)
-    # May fail if Ollama is not running (500), which is expected in test environment
-    if response.status_code == 500:
-        pytest.skip("Ollama not running - skipping AI prompt generation test")
 
     assert response.status_code == 200
     data = response.json()
-    assert "prompt" in data
-    assert len(data["prompt"]) > 0  # Should have generated a prompt
+    assert data["prompt"] == "deterministic generated prompt"
 
 
 def test_generate_with_seed(client):
