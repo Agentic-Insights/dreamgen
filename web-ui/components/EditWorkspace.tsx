@@ -8,7 +8,8 @@ import {
 } from "lucide-react";
 
 import {
-  API_BASE, api, type MageEditCapabilities, type MageEditJob, type MageEditVariant,
+  API_BASE, api, replayRequestFromMageEditJob, type CreateMageEditRequest,
+  type MageEditCapabilities, type MageEditJob, type MageEditVariant,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -79,6 +80,21 @@ export default function EditWorkspace({ initialSource, onSourceConsumed }: EditW
     setSelectedJob(null);
     onSourceConsumed?.();
   }, [initialSource, onSourceConsumed]);
+  useEffect(() => {
+    if (!selectedJob || selectedJob.backend !== "mage-flow-edit") return;
+    try {
+      const saved = replayRequestFromMageEditJob(selectedJob);
+      setCommand(saved.command);
+      setVariant(saved.variant);
+      setSeed(saved.seed);
+      setSteps(saved.steps);
+      setGuidance(saved.guidance);
+      setMaxSize(saved.max_size);
+      setNegativePrompt(saved.negative_prompt ?? "");
+    } catch {
+      // Legacy jobs remain inspectable; Retry surfaces the precise missing-settings error.
+    }
+  }, [selectedJob]);
   useEffect(() => () => {
     previews.filter((preview) => preview.startsWith("blob:")).forEach(URL.revokeObjectURL);
   }, [previews]);
@@ -88,7 +104,9 @@ export default function EditWorkspace({ initialSource, onSourceConsumed }: EditW
     [capabilities, variant]
   );
   const resultUrl = imageUrl(selectedJob?.edited_path);
-  const sourceUrl = imageUrl(selectedJob?.original_path || previews[0] || source?.imageUrl);
+  const sourceUrl = imageUrl(
+    selectedJob?.original_path || selectedJob?.source_path || previews[0] || source?.imageUrl,
+  );
   const activeJobs = jobs.filter((job) => ["queued", "running", "cancelling"].includes(job.status));
   const activeJob = activeJobs.find((job) => job.status === "running" || job.status === "cancelling") ?? activeJobs[0];
   const queuedCount = activeJobs.filter((job) => job.status === "queued").length;
@@ -119,7 +137,7 @@ export default function EditWorkspace({ initialSource, onSourceConsumed }: EditW
       await api.downloadMageEditModel(variant);
       await refresh();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Could not download official model");
+      setError(reason instanceof Error ? reason.message : "Could not download the pinned mirror");
     } finally {
       setDownloading(false);
     }
@@ -137,15 +155,6 @@ export default function EditWorkspace({ initialSource, onSourceConsumed }: EditW
     setError(null);
   };
 
-  const jobSourceUrls = (job?: MageEditJob | null) => {
-    const artifacts = job?.metadata?.source_artifacts;
-    if (!Array.isArray(artifacts)) return job?.original_path ? [imageUrl(job.original_path)] : [];
-    return artifacts.flatMap((artifact) => {
-      if (!artifact || typeof artifact !== "object" || !("path" in artifact)) return [];
-      return typeof artifact.path === "string" ? [imageUrl(artifact.path)] : [];
-    });
-  };
-
   const resolveFiles = async (preferredUrls: string[] = sourceUrl ? [sourceUrl] : []) => {
     if (files.length && preferredUrls.length <= 1 && preferredUrls[0] === sourceUrl) return files;
     if (!preferredUrls.length) throw new Error("Choose at least one source image first.");
@@ -157,22 +166,46 @@ export default function EditWorkspace({ initialSource, onSourceConsumed }: EditW
     }));
   };
 
-  const queueEdit = async (parent?: MageEditJob | null, preferredUrls?: string[]) => {
-    if (!command.trim()) return setError("Describe the change you want to make.");
-    if (!selectedVariant?.ready) return setError("This official checkpoint is not ready locally.");
+  const queueEdit = async (
+    parent?: MageEditJob | null,
+    preferredUrls?: string[],
+  ) => {
+    const request: CreateMageEditRequest = {
+      command: command.trim(), variant, seed, steps, guidance, max_size: maxSize,
+      negative_prompt: negativePrompt, vl_cond_long_edge: 384,
+      source_path: source?.sourcePath,
+    };
+    if (!request.command.trim()) return setError("Describe the change you want to make.");
+    const requestVariant = capabilities?.variants.find((item) => item.id === request.variant);
+    if (!requestVariant?.ready) return setError("This pinned mirror checkpoint is not ready locally.");
     setSubmitting(true);
     setError(null);
     try {
       const sourceFiles = await resolveFiles(preferredUrls);
       const job = await api.createMageEditJob(sourceFiles, {
-        command: command.trim(), variant, seed, steps, guidance, max_size: maxSize,
-        negative_prompt: negativePrompt, vl_cond_long_edge: 384,
-        source_path: source?.sourcePath, parent_job_id: parent?.id,
+        ...request,
+        command: request.command.trim(),
+        parent_job_id: parent?.id,
       });
       setJobs((current) => [job, ...current]);
       setSelectedJob(job);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not queue edit");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const retry = async () => {
+    if (!selectedJob) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const job = await api.retryMageEditJob(selectedJob.id);
+      setJobs((current) => [job, ...current]);
+      setSelectedJob(job);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not recover retry settings");
     } finally {
       setSubmitting(false);
     }
@@ -215,7 +248,7 @@ export default function EditWorkspace({ initialSource, onSourceConsumed }: EditW
             <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-primary">Edit workspace</div>
             <h1 className="mt-1 text-2xl font-semibold">Command an image transformation</h1>
             <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-              Microsoft Mage-Flow-Edit · local, versioned, and private until you explicitly approve and publish.
+              Microsoft Mage-Flow-Edit · pinned Comfy-Org mirror · local and private until approval and publish.
             </p>
           </div>
           <div className="flex flex-wrap gap-2 text-xs">
@@ -231,9 +264,9 @@ export default function EditWorkspace({ initialSource, onSourceConsumed }: EditW
           <div className="mb-4 flex gap-3 rounded-xl border border-amber-400/40 bg-amber-400/10 p-4 text-sm" data-testid="edit-unavailable">
             <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-300" />
             <div>
-              <div className="font-semibold text-amber-200">Official checkpoints are not available locally</div>
+              <div className="font-semibold text-amber-200">Pinned mirror is not enabled</div>
               <p className="mt-1 text-muted-foreground">{capabilities.access_note}</p>
-              <p className="mt-2 font-mono text-xs">Action: restore Microsoft repository access, run hf auth login, then pin the verified 40-character revision.</p>
+              <p className="mt-2 font-mono text-xs">Action: enable the exact Comfy-Org revision shown in provenance.</p>
             </div>
           </div>
         )}
@@ -253,10 +286,15 @@ export default function EditWorkspace({ initialSource, onSourceConsumed }: EditW
             <div className="grid grid-cols-3 gap-2">
               {capabilities?.variants.map((item) => <button key={item.id} type="button" onClick={() => chooseVariant(item.id)} className={cn("rounded-lg border p-2 text-left text-xs", variant === item.id ? "border-primary bg-primary/10" : "border-border/70")}><div className="font-semibold">{item.label}</div><div className="mt-1 text-muted-foreground">{item.default_steps} steps{item.ready ? " · ready" : " · unavailable"}</div></button>)}
             </div>
-            {selectedVariant?.available && !selectedVariant.cached && <button type="button" disabled={downloading} onClick={() => void downloadModel()} className="flex w-full items-center justify-center gap-2 rounded-lg border border-primary/40 px-3 py-2 text-xs"><UploadCloud className="h-4 w-4" />{downloading ? "Downloading official checkpoint…" : `Download ${selectedVariant.label}`}</button>}
+            {selectedVariant?.available && !selectedVariant.cached && <button type="button" disabled={downloading} onClick={() => void downloadModel()} className="flex w-full items-center justify-center gap-2 rounded-lg border border-primary/40 px-3 py-2 text-xs"><UploadCloud className="h-4 w-4" />{downloading ? "Downloading pinned mirror…" : `Download ${selectedVariant.label} mirror`}</button>}
             <div className="grid grid-cols-2 gap-3 text-xs">
               <label>Seed<input type="number" value={seed} onChange={(e) => setSeed(Number(e.target.value))} className="mt-1 w-full rounded-lg border bg-background p-2" /></label>
-              <label>Longest side<select value={maxSize} onChange={(e) => setMaxSize(Number(e.target.value))} className="mt-1 w-full rounded-lg border bg-background p-2">{[512,768,1024,1536,2048].map((size) => <option key={size}>{size}</option>)}</select></label>
+              <label>Longest side<select value={maxSize} onChange={(e) => setMaxSize(Number(e.target.value))} className="mt-1 w-full rounded-lg border bg-background p-2">
+                <option value={512}>512</option><option value={768}>768</option>
+                <option value={1024}>1024 · 4090 default</option>
+                <option value={1536}>1536 · tight on 24 GB</option>
+                <option value={2048}>2048 · experimental on 24 GB</option>
+              </select></label>
               <label>Steps<input type="number" min={1} max={50} value={steps} onChange={(e) => setSteps(Number(e.target.value))} className="mt-1 w-full rounded-lg border bg-background p-2" /></label>
               <label>CFG<input type="number" min={1} max={10} step="0.5" value={guidance} onChange={(e) => setGuidance(Number(e.target.value))} className="mt-1 w-full rounded-lg border bg-background p-2" /></label>
             </div>
@@ -281,7 +319,7 @@ export default function EditWorkspace({ initialSource, onSourceConsumed }: EditW
             {selectedJob?.status === "succeeded" && <div className="mt-4 flex flex-wrap gap-2">
               <button disabled={Boolean(diagnosticJob)} onClick={() => void decide("approved")} className="flex items-center gap-2 rounded-lg bg-emerald-500 px-3 py-2 text-xs font-semibold text-black disabled:opacity-35"><Check className="h-4 w-4" />Approve</button>
               <button disabled={Boolean(diagnosticJob)} onClick={() => void decide("rejected")} className="flex items-center gap-2 rounded-lg border border-rose-400/50 px-3 py-2 text-xs disabled:opacity-35"><X className="h-4 w-4" />Reject</button>
-              <button disabled={Boolean(diagnosticJob)} onClick={() => void queueEdit(selectedJob, jobSourceUrls(selectedJob))} className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs disabled:opacity-35"><RotateCcw className="h-4 w-4" />Retry</button>
+              <button data-testid="retry-edit" disabled={Boolean(diagnosticJob)} onClick={() => void retry()} className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs disabled:opacity-35"><RotateCcw className="h-4 w-4" />Retry exact settings</button>
               <button disabled={Boolean(diagnosticJob)} onClick={branch} className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs disabled:opacity-35"><GitBranch className="h-4 w-4" />Branch from result</button>
               <button disabled={Boolean(diagnosticJob) || selectedJob.decision_state !== "approved"} onClick={() => void publish()} className="ml-auto flex items-center gap-2 rounded-lg border border-primary/40 px-3 py-2 text-xs disabled:opacity-35"><UploadCloud className="h-4 w-4" />Publish to gallery</button>
             </div>}
@@ -295,7 +333,8 @@ export default function EditWorkspace({ initialSource, onSourceConsumed }: EditW
             </div>
             <div className="mt-4 border-t pt-4 text-[11px] text-muted-foreground">
               <div className="font-semibold text-foreground">Immutable provenance</div>
-              <p className="mt-1">Source and derivative SHA-256 hashes, command, official model/revision, settings, timing, VRAM, parent, and decisions are retained in hash-linked manifests.</p>
+              <p className="mt-1">Source and derivative hashes, Microsoft upstream identity, Comfy-Org artifact path/revision/SHA-256, configuration source, settings, timing, VRAM, parent, and decisions are retained in hash-linked manifests.</p>
+              {selectedVariant && <p className="mt-2 break-all font-mono text-[10px]">{selectedVariant.artifact_repository}@{selectedVariant.verified_revision}<br />{selectedVariant.artifact_path}<br />sha256:{selectedVariant.artifact_sha256}</p>}
             </div>
           </aside>
         </div>

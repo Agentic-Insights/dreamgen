@@ -1,9 +1,10 @@
 # ✨ DreamGen
 
-> Microsoft Mage-Flow-Edit support is implemented as a first-class, provenance-preserving
-> local workflow but remains inference-gated while the official checkpoints are unavailable.
-> See [docs/MAGE_FLOW_EDIT.md](docs/MAGE_FLOW_EDIT.md) for exact repositories, controls,
-> license/intended-use caveats, and the current access boundary.
+> Microsoft Mage-Flow-Edit is available as a first-class, provenance-preserving local
+> workflow through an explicitly user-authorized, hash-pinned Comfy-Org mirror. DreamGen
+> records the mirror separately from Microsoft's upstream identity. See
+> [docs/MAGE_FLOW_EDIT.md](docs/MAGE_FLOW_EDIT.md) for exact artifacts, measured RTX 4090
+> evidence, controls, and license/intended-use caveats.
 
 Generate unlimited AI images locally with no subscriptions, no cloud APIs, and complete privacy. Your machine dreams with you! ✨
 

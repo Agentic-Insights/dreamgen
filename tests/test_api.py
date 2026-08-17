@@ -110,8 +110,14 @@ def test_mage_edit_job_uses_official_runtime_and_persists_lineage(client, monkey
         observed["sources"] = sources
         return EditRuntimeResult(
             image=result_buffer.getvalue(),
-            model="microsoft/Mage-Flow-Edit-Turbo",
+            model="Comfy-Org/Mage-Flow",
+            upstream_model="microsoft/Mage-Flow-Edit-Turbo",
             revision="a" * 40,
+            artifact_path="diffusion_models/mage_flow_edit_turbo_bf16.safetensors",
+            artifact_sha256="b" * 64,
+            provenance_status="user_authorized_comfy_org_mirror",
+            configuration_repository="mage-flow-community/Mage-Flow-Edit",
+            configuration_revision="c" * 40,
             source_revision="76bec2bb3818863f470de7e867c2dc7f1d0bfd83",
             elapsed_seconds=1.25,
             peak_vram_mb=19800,
@@ -129,7 +135,16 @@ def test_mage_edit_job_uses_official_runtime_and_persists_lineage(client, monkey
             ("files", ("source.png", source_buffer.getvalue(), "image/png")),
             ("files", ("reference.png", reference_buffer.getvalue(), "image/png")),
         ],
-        data={"command": "make it teal", "variant": "turbo"},
+        data={
+            "command": "make it teal",
+            "variant": "turbo",
+            "seed": "7",
+            "steps": "4",
+            "guidance": "1.0",
+            "max_size": "512",
+            "negative_prompt": "haze",
+            "vl_cond_long_edge": "384",
+        },
     )
     assert created.status_code == 202
     job = client.get(f"/api/edit/jobs/{created.json()['id']}").json()
@@ -145,11 +160,24 @@ def test_mage_edit_job_uses_official_runtime_and_persists_lineage(client, monkey
     assert job["metadata"]["derivative_sha256"]
     assert job["metadata"]["hardware"]["peak_vram_mb"] == 19800
     assert job["metadata"]["model_revision"] == "a" * 40
+    assert job["metadata"]["model"] == "Comfy-Org/Mage-Flow"
+    assert job["metadata"]["upstream_model"] == "microsoft/Mage-Flow-Edit-Turbo"
+    assert job["metadata"]["artifact_sha256"] == "b" * 64
+    assert job["metadata"]["provenance_status"] == "user_authorized_comfy_org_mirror"
     assert job["decision_state"] == "pending"
 
     approved = client.post(f"/api/edit/jobs/{job['id']}/decision", json={"decision": "approved"})
     assert approved.status_code == 200
     assert approved.json()["decision_state"] == "approved"
+
+    retry = client.post(f"/api/edit/jobs/{job['id']}/retry")
+    assert retry.status_code == 202
+    retried = client.get(f"/api/edit/jobs/{retry.json()['id']}").json()
+    assert retried["status"] == "succeeded"
+    assert retried["root_job_id"] == job["root_job_id"]
+    assert retried["parent_job_id"] == job["id"]
+    assert retried["version"] == 2
+    assert retried["metadata"]["settings"] == job["metadata"]["settings"]
 
 
 def test_mage_edit_job_rejects_more_than_three_references(client, monkeypatch):
@@ -414,19 +442,20 @@ def test_prompt_endpoint_accepts_client_request_id(client, monkeypatch):
     assert response.json() == {"prompt": "prompt from cinematic alleyway"}
 
 
-def test_generate_without_prompt(client):
-    """Test generation with AI-generated prompt (requires Ollama)"""
+def test_generate_without_prompt(client, monkeypatch):
+    """Test generation with a deterministic generated prompt."""
+
+    async def fake_generate_prompt(self, meta_prompt=None):
+        return "deterministic generated prompt"
+
+    monkeypatch.setattr("src.api.server.PromptGenerator.generate_prompt", fake_generate_prompt)
     payload = {"enable_plugins": False}
 
     response = client.post("/api/generate", json=payload)
-    # May fail if Ollama is not running (500), which is expected in test environment
-    if response.status_code == 500:
-        pytest.skip("Ollama not running - skipping AI prompt generation test")
 
     assert response.status_code == 200
     data = response.json()
-    assert "prompt" in data
-    assert len(data["prompt"]) > 0  # Should have generated a prompt
+    assert data["prompt"] == "deterministic generated prompt"
 
 
 def test_generate_with_seed(client):

@@ -1,134 +1,99 @@
 # Microsoft Mage-Flow-Edit in DreamGen
 
-DreamGen calls the feature **Mage-Edit** and records the official model family name,
-**Microsoft Mage-Flow-Edit**, on every derivative. It never presents another editor,
-mirror, or fixture as Mage-Flow-Edit.
+DreamGen calls the feature **Mage-Edit** and records both identities on every
+derivative: Microsoft's upstream model family and the exact repository that supplied
+the bytes. It never relabels another editor or a diagnostic fixture as Mage-Flow-Edit.
 
-## Pinned primary source
+## Sources and pinned revisions
 
-- Implementation: `https://github.com/microsoft/Mage`
+- Upstream implementation: `https://github.com/microsoft/Mage`
 - Reviewed source commit: `76bec2bb3818863f470de7e867c2dc7f1d0bfd83`
-- Source license and Mage-Flow license declared by Microsoft: MIT
+- Checkpoint mirror authorized by this DreamGen operator: `Comfy-Org/Mage-Flow`
+- Mirror revision: `dbba082792fb61234d7218327511a9725b69db37`
+- Diffusers layout/tokenizer metadata only: `mage-flow-community/Mage-Flow-Edit`
+  at `fd7119d80fff2e5be21178edf2a93877955540b9`
+- License declared by Microsoft and the mirror card: MIT.
 - Intended-use caveat: Microsoft's README says the models are for research purposes,
-  are not intended for product/service deployment, and require human oversight and
-  downstream moderation, validation, and compliance safeguards.
-- Required runtime behavior retained by DreamGen: Microsoft's multimodal content gate
-  and Gaussian-Shading watermark are not optional or bypassed.
+  not product/service deployment, and require human oversight, moderation, validation,
+  and compliance safeguards.
+- Microsoft's multimodal content gate and Gaussian-Shading watermark remain enabled.
 
-Official checkpoint repositories:
+Microsoft's three original Hugging Face repositories remain unavailable to anonymous
+requests and to the checked signed-in account. `Comfy-Org/Mage-Flow` describes itself as
+"Repackaged model files for ComfyUI" and links Microsoft's source. This is not evidence
+that Microsoft transferred canonical ownership. The operator explicitly authorized this
+mirror; DreamGen therefore labels it `user_authorized_comfy_org_mirror` and preserves the
+Microsoft upstream identity separately.
 
-| Variant | Repository | Official edit default |
-| --- | --- | --- |
-| Base | `microsoft/Mage-Flow-Edit-Base` | 30 steps, CFG 5 |
-| RL-aligned | `microsoft/Mage-Flow-Edit` | 30 steps, CFG 5 |
-| Turbo | `microsoft/Mage-Flow-Edit-Turbo` | 4 steps, CFG 1 |
+The aligned and Turbo transformer hashes in the Comfy repository exactly match the
+previously audited `mage-flow-community` duplicates. No community weight shards are
+loaded. The aligned community repository supplies only the missing Diffusers JSON and
+tokenizer text metadata; a key inventory check found 713 expected and 713 present text
+encoder tensors, with no missing or unexpected keys.
 
-The pinned root checkpoint table and edit benchmark both list the aligned edit model
-at 30 steps. A generic parameter note in the same source says “RL 20”; that value also
-appears for the text-to-image RL model. DreamGen follows the edit-specific table and
-benchmark and keeps the user free to change steps.
+| Lane | Upstream identity | Mirror artifact | SHA-256 | Default |
+| --- | --- | --- | --- | --- |
+| Base | `microsoft/Mage-Flow-Edit-Base` | `diffusion_models/mage_flow_edit_base_bf16.safetensors` | `9d93faa75963ba4a2ef1b64bed4fe94c2554b82e8f3fb2dbb267604a634d450d` | 30 steps, CFG 5 |
+| Aligned | `microsoft/Mage-Flow-Edit` | `diffusion_models/mage_flow_edit_bf16.safetensors` | `09cee4afa95239d850af02c9b1c006bffc71dca4a984a2a1f56edff9282d53d3` | 30 steps, CFG 5 |
+| Turbo | `microsoft/Mage-Flow-Edit-Turbo` | `diffusion_models/mage_flow_edit_turbo_bf16.safetensors` | `29c3726ecd64afe149eef28af3e27b6b40de52646bfd16757a37da4b6fbcf288` | 4 steps, CFG 1 |
 
-## Availability boundary (rechecked 2026-08-16)
-
-Anonymous Hugging Face API, resolve, and git requests return HTTP 401. A clean run with
-the current available `huggingface_hub` CLI (0.35.0) produces the same result, and the
-local CLI is not authenticated. More importantly, an authenticated browser session
-shows HTTP 404 for all three official edit repositories, none appears in the account's
-gated-repository requests, and Microsoft's live Mage collection lists only `Mage-VL`
-and `Mage-ViT`. No standard gated-model agreement or request-access control is offered.
-The credential-free audit is recorded in
-`docs/proof/mage-edit/huggingface-access-audit.json`.
-
-This distinguishes the current state from an ordinary license gate: the repositories
-are withdrawn, private, or otherwise unavailable to this account. Search indexes
-captured a short-lived Microsoft publication in early August, including verified commit
-pages, but current API, resolve, signed-in browser, and collection state no longer expose
-those repositories. Stale indexed pages are not a download or provenance authority.
-Therefore DreamGen ships edit inference disabled. Full official checkpoint HEADs and
-complete current inventories remain intentionally blank; abbreviated or stale indexed
-revisions and community copies are not accepted as activation proof.
-
-Exact recovery action: Microsoft must restore/publicize the three repositories, or the
-operator must use a Hugging Face account that Microsoft has explicitly granted access.
-Then run `hf auth login` in the local terminal, verify each official repository resolves,
-pin its full 40-character commit SHA in the corresponding `MAGEFLOW_EDIT_*_REVISION`
-variable, and set `MAGEFLOW_EDIT_ENABLED=true`. Never paste a token into logs or source.
-
-### `mage-flow-community` provenance lead (rechecked 2026-08-16)
-
-The public `mage-flow-community` organization is a useful preservation lead, but it is
-not currently defensible as Microsoft's authorized or canonical continuation:
-
-- its three edit repositories are internally complete according to their own manifests
-  and have one Hugging Face commit titled `Duplicate from microsoft/...`, created by
-  `multimodalart` with duplicate-source attribution to `Xinjie-Q`; the inaccessible
-  Microsoft weights prevent an independent byte-for-byte comparison;
-- the live organization member API exposes one team member, `brimo`, and no Microsoft
-  ownership or affiliation statement;
-- identical duplicate attribution appears on unrelated users' copies, so the inherited
-  `Xinjie-Q` co-author is evidence of the Hub duplication operation, not authorization;
-- the copied cards do not name `mage-flow-community`; they still link every model and
-  usage example to the withdrawn `microsoft/Mage-Flow*` repositories;
-- Microsoft's current source HEAD
-  `76bec2bb3818863f470de7e867c2dc7f1d0bfd83` contains no community-namespace reference
-  and still defaults to the Microsoft repositories; compared with DreamGen's previous
-  `6cefeb40e4c8ecc404ecb73732a91878939f27e0` pin, the intervening changes do not alter
-  runtime code;
-- Microsoft's live Mage collection now contains only Mage-VL and Mage-ViT.
-
-The community weights are public, ungated, internally complete according to their own
-manifests, and labeled MIT, but the copied cards omit the root Microsoft README's
-research-only Responsible AI notice. That notice is an intended-use caveat rather than
-a change to the MIT license, and DreamGen continues to show it.
-
-No community weights were downloaded, aliased, or activated. The exact revisions, full
-24-object LFS inventories, weight hashes, source comparisons, browser/API results, and
-zero-byte storage decision are recorded in
-`docs/proof/mage-edit/community-provenance-audit.json`. Activation requires an explicit
-statement from Microsoft or the Mage-Flow authors that this namespace is the authorized
-checkpoint home, or restoration of the canonical Microsoft repositories.
+Aligned and Turbo are downloaded and verified. Base remains an available selectable
+lane but is not cached. The shared Qwen3-VL BF16 encoder is 8,875,719,384 bytes with
+SHA-256 `36f3ff447ef59201722e8f9ce6020c9819fdcfba6aa2608c4e09b1c0ce114e34`;
+the BF16 VAE is 345,053,056 bytes with SHA-256
+`34e076dc1e8a15321e1e07be5111d59cf16dd10b804b7c7e20b4de29013427e0`.
+DreamGen builds a no-copy Diffusers overlay from links to those pinned blobs.
 
 ## Supported operation
 
-The official API accepts one natural-language instruction plus one to three reference
-images and returns one edited image. Studio, API, and CLI enforce Microsoft's trained
-range even though the upstream implementation accepts more. The output aspect ratio
-follows the primary reference. Retry reuses the complete reference set; branch-from-result
-starts a new single-primary iteration. Supported categories include semantic/local
-content editing; subject, scene, and camera transformations; appearance and artistic
-changes; conditional reconstruction/restoration; and multi-reference composition.
+The API accepts one instruction plus one to three reference images and returns one
+edited image. The output aspect ratio follows the primary reference. Retry reuses the
+complete reference set; branch-from-result starts a new single-primary iteration.
+Supported categories include local/semantic edits, subject/scene/camera transforms,
+appearance and artistic changes, restoration, and multi-reference composition.
 
-DreamGen exposes only official parameters: command, seed, steps, CFG, maximum output
-side (512–2048), optional negative prompt, and the 384-pixel visual-language condition
-edge. Output dimensions remain multiples of 16. There is no model-supported edit
-`strength` control, so the Mage-Edit Studio and CLI do not expose one.
+Studio exposes command, variant, seed, steps, CFG, maximum output side (512–2048),
+optional negative prompt, and the 384-pixel visual-language condition edge. There is no
+model-supported edit `strength`, so DreamGen does not expose one.
 
-## RTX 4090 boundary and evidence
+## RTX 4090 evidence
 
-The supported baseline is one RTX 4090-class NVIDIA GPU with 24 GB VRAM or better.
-The checked host reports an RTX 4090 with 23,028 MiB total VRAM. Microsoft's published
-measurement is approximately 18–20 GB peak and 1.02 seconds for Turbo at 1024² on an
-A100; it is context, not DreamGen's 4090 benchmark.
+The supported baseline is one RTX 4090-class NVIDIA GPU with 24 GB VRAM or better. The
+Docker sidecar measured these genuine edits on the checked RTX 4090 (23,028 MiB total),
+using SDPA and a 512-pixel maximum side:
 
-No official edit checkpoint was accessible, so no truthful RTX 4090 edit latency,
-peak-memory measurement, or visual output can be reported yet. DreamGen does not call
-CPU/offload or another editor a successful Mage-Edit fallback. The sidecar serializes
-generation/edit work, unloads the previous model before switching, reports measured
-elapsed time and peak CUDA allocation, and rejects execution until an official full
-revision is configured and cached. Turbo and aligned must both be benchmarked on the
-4090 before this integration is release-ready.
+| Variant / references | Seed | Inference | Peak CUDA allocation | Cold HTTP total |
+| --- | ---: | ---: | ---: | ---: |
+| Aligned / one | 42 | 6.5671 s | 17,426 MiB | 123.13 s |
+| Aligned / two | 7 | 6.5592 s | 17,432 MiB | 7.43 s (warm) |
+| Turbo / one | 42 | 3.6262 s | 17,426 MiB | 93.64 s |
+| Turbo / one, 1024 max side | 42 | 2.5640 s | 17,431 MiB | 3.17 s (warm) |
+| Turbo / one, 1536 max side | 42 | 3.7565 s | 17,548 MiB | 4.50 s (warm) |
+| Turbo / one, 2048 max side | 42 | 5.9665 s | 18,292 MiB | 7.09 s (warm) |
+
+The shipped 1024 default is therefore measured on the baseline card. System-reported free
+VRAM after each request was approximately 1,743 MiB at 1024, 568 MiB at 1536, and only
+356 MiB at 2048 after Windows display overhead. All exposed sizes completed for this
+portrait source, but Studio labels 1536 as tight and 2048 as experimental because other
+aspect ratios and concurrent GPU use can change the margin. A 4096 request is rejected
+before inference with HTTP 422; no substitute backend or offload path runs. DreamGen
+serializes work, shows load/free/peak VRAM, and unloads the previous variant before
+switching. It does not call CPU offload or another editor a successful Mage-Edit fallback.
+
+Proof inputs, outputs, response headers, hashes, and the mirror audit are under
+`docs/proof/mage-edit/`.
 
 ## Immutable lineage and publication
 
-Each session writes every reference as a content-addressed normalized source under
+Each session writes content-addressed normalized sources under
 `output/edits/<root>/source`, version-addressed derivatives under `versions`, and
 append-only hash-linked creation/decision manifests under `manifests`. Jobs retain the
-command, ordered source paths and SHA-256 hashes, derivative SHA-256, official model and
-revisions, settings, parent/root IDs, version, timing, GPU/VRAM evidence, and decision.
+ordered source hashes, command, derivative hash, mirror and upstream identities,
+artifact/config revisions and hashes, settings, parent/root IDs, version, timing,
+GPU/VRAM evidence, and decision.
 
-Edit sources and pending/rejected derivatives are not publishable. Approval is a
-separate immutable decision record. Only an approved, non-diagnostic derivative can be
-moved to `published`/`featured` and enter Cloudflare release-manifest schema v2. Release
-items carry edit lineage, content-versioned URLs, the source catalog hash, and rollback
-links to the previous release. Publishing never deletes remote or local assets by
-default.
+Sources and pending/rejected derivatives are not publishable. Approval is a separate
+immutable decision record. Only an approved, non-diagnostic derivative can enter the
+Cloudflare release-manifest v2 pipeline. Release items carry lineage, content-versioned
+URLs, source catalog hash, and rollback links. Publishing never deletes remote or local
+assets by default.

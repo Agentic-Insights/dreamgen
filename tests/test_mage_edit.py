@@ -15,7 +15,7 @@ def png_bytes(tmp_path, name="source.png", color="navy"):
     return path.read_bytes()
 
 
-def test_capabilities_use_only_official_models_and_no_strength(monkeypatch):
+def test_capabilities_label_user_authorized_mirror_and_no_strength(monkeypatch):
     for name in (
         "MAGEFLOW_EDIT_BASE_REVISION",
         "MAGEFLOW_EDIT_ALIGNED_REVISION",
@@ -28,6 +28,11 @@ def test_capabilities_use_only_official_models_and_no_strength(monkeypatch):
 
     assert document["official_name"] == "Mage-Flow-Edit"
     assert [item["repository"] for item in document["variants"]] == [
+        "Comfy-Org/Mage-Flow",
+        "Comfy-Org/Mage-Flow",
+        "Comfy-Org/Mage-Flow",
+    ]
+    assert [item["upstream_repository"] for item in document["variants"]] == [
         "microsoft/Mage-Flow-Edit-Base",
         "microsoft/Mage-Flow-Edit",
         "microsoft/Mage-Flow-Edit-Turbo",
@@ -35,7 +40,8 @@ def test_capabilities_use_only_official_models_and_no_strength(monkeypatch):
     assert [item["default_steps"] for item in document["variants"]] == [30, 30, 4]
     assert "strength" not in document["controls"]
     assert document["unsupported_controls"] == ["strength"]
-    assert document["provenance_status"] == "official_repositories_inaccessible"
+    assert document["provenance_status"] == "user_authorized_comfy_org_mirror"
+    assert document["checkpoint_source"]["revision"] == ("dbba082792fb61234d7218327511a9725b69db37")
     assert document["controls"]["reference_images"] == {
         "type": "image",
         "minimum": 1,
@@ -49,8 +55,9 @@ def test_capabilities_use_only_official_models_and_no_strength(monkeypatch):
     assert all(
         not item["repository"].startswith("mage-flow-community/") for item in document["variants"]
     )
-    assert "unendorsed duplicates" in document["access_note"]
-    assert not document["available"]
+    assert "explicitly authorized Comfy-Org/Mage-Flow" in document["access_note"]
+    assert all(item["artifact_sha256"] for item in document["variants"])
+    assert document["available"]
 
 
 def test_edit_artifacts_are_content_addressed_versioned_and_hash_linked(tmp_path):

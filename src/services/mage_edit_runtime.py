@@ -16,7 +16,13 @@ from typing import Any
 class EditRuntimeResult:
     image: bytes
     model: str
+    upstream_model: str
     revision: str
+    artifact_path: str
+    artifact_sha256: str
+    provenance_status: str
+    configuration_repository: str
+    configuration_revision: str
     source_revision: str
     elapsed_seconds: float | None
     peak_vram_mb: int | None
@@ -105,7 +111,15 @@ def run_edit(
             return EditRuntimeResult(
                 image=response.read(),
                 model=headers.get("X-DreamGen-Model", "unknown"),
+                upstream_model=headers.get("X-DreamGen-Upstream-Model", "unknown"),
                 revision=headers.get("X-DreamGen-Model-Revision", "unknown"),
+                artifact_path=headers.get("X-DreamGen-Artifact-Path", "unknown"),
+                artifact_sha256=headers.get("X-DreamGen-Artifact-SHA256", "unknown"),
+                provenance_status=headers.get("X-DreamGen-Provenance-Status", "unknown"),
+                configuration_repository=headers.get(
+                    "X-DreamGen-Configuration-Repository", "unknown"
+                ),
+                configuration_revision=headers.get("X-DreamGen-Configuration-Revision", "unknown"),
                 source_revision=headers.get("X-DreamGen-Source-SHA", "unknown"),
                 elapsed_seconds=float(elapsed) if elapsed else None,
                 peak_vram_mb=int(peak) if peak and peak.isdigit() else None,

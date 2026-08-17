@@ -204,6 +204,11 @@ export interface MageEditVariant {
   id: 'base' | 'aligned' | 'turbo';
   label: string;
   repository: string;
+  upstream_repository: string;
+  artifact_repository: string;
+  artifact_path: string;
+  artifact_sha256: string;
+  artifact_bytes: number;
   default_steps: number;
   default_guidance: number;
   verified_revision?: string | null;
@@ -220,6 +225,20 @@ export interface MageEditCapabilities {
   source_revision: string;
   license: string;
   research_only: boolean;
+  provenance_status: string;
+  checkpoint_source: {
+    repository: string;
+    revision: string;
+    url: string;
+    provenance_status: string;
+    license_claim: string;
+  };
+  configuration_source: {
+    repository: string;
+    revision: string;
+    weights_used: boolean;
+    purpose: string;
+  };
   target_hardware: string;
   available: boolean;
   model_loaded: boolean;
@@ -267,6 +286,36 @@ export interface CreateMageEditRequest {
   vl_cond_long_edge?: number;
   source_path?: string;
   parent_job_id?: string;
+}
+
+export function replayRequestFromMageEditJob(job: MageEditJob): CreateMageEditRequest {
+  const settings = job.metadata.settings;
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+    throw new Error('This recovered edit has no immutable settings to retry.');
+  }
+  const saved = settings as Record<string, unknown>;
+  const variant = saved.variant;
+  const command = typeof saved.command === 'string' ? saved.command : job.prompt;
+  if (!command.trim() || !['base', 'aligned', 'turbo'].includes(String(variant))) {
+    throw new Error('This recovered edit has incomplete immutable settings.');
+  }
+  const requiredNumber = (key: string) => {
+    const value = saved[key];
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      throw new Error(`This recovered edit is missing ${key}.`);
+    }
+    return value;
+  };
+  return {
+    command,
+    variant: variant as MageEditVariant['id'],
+    seed: requiredNumber('seed'),
+    steps: requiredNumber('steps'),
+    guidance: requiredNumber('guidance'),
+    max_size: requiredNumber('max_size'),
+    negative_prompt: typeof saved.negative_prompt === 'string' ? saved.negative_prompt : '',
+    vl_cond_long_edge: requiredNumber('vl_cond_long_edge'),
+  };
 }
 
 export interface PromptResponse {
@@ -899,7 +948,7 @@ export class ImageGenAPI {
 
   async downloadMageEditModel(variant: MageEditVariant['id']): Promise<Record<string, unknown>> {
     const response = await fetch(`${this.baseUrl}/api/edit/models/${variant}/download`, { method: 'POST' });
-    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to download official edit model'));
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to download pinned edit mirror'));
     return response.json();
   }
 
@@ -920,6 +969,12 @@ export class ImageGenAPI {
   async cancelMageEditJob(jobId: string): Promise<MageEditJob> {
     const response = await fetch(`${this.baseUrl}/api/edit/jobs/${encodeURIComponent(jobId)}/cancel`, { method: 'POST' });
     if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to cancel edit'));
+    return response.json();
+  }
+
+  async retryMageEditJob(jobId: string): Promise<MageEditJob> {
+    const response = await fetch(`${this.baseUrl}/api/edit/jobs/${encodeURIComponent(jobId)}/retry`, { method: 'POST' });
+    if (!response.ok) throw new Error(await extractErrorMessage(response, 'Failed to retry exact edit settings'));
     return response.json();
   }
 

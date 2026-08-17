@@ -704,13 +704,13 @@ def generate(
         print("\nOperation cancelled by user")
 
 
-@app.command(help="Queue an immutable Microsoft Mage-Flow-Edit operation")
+@app.command(help="Queue an immutable Mage-Flow-Edit operation with pinned artifact provenance")
 def edit(
     sources: list[Path] = typer.Argument(
         ..., exists=True, dir_okay=False, readable=True, help="One to three reference images"
     ),
     command: str = typer.Option(..., "--command", "-c", help="Natural-language edit command"),
-    variant: str = typer.Option("turbo", help="Official variant: base, aligned, or turbo"),
+    variant: str = typer.Option("turbo", help="Upstream lane: base, aligned, or turbo"),
     seed: int = typer.Option(42, min=0, max=2**31 - 1),
     steps: Optional[int] = typer.Option(None, min=1, max=50),
     guidance: Optional[float] = typer.Option(None, min=1.0, max=10.0),
@@ -762,6 +762,11 @@ def edit(
                 f"Root: {job['root_job_id']} · version {job['version']}\n"
                 f"Decision: {job['decision_state']} (local only until approved)\n"
                 f"Model: {job['metadata'].get('model')}@{job['metadata'].get('model_revision')}\n"
+                f"Upstream: {job['metadata'].get('upstream_model')}\n"
+                f"Artifact: {job['metadata'].get('artifact_path')}\n"
+                f"Artifact SHA-256: {job['metadata'].get('artifact_sha256')}\n"
+                f"Inference: {(job['metadata'].get('timing') or {}).get('elapsed_seconds')}s · "
+                f"peak VRAM {(job['metadata'].get('hardware') or {}).get('peak_vram_mb')} MiB\n"
                 f"Manifest: {job.get('manifest_path')}",
                 title="Mage-Flow-Edit complete",
                 border_style="green",

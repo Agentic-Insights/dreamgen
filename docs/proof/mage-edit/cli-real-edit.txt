@@ -1,0 +1,19 @@
+Queued Mage-Flow-Edit 679d152a-db6f-45ab-ac0a-66b2d7128869 (v1)
+running
+succeeded
+┌────────────────────────── Mage-Flow-Edit complete ──────────────────────────┐
+│ Derivative:                                                                 │
+│ /images/edits/679d152a-db6f-45ab-ac0a-66b2d7128869/versions/v001-679d152a-f │
+│ 44b589fc0ab2e764e4d.png                                                     │
+│ Root: 679d152a-db6f-45ab-ac0a-66b2d7128869 · version 1                      │
+│ Decision: pending (local only until approved)                               │
+│ Model: Comfy-Org/Mage-Flow@dbba082792fb61234d7218327511a9725b69db37         │
+│ Upstream: microsoft/Mage-Flow-Edit-Turbo                                    │
+│ Artifact: diffusion_models/mage_flow_edit_turbo_bf16.safetensors            │
+│ Artifact SHA-256:                                                           │
+│ 29c3726ecd64afe149eef28af3e27b6b40de52646bfd16757a37da4b6fbcf288            │
+│ Inference: 3.1961s · peak VRAM 17430 MiB                                    │
+│ Manifest:                                                                   │
+│ /app/output/edits/679d152a-db6f-45ab-ac0a-66b2d7128869/manifests/0002-v001- │
+│ 679d152a-5c45ad10a9838553.json                                              │
+└─────────────────────────────────────────────────────────────────────────────┘

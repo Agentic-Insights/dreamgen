@@ -820,7 +820,13 @@ async def execute_mage_edit_job(job_id: str, sources: list[tuple[bytes, str]]) -
         completed_metadata = {
             **metadata,
             "model": result.model,
+            "upstream_model": result.upstream_model,
             "model_revision": result.revision,
+            "artifact_path": result.artifact_path,
+            "artifact_sha256": result.artifact_sha256,
+            "provenance_status": result.provenance_status,
+            "configuration_repository": result.configuration_repository,
+            "configuration_revision": result.configuration_revision,
             "source_revision": result.source_revision,
             "timing": {"elapsed_seconds": result.elapsed_seconds},
             "hardware": {"peak_vram_mb": result.peak_vram_mb},
@@ -857,7 +863,13 @@ async def execute_mage_edit_job(job_id: str, sources: list[tuple[bytes, str]]) -
                 "source_artifacts": metadata.get("source_artifacts"),
                 "derivative_sha256": derivative_sha,
                 "model": result.model,
+                "upstream_model": result.upstream_model,
                 "model_revision": result.revision,
+                "artifact_path": result.artifact_path,
+                "artifact_sha256": result.artifact_sha256,
+                "provenance_status": result.provenance_status,
+                "configuration_repository": result.configuration_repository,
+                "configuration_revision": result.configuration_revision,
                 "source_revision": result.source_revision,
                 "settings": settings,
                 "timing": completed_metadata["timing"],
@@ -2260,7 +2272,7 @@ async def download_mage_edit_model(variant: str):
     if not descriptor.get("available"):
         raise HTTPException(
             status_code=503,
-            detail="A verified full official revision must be configured before download.",
+            detail="Enable the exact pinned Comfy-Org mirror revision before download.",
         )
     try:
         return await asyncio.to_thread(download_edit_model, variant)
@@ -2284,7 +2296,7 @@ async def create_mage_edit_job(
     source_path: Optional[str] = Form(None),
     parent_job_id: Optional[str] = Form(None),
 ):
-    """Queue an official Mage-Flow-Edit job; no substitute backend is permitted."""
+    """Queue Mage-Flow-Edit through the explicitly authorized pinned mirror."""
     command = command.strip()
     if not command:
         raise HTTPException(status_code=422, detail="Edit command is required")
@@ -2298,10 +2310,10 @@ async def create_mage_edit_job(
         raise HTTPException(
             status_code=503,
             detail={
-                "message": "The official Mage-Flow-Edit checkpoint is not ready.",
+                "message": "The pinned Mage-Flow-Edit mirror checkpoint is not ready.",
                 "repository": descriptor["repository"],
                 "reason": live_variant.get("availability_reason") or live.get("runtime_reason"),
-                "action": "Restore official Microsoft repository access, authenticate with `hf auth login`, then configure the verified full revision.",
+                "action": "Download the pinned Comfy-Org mirror artifacts for this variant.",
             },
         )
     resolved_steps = steps if steps is not None else int(descriptor["default_steps"])
@@ -2372,8 +2384,14 @@ async def create_mage_edit_job(
         "source_sha256s": [artifact["sha256"] for artifact in source_artifacts],
         "source_artifacts": source_artifacts,
         "settings": settings,
-        "model": descriptor["repository"],
+        "model": descriptor["artifact_repository"],
+        "upstream_model": descriptor["upstream_repository"],
         "model_revision": descriptor["verified_revision"],
+        "artifact_path": descriptor["artifact_path"],
+        "artifact_sha256": descriptor["artifact_sha256"],
+        "provenance_status": live["provenance_status"],
+        "configuration_repository": live["configuration_source"]["repository"],
+        "configuration_revision": live["configuration_source"]["revision"],
         "source_revision": live["source_revision"],
         "edit_lineage": {
             "role": "source",
@@ -2399,8 +2417,14 @@ async def create_mage_edit_job(
             "source_artifacts": source_artifacts,
             "source_path": source_url,
             "command": command,
-            "model": descriptor["repository"],
+            "model": descriptor["artifact_repository"],
+            "upstream_model": descriptor["upstream_repository"],
             "model_revision": descriptor["verified_revision"],
+            "artifact_path": descriptor["artifact_path"],
+            "artifact_sha256": descriptor["artifact_sha256"],
+            "provenance_status": live["provenance_status"],
+            "configuration_repository": live["configuration_source"]["repository"],
+            "configuration_revision": live["configuration_source"]["revision"],
             "source_revision": live["source_revision"],
             "settings": settings,
             "hardware": live.get("gpu"),
@@ -2439,6 +2463,70 @@ async def create_mage_edit_job(
     )
     background_tasks.add_task(execute_mage_edit_job, job_id, source_payloads)
     return job
+
+
+@app.post("/api/edit/jobs/{job_id}/retry", status_code=202)
+async def retry_mage_edit_job(job_id: str, background_tasks: BackgroundTasks):
+    """Replay one recovered edit with its exact immutable sources and settings."""
+    job = edit_job_store.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Edit job not found")
+    if job.get("status") != "succeeded" or job.get("backend") != "mage-flow-edit":
+        raise HTTPException(status_code=409, detail="Only succeeded Mage-Flow-Edit jobs can retry")
+    metadata = dict(job.get("metadata") or {})
+    settings = metadata.get("settings")
+    artifacts = metadata.get("source_artifacts")
+    if not isinstance(settings, dict) or not isinstance(artifacts, list) or not artifacts:
+        raise HTTPException(status_code=409, detail="Recovered job is missing immutable retry data")
+    uploads: list[UploadFile] = []
+    output_root = OUTPUT_DIR.resolve()
+    for index, artifact in enumerate(artifacts):
+        if not isinstance(artifact, dict):
+            raise HTTPException(status_code=409, detail="Recovered source metadata is invalid")
+        relative = str(artifact.get("path") or "").removeprefix("/images/")
+        source_file = (OUTPUT_DIR / relative).resolve()
+        if not source_file.is_relative_to(output_root) or not source_file.is_file():
+            raise HTTPException(status_code=409, detail="Recovered source file is unavailable")
+        source_bytes = source_file.read_bytes()
+        expected_sha = str(artifact.get("sha256") or "")
+        if not expected_sha or sha256_bytes(source_bytes) != expected_sha:
+            raise HTTPException(
+                status_code=409,
+                detail="Recovered source file no longer matches its immutable SHA-256",
+            )
+        uploads.append(
+            UploadFile(
+                file=io.BytesIO(source_bytes),
+                filename=str(artifact.get("original_filename") or f"reference-{index + 1}.png"),
+            )
+        )
+    required = {
+        "command",
+        "variant",
+        "seed",
+        "steps",
+        "guidance",
+        "max_size",
+        "negative_prompt",
+        "vl_cond_long_edge",
+    }
+    if not required.issubset(settings):
+        raise HTTPException(status_code=409, detail="Recovered settings are incomplete")
+    return await create_mage_edit_job(
+        background_tasks,
+        files=uploads,
+        file=None,
+        command=str(settings["command"]),
+        variant=str(settings["variant"]),
+        seed=int(settings["seed"]),
+        steps=int(settings["steps"]),
+        guidance=float(settings["guidance"]),
+        max_size=int(settings["max_size"]),
+        negative_prompt=str(settings["negative_prompt"]),
+        vl_cond_long_edge=int(settings["vl_cond_long_edge"]),
+        source_path=metadata.get("source_catalog_path"),
+        parent_job_id=job_id,
+    )
 
 
 @app.post("/api/edit/jobs/{job_id}/cancel")

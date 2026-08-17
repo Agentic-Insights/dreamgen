@@ -146,7 +146,7 @@ def test_unload_releases_sidecar_pipeline(sidecar, monkeypatch):
     assert sidecar._pipeline is None
 
 
-def test_official_edit_call_uses_only_supported_pipeline_controls(sidecar, monkeypatch):
+def test_mirrored_edit_call_uses_only_supported_pipeline_controls(sidecar, monkeypatch):
     observed = {}
 
     class Pipeline:
@@ -155,8 +155,8 @@ def test_official_edit_call_uses_only_supported_pipeline_controls(sidecar, monke
             return [Image.new("RGB", (64, 64), "teal")]
 
     monkeypatch.setenv("MAGEFLOW_EDIT_ENABLED", "true")
-    monkeypatch.setitem(sidecar.EDIT_MODELS["turbo"], "revision", "a" * 40)
-    monkeypatch.setattr(sidecar, "_load_pipeline", lambda *_args: Pipeline())
+    monkeypatch.setitem(sidecar.EDIT_MODELS["turbo"], "revision", sidecar.EDIT_MIRROR_REVISION)
+    monkeypatch.setattr(sidecar, "_load_pipeline", lambda *_args, **_kwargs: Pipeline())
     monkeypatch.setattr(sidecar.torch.cuda, "is_available", lambda: False)
     source = io.BytesIO()
     Image.new("RGB", (64, 48), "navy").save(source, "PNG")
@@ -189,7 +189,7 @@ def test_official_edit_call_uses_only_supported_pipeline_controls(sidecar, monke
     assert metrics["peak_vram_mb"] is None
 
 
-def test_official_edit_rejects_more_than_three_references(sidecar):
+def test_mirrored_edit_rejects_more_than_three_references(sidecar):
     with pytest.raises(HTTPException) as exc_info:
         sidecar._run_edit(
             [b"not-read"] * 4,
@@ -204,3 +204,39 @@ def test_official_edit_rejects_more_than_three_references(sidecar):
         )
 
     assert exc_info.value.status_code == 422
+
+
+def test_mirror_overlay_links_pinned_weights_without_copying(sidecar, monkeypatch, tmp_path):
+    config = tmp_path / "config"
+    (config / "transformer").mkdir(parents=True)
+    (config / "scheduler").mkdir()
+    (config / "text_encoder").mkdir()
+    (config / "model_index.json").write_text("{}", encoding="utf-8")
+    (config / "transformer" / "config.json").write_text("{}", encoding="utf-8")
+    (config / "scheduler" / "scheduler_config.json").write_text("{}", encoding="utf-8")
+    (config / "text_encoder" / "config.json").write_text("{}", encoding="utf-8")
+    (config / "text_encoder" / "model.safetensors.index.json").write_text("{}", encoding="utf-8")
+    artifacts = {}
+    for name in ("transformer", "text_encoder", "vae"):
+        path = tmp_path / f"{name}.safetensors"
+        path.write_bytes(name.encode())
+        artifacts[name] = str(path)
+    artifacts["config"] = str(config)
+    monkeypatch.setenv("HF_HOME", str(tmp_path / "hf"))
+    monkeypatch.setattr(sidecar, "_cached_edit_assets", lambda _settings: artifacts)
+    monkeypatch.setattr(sidecar, "_validate_artifact", lambda *_args, **_kwargs: None)
+
+    overlay = Path(sidecar._prepare_mirror_repo(sidecar.EDIT_MODELS["aligned"]))
+
+    assert (
+        overlay / "transformer" / "diffusion_pytorch_model.safetensors"
+    ).read_bytes() == b"transformer"
+    assert (overlay / "text_encoder" / "model.safetensors").read_bytes() == b"text_encoder"
+    assert (overlay / "vae" / "diffusion_pytorch_model.safetensors").read_bytes() == b"vae"
+    assert not (overlay / "text_encoder" / "model.safetensors.index.json").exists()
+
+
+def test_edit_cache_rejects_an_unpinned_mirror_repository(sidecar, monkeypatch):
+    monkeypatch.setattr(sidecar, "EDIT_MIRROR_REPOSITORY", "someone-else/Mage-Flow")
+
+    assert sidecar._cached_edit_assets(sidecar.EDIT_MODELS["aligned"]) is None
