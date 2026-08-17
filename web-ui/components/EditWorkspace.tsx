@@ -243,15 +243,15 @@ export default function EditWorkspace({ initialSource, onSourceConsumed }: EditW
   return (
     <div className="h-full overflow-y-auto" data-testid="mage-edit-workspace">
       <div className="mx-auto max-w-[1700px] p-3 sm:p-5">
-        <div className="mb-4 flex flex-wrap items-start justify-between gap-4 rounded-xl border border-primary/30 bg-card/80 p-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/30 bg-card/80 p-3">
           <div>
             <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-primary">Edit workspace</div>
-            <h1 className="mt-1 text-2xl font-semibold">Command an image transformation</h1>
-            <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+            <h1 className="mt-0.5 text-xl font-semibold sm:text-2xl">Command an image transformation</h1>
+            <p className="mt-1 hidden max-w-3xl text-sm text-muted-foreground sm:block">
               Microsoft Mage-Flow-Edit · pinned Comfy-Org mirror · local and private until approval and publish.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2 text-xs">
+          <div className="flex max-w-full flex-nowrap gap-2 overflow-x-auto text-xs sm:flex-wrap">
             <span className="status-pill"><MemoryStick className="h-3.5 w-3.5" />{capabilities?.gpu.name || "GPU unavailable"}</span>
             <span className="status-pill">{capabilities?.gpu.vram_total_mb ? `${Math.round(capabilities.gpu.vram_total_mb / 1024)} GB VRAM` : "VRAM unknown"}</span>
             {capabilities?.gpu.vram_free_mb ? <span className="status-pill">{Math.round(capabilities.gpu.vram_free_mb / 1024)} GB free</span> : null}
@@ -271,9 +271,9 @@ export default function EditWorkspace({ initialSource, onSourceConsumed }: EditW
           </div>
         )}
 
-        <div className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)_300px]">
-          <section className="space-y-4 rounded-xl border border-border/70 bg-card/75 p-4">
-            <div className="flex items-center justify-between"><h2 className="font-semibold">1 · Source & command</h2><span className="text-xs text-muted-foreground">original stays immutable</span></div>
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+          <section className="order-2 space-y-4 rounded-xl border border-border/70 bg-card/75 p-4">
+            <div className="flex items-center justify-between"><h2 className="font-semibold">Next edit · Source & command</h2><span className="text-xs text-muted-foreground">original stays immutable</span></div>
             <button type="button" onClick={() => fileInput.current?.click()} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); chooseFiles(Array.from(event.dataTransfer.files)); }} className="flex min-h-36 w-full items-center justify-center overflow-hidden rounded-xl border border-dashed border-primary/40 bg-background/60">
               {previews[0] ? <img src={imageUrl(previews[0])} alt="Primary edit source" className="max-h-56 w-full object-contain" /> : <span className="flex flex-col items-center gap-2 text-sm text-muted-foreground"><ImagePlus className="h-7 w-7" />Choose or drop 1–3 local images</span>}
             </button>
@@ -305,10 +305,10 @@ export default function EditWorkspace({ initialSource, onSourceConsumed }: EditW
             </button>
           </section>
 
-          <section className="rounded-xl border border-border/70 bg-card/75 p-4">
-            <div className="mb-3 flex items-center justify-between"><h2 className="font-semibold">2 · Compare</h2>{selectedJob && <span className="status-pill">v{selectedJob.version} · {diagnosticJob ? "diagnostic fixture" : selectedJob.status}</span>}</div>
-            <div className="relative flex min-h-[420px] items-center justify-center overflow-hidden rounded-xl border bg-black/35" data-testid="edit-compare">
-              {sourceUrl ? <img src={sourceUrl} alt="Original" className="max-h-[68vh] w-full object-contain" /> : <div className="text-sm text-muted-foreground">Choose a source to begin</div>}
+          <section className="order-1 rounded-xl border border-border/70 bg-card/75 p-3 sm:p-4 xl:col-span-2">
+            <div className="mb-2 flex items-center justify-between"><h2 className="font-semibold">Result · Compare</h2>{selectedJob && <span className="status-pill">v{selectedJob.version} · {diagnosticJob ? "diagnostic fixture" : selectedJob.status}</span>}</div>
+            <div className="relative flex h-[min(62vh,620px)] min-h-[360px] items-center justify-center overflow-hidden rounded-xl border bg-black/35" data-testid="edit-compare">
+              {sourceUrl ? <img src={sourceUrl} alt="Original" className="h-full w-full object-contain" /> : <div className="text-sm text-muted-foreground">Choose a source to begin</div>}
               {resultUrl && <div className="absolute inset-0 overflow-hidden" style={{ clipPath: `inset(0 ${100 - compare}% 0 0)` }}><img src={resultUrl} alt="Edited result" className="h-full w-full object-contain" /></div>}
               {sourceUrl && !resultUrl && <div className="absolute left-3 top-3 z-20 rounded-md border border-border bg-background/90 px-2 py-1 font-mono text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Original preview · no edit output</div>}
               {diagnosticJob && <div className="absolute left-3 top-3 z-20 rounded-md border border-amber-300/60 bg-amber-950/90 px-2 py-1 font-mono text-[10px] font-bold uppercase tracking-wide text-amber-100">Diagnostic fixture · not model output</div>}
@@ -326,7 +326,7 @@ export default function EditWorkspace({ initialSource, onSourceConsumed }: EditW
             {selectedJob?.status === "failed" && <div className="mt-3 rounded-lg border border-destructive/40 p-3 text-xs text-destructive">{selectedJob.error}</div>}
           </section>
 
-          <aside className="rounded-xl border border-border/70 bg-card/75 p-4">
+          <aside className="order-3 rounded-xl border border-border/70 bg-card/75 p-4">
             <div className="mb-3 flex items-center justify-between"><h2 className="flex items-center gap-2 font-semibold"><History className="h-4 w-4" />Versions</h2><button onClick={() => void refresh()} aria-label="Refresh edit history"><RefreshCw className="h-4 w-4" /></button></div>
             <div className="space-y-2">
               {jobs.length ? jobs.map((job) => <button key={job.id} onClick={() => setSelectedJob(job)} className={cn("w-full rounded-lg border p-3 text-left text-xs", selectedJob?.id === job.id ? "border-primary bg-primary/10" : "border-border/70")}><div className="flex justify-between"><span className="font-semibold">v{job.version} · {job.status}</span>{job.decision_state === "approved" && <ShieldCheck className="h-4 w-4 text-emerald-400" />}</div><p className="mt-1 line-clamp-2 text-muted-foreground">{job.prompt}</p><div className="mt-2 font-mono text-[10px] text-muted-foreground">{job.id.slice(0,8)} · {job.parent_job_id ? "branch" : "root"}</div></button>) : <div className="rounded-lg border border-dashed p-5 text-center text-xs text-muted-foreground">No edit versions yet.</div>}
